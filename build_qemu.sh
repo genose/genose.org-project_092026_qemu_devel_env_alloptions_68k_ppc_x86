@@ -90,11 +90,15 @@ configure_qemu() {
     cd "${QEMU_BUILD_DIR}"
 
     local target_list
-    target_list=$(IFS=','; echo "${QEMU_TARGETS[*]}")
+    target_list=$(printf '%s,' "${QEMU_TARGETS[@]}"); target_list="${target_list%,}"
 
     # Detect whether user-mode is supported (Linux only)
     if [[ "$(uname -s)" != "Linux" ]]; then
-        target_list=$(printf '%s' "${QEMU_TARGETS[*]}" | tr ' ' '\n' | grep -v 'linux-user' | tr '\n' ',' | sed 's/,$//')
+        local softmmu_targets=()
+        for t in "${QEMU_TARGETS[@]}"; do
+            [[ "${t}" != *linux-user* ]] && softmmu_targets+=("${t}")
+        done
+        target_list=$(printf '%s,' "${softmmu_targets[@]}"); target_list="${target_list%,}"
     fi
 
     "${QEMU_SRC_DIR}/configure" \
