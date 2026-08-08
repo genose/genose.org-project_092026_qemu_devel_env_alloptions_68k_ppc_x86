@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# =============================================================================
+# build_qemu.sh — Custom QEMU build script
+# Targets: m68k, ppc, ppc64, i386, x86_64
+# Retro platforms: MacOS 7.1-9.2.2 (PPC/68k), Atari ST (68k),
+#                  Amiga (68k), HaikuOS (x86/x86_64)
+# =============================================================================
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Configuration — override with environment variables if desired
+# ---------------------------------------------------------------------------
+QEMU_VERSION="${QEMU_VERSION:-9.2.0}"
+QEMU_SRC_DIR="${QEMU_SRC_DIR:-$(pwd)/qemu-${QEMU_VERSION}}"
+QEMU_BUILD_DIR="${QEMU_BUILD_DIR:-${QEMU_SRC_DIR}/build}"
+QEMU_INSTALL_PREFIX="${QEMU_INSTALL_PREFIX:-${HOME}/.local/qemu-retro}"
+QEMU_TARBALL="qemu-${QEMU_VERSION}.tar.xz"
+QEMU_TARBALL_URL="https://download.qemu.org/${QEMU_TARBALL}"
+JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)}"
+
+# Target list — all retro-relevant system emulators
+QEMU_TARGETS=(
+    m68k-softmmu       # Motorola 68000 family (Amiga, Atari ST, Mac 68k)
+    ppc-softmmu        # PowerPC 32-bit (MacOS 7.5–9.2.2 on Old World / New World)
+    ppc64-softmmu      # PowerPC 64-bit
+    i386-softmmu       # x86 32-bit (HaikuOS, DOS, early Windows)
+    x86_64-softmmu     # x86 64-bit (HaikuOS, modern Linux)
+    # User-mode emulation (Linux host only)
+    m68k-linux-user
+    ppc-linux-user
+    ppc64-linux-user
+    i386-linux-user
+    x86_64-linux-user
+)
+
+# Optional extra configure flags (append as needed)
+EXTRA_CONFIG_FLAGS=(
+    --enable-slirp          # built-in SLIRP networking
+    --enable-vnc            # VNC display
+    --enable-sdl            # SDL2 display
+    --enable-gtk            # GTK display
+    --enable-curses         # curses/text display
+    --enable-audio-drv-list=alsa,pa,sdl,coreaudio,dsound
+    --enable-bzip2
+    --enable-lzo
+    --enable-snappy
+    --enable-libssh
+    --enable-usb-redir
+    --enable-smartcard
+    --enable-opengl
+    --enable-virtfs         # VirtFS / 9P host filesystem sharing
+)
+
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
+log()  { printf '\033[1;32m[build_qemu]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[build_qemu] WARN:\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31m[build_qemu] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+
+check_deps() {
+    local missing=()
+    local deps=(git curl tar make ninja pkg-config python3 gcc g++ flex bison)
+    for d in "${deps[@]}"; do
+        command -v "$d" &>/dev/null || missing+=("$d")
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        warn "Missing build dependencies: ${missing[*]}"
+        warn "On Debian/Ubuntu:  sudo apt-get install build-essential git ninja-build pkg-config python3-pip libglib2.0-dev libpixman-1-dev libsdl2-dev libgtk-3-dev libvte-2.91-dev libslirp-dev libbz2-dev liblzo2-dev libsnappy-dev libssh-dev libusbredirhost-dev libcacard-dev libepoxy-dev libvirglrenderer-dev libncurses-dev"
+        warn "On macOS (Homebrew): brew install ninja pkg-config glib pixman sdl2 gtk+3 libslirp"
+        warn "On Fedora/RHEL:    sudo dnf install @development-tools ninja-build glib2-devel pixman-devel SDL2-devel gtk3-devel slirp-devel bzip2-devel lzo-devel snappy-devel libssh-devel usbredir-devel openssl-devel"
+    fi
+}
+
+download_qemu() {
+    if [[ -d "${QEMU_SRC_DIR}" ]]; then
+        log "Source directory already exists: ${QEMU_SRC_DIR}"
+        return 0
+    fi
+    log "Downloading QEMU ${QEMU_VERSION} from ${QEMU_TARBALL_URL} …"
+    curl -fL --progress-bar -o "/tmp/${QEMU_TARBALL}" "${QEMU_TARBALL_URL}"
+    log "Extracting tarball …"
+    tar -xf "/tmp/${QEMU_TARBALL}" -C "$(dirname "${QEMU_SRC_DIR}")"
+    rm -f "/tmp/${QEMU_TARBALL}"
+}
+
+configure_qemu() {
+    log "Configuring QEMU …"
+    mkdir -p "${QEMU_BUILD_DIR}"
+    cd "${QEMU_BUILD_DIR}"
+
+    local target_list
+    target_list=$(IFS=','; echo "${QEMU_TARGETS[*]}")
+
+    # Detect whether user-mode is supported (Linux only)
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        target_list=$(printf '%s' "${QEMU_TARGETS[*]}" | tr ' ' '\n' | grep -v 'linux-user' | tr '\n' ',' | sed 's/,$//')
+    fi
+
+    "${QEMU_SRC_DIR}/configure" \
+        --prefix="${QEMU_INSTALL_PREFIX}" \
+        --target-list="${target_list}" \
+        "${EXTRA_CONFIG_FLAGS[@]}" \
+        2>&1 | tee configure.log || {
+            warn "Some optional features were not found; retrying with minimal flags …"
+            "${QEMU_SRC_DIR}/configure" \
+                --prefix="${QEMU_INSTALL_PREFIX}" \
+                --target-list="${target_list}" \
+                2>&1 | tee configure.log
+        }
+}
+
+build_qemu() {
+    log "Building QEMU with ${JOBS} parallel jobs …"
+    cd "${QEMU_BUILD_DIR}"
+    ninja -j"${JOBS}" 2>&1 | tee build.log
+}
+
+install_qemu() {
+    log "Installing QEMU to ${QEMU_INSTALL_PREFIX} …"
+    cd "${QEMU_BUILD_DIR}"
+    ninja install 2>&1 | tee install.log
+    log "Done. Add ${QEMU_INSTALL_PREFIX}/bin to your PATH:"
+    log "  export PATH=\"${QEMU_INSTALL_PREFIX}/bin:\$PATH\""
+}
+
+show_help() {
+    cat <<EOF
+Usage: $(basename "$0") [COMMAND]
+
+Commands:
+  download    Download and extract QEMU ${QEMU_VERSION} source
+  configure   Run ./configure with retro-target flags
+  build       Compile QEMU
+  install     Install QEMU to ${QEMU_INSTALL_PREFIX}
+  all         Download → configure → build → install  (default)
+  help        Show this help
+
+Environment variables:
+  QEMU_VERSION          QEMU version to build      (default: ${QEMU_VERSION})
+  QEMU_SRC_DIR          Path to source tree        (default: ./qemu-\${QEMU_VERSION})
+  QEMU_BUILD_DIR        Path to build directory    (default: \${QEMU_SRC_DIR}/build)
+  QEMU_INSTALL_PREFIX   Installation prefix        (default: \${HOME}/.local/qemu-retro)
+  JOBS                  Parallel build jobs        (default: nproc)
+
+Enabled targets:
+$(printf '  %s\n' "${QEMU_TARGETS[@]}")
+
+Extra configure flags:
+$(printf '  %s\n' "${EXTRA_CONFIG_FLAGS[@]}")
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+main() {
+    local cmd="${1:-all}"
+    case "${cmd}" in
+        download)  check_deps; download_qemu ;;
+        configure) configure_qemu ;;
+        build)     build_qemu ;;
+        install)   install_qemu ;;
+        all)
+            check_deps
+            download_qemu
+            configure_qemu
+            build_qemu
+            install_qemu
+            ;;
+        help|--help|-h) show_help ;;
+        *) die "Unknown command '${cmd}'. Run '$(basename "$0") help' for usage." ;;
+    esac
+}
+
+main "$@"
