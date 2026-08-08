@@ -53,6 +53,11 @@ qemu_bin() {
     die "Cannot find '${name}'. Build QEMU first with build_qemu.sh or set QEMU_BIN_DIR."
 }
 
+# Resolve qemu-img (checks QEMU_BIN_DIR first, then PATH)
+qemu_img_bin() {
+    qemu_bin "qemu-img"
+}
+
 # ---------------------------------------------------------------------------
 # Utility: ask for a value with a default
 # ---------------------------------------------------------------------------
@@ -84,7 +89,7 @@ pick_image() {
             imgname=$(ask "Image filename" "${platform}-disk.qcow2")
             local size
             size=$(ask "Image size (e.g. 512M, 2G)" "2G")
-            qemu-img create -f qcow2 "${dir}/${imgname}" "${size}"
+            $(qemu_img_bin) create -f qcow2 "${dir}/${imgname}" "${size}"
             echo "${dir}/${imgname}"
         else
             echo ""
@@ -118,7 +123,9 @@ pick_cdrom() {
 
     if [[ ${#isos[@]} -eq 0 ]]; then
         warn "No ISO/CD images found in ${dir}"
-        ask "Enter full path to ISO (or leave blank to skip)" ""
+        local manual_path
+        manual_path=$(ask "Enter full path to ISO (or leave blank to skip)" "")
+        echo "${manual_path}"
         return
     fi
 
@@ -148,17 +155,19 @@ ensure_shared_dir() {
 }
 
 # ---------------------------------------------------------------------------
-# Utility: build common display/audio flags
+# Utility: populate an array with display/audio flags
+# Usage:  local -a dflags; display_flags dflags "${display}"
 # ---------------------------------------------------------------------------
 display_flags() {
-    local display="${1:-${DEFAULT_DISPLAY}}"
+    local -n _df_array="$1"
+    local display="${2:-${DEFAULT_DISPLAY}}"
     case "${display}" in
-        sdl)    echo "-display sdl -audiodev sdl,id=snd0" ;;
-        gtk)    echo "-display gtk -audiodev pa,id=snd0" ;;
-        vnc)    echo "-display vnc=:0 -audiodev none,id=snd0" ;;
-        curses) echo "-display curses -audiodev none,id=snd0" ;;
-        none)   echo "-display none -audiodev none,id=snd0" ;;
-        *)      echo "-display ${display} -audiodev none,id=snd0" ;;
+        sdl)    _df_array=(-display sdl    -audiodev sdl,id=snd0)  ;;
+        gtk)    _df_array=(-display gtk    -audiodev pa,id=snd0)   ;;
+        vnc)    _df_array=(-display vnc=:0 -audiodev none,id=snd0) ;;
+        curses) _df_array=(-display curses -audiodev none,id=snd0) ;;
+        none)   _df_array=(-display none   -audiodev none,id=snd0) ;;
+        *)      _df_array=(-display "${display}" -audiodev none,id=snd0) ;;
     esac
 }
 
@@ -182,12 +191,14 @@ launch_macos_68k() {
     local display
     display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
 
+    local -a dflags; display_flags dflags "${display}"
+
     local cmd=(
         "${qemu}"
         -machine q800
         -m "${ram}"
         -cpu m68040
-        $(display_flags "${display}")
+        "${dflags[@]}"
         -device nubus-macfb
         -nic user,model=dp83932
         -rtc base=localtime
@@ -231,12 +242,14 @@ launch_macos_ppc() {
     local prom_file
     prom_file=$(ask "Path to ROM/BIOS file (leave blank for OpenBIOS)" "")
 
+    local -a dflags; display_flags dflags "${display}"
+
     local cmd=(
         "${qemu}"
         -machine mac99,via=pmu
         -m "${ram}"
         -cpu G4
-        $(display_flags "${display}")
+        "${dflags[@]}"
         -device VGA,vgamem_mb=16
         -device usb-kbd
         -device usb-mouse
@@ -289,12 +302,14 @@ launch_atari() {
     local display
     display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
 
+    local -a dflags; display_flags dflags "${display}"
+
     local cmd=(
         "${qemu}"
         -machine virt
         -m "${ram}"
         -cpu m68040
-        $(display_flags "${display}")
+        "${dflags[@]}"
         -nic user
         -rtc base=localtime
     )
@@ -341,12 +356,14 @@ launch_amiga() {
     local display
     display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
 
+    local -a dflags; display_flags dflags "${display}"
+
     local cmd=(
         "${qemu}"
         -machine virt
         -m "${ram}"
         -cpu m68040
-        $(display_flags "${display}")
+        "${dflags[@]}"
         -nic user
         -rtc base=localtime
     )
@@ -391,12 +408,14 @@ launch_haiku() {
     local shared_dir
     shared_dir=$(ensure_shared_dir)
 
+    local -a dflags; display_flags dflags "${display}"
+
     local cmd=(
         "${qemu}"
         -machine q35
         -m "${ram}"
         -smp "${cores}"
-        $(display_flags "${display}")
+        "${dflags[@]}"
         -device VGA,vgamem_mb=32
         -device usb-ehci
         -device usb-kbd
@@ -448,14 +467,22 @@ launch_custom() {
     local display
     display=$(ask "Display (sdl/gtk/vnc/curses/none)" "${DEFAULT_DISPLAY}")
     local extra
-    extra=$(ask "Extra QEMU flags (optional)" "")
+    extra=$(ask "Extra QEMU flags (space-separated simple flags without values containing spaces)" "")
 
-    local cmd=("${qemu}" -m "${ram}" $(display_flags "${display}"))
+    local -a dflags; display_flags dflags "${display}"
+    # shellcheck disable=SC2206
+    local -a extra_arr=()
+    if [[ -n "${extra}" ]]; then
+        # Word-split intentionally; values with spaces must be passed via env config files
+        read -r -a extra_arr <<<"${extra}"
+    fi
+
+    local cmd=("${qemu}" -m "${ram}" "${dflags[@]}")
     [[ -n "${machine}" ]] && cmd+=(-machine "${machine}")
     [[ -n "${cpu}" ]]     && cmd+=(-cpu "${cpu}")
     [[ -n "${disk}" ]]    && cmd+=(-hda "${disk}")
     [[ -n "${cdrom}" ]]   && cmd+=(-cdrom "${cdrom}" -boot d)
-    [[ -n "${extra}" ]]   && cmd+=(${extra})
+    [[ ${#extra_arr[@]} -gt 0 ]] && cmd+=("${extra_arr[@]}")
 
     log "Running: ${cmd[*]}"
     mkdir -p "${VM_LOG_DIR}"
@@ -482,7 +509,7 @@ manage_images() {
             mkdir -p "${dest}"
             name=$(ask "Filename" "disk.qcow2")
             size=$(ask "Size (e.g. 512M, 2G, 8G)" "2G")
-            qemu-img create -f qcow2 "${dest}/${name}" "${size}"
+            "$(qemu_img_bin)" create -f qcow2 "${dest}/${name}" "${size}"
             log "Created ${dest}/${name}"
             ;;
         2)
@@ -490,20 +517,20 @@ manage_images() {
             src=$(ask "Source image path" "")
             dst=$(ask "Destination path" "")
             fmt=$(ask "Target format (qcow2/raw/vmdk/vdi)" "qcow2")
-            qemu-img convert -p -O "${fmt}" "${src}" "${dst}"
+            "$(qemu_img_bin)" convert -p -O "${fmt}" "${src}" "${dst}"
             log "Converted to ${dst}"
             ;;
         3)
             local img newsize
             img=$(ask "Image path" "")
             newsize=$(ask "New size (e.g. +2G or absolute 10G)" "")
-            qemu-img resize "${img}" "${newsize}"
+            "$(qemu_img_bin)" resize "${img}" "${newsize}"
             log "Resized ${img} to ${newsize}"
             ;;
         4)
             local img
             img=$(ask "Image path" "")
-            qemu-img info "${img}"
+            "$(qemu_img_bin)" info "${img}"
             ;;
         5) return ;;
     esac
