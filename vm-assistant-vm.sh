@@ -160,8 +160,10 @@ edit_vm() {
                 echo "  7410 - G4 500MHz"
                 echo "  750  - G3 900MHz"
                 echo "  604ev - PowerPC 604e"
+                echo "  604  - PowerPC 604"
+                echo "  601  - PowerPC 601"
                 echo "  68040 - Motorola 68040"
-                read -p "Architecture (G4/601/604ev/ppc/68040) [${arch:-G4}]: " arch
+                read -p "Architecture (G4/601/604ev/604/ppc/68040) [${arch:-G4}]: " arch
                 read -p "Machine [${machine:-mac99}]: " machine
                 read -p "CPU type [${cpu_type:-7455}]: " cpu_type
                 read -p "VIA type (pmu/cuda/none) [${via:-cuda}]: " via
@@ -303,12 +305,16 @@ start_qemu_vm() {
         qemu_args+=("-device" "virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare")
     fi
     case "$arch" in
-        "G4"|"604ev"|"ppc"|"68040"|"601")
+        "G4"|"604ev"|"ppc"|"68040"|"601"|"604"|"750"|"7400")
             local ppc_machine="${machine:-mac99}"
             case "$arch" in
-                "604ev") ppc_machine="g3beige" ;;
+                "604ev"|"604"|"68040"|"601"|"750"|"7400") ppc_machine="g3beige" ;;
             esac
-            qemu_args+=("-machine" "${ppc_machine},via=${via}")
+            if [ "$ppc_machine" = "g3beige" ]; then
+                qemu_args+=("-machine" "${ppc_machine}")
+            else
+                qemu_args+=("-machine" "${ppc_machine},via=${via}")
+            fi
             qemu_args+=("-cpu" "${cpu_type}")
             qemu_args+=("-accel" "tcg,tb-size=128")
             if [ "$num_screens" -gt 1 ]; then
@@ -611,18 +617,20 @@ create_vm() {
             echo "Architecture:"
             echo "  [1] G4 (PowerPC)"
             echo "  [2] 604ev (PowerPC)"
-            echo "  [3] 68040 (Motorola)"
+            echo "  [3] 604 (PowerPC)"
             echo "  [4] 601 (PowerPC)"
-            echo "  [5] x86_64 (Intel/AMD)"
+            echo "  [5] 68040 (Motorola)"
+            echo "  [6] x86_64 (Intel/AMD)"
             read -p "Architecture [1]: " arch_choice
             arch_choice=${arch_choice:-1}
             local arch=""; local machine=""; local cpu_type=""
             case $arch_choice in
                 1) arch="G4"; machine="mac99"; cpu_type="7455" ;;
                 2) arch="604ev"; machine="g3beige"; cpu_type="604ev" ;;
-                3) arch="68040"; machine="mac99"; cpu_type="68040" ;;
-                4) arch="601"; machine="mac99"; cpu_type="601" ;;
-                5) arch="x86_64"; machine="q35"; cpu_type="host" ;;
+                3) arch="604"; machine="g3beige"; cpu_type="604" ;;
+                4) arch="601"; machine="g3beige"; cpu_type="601" ;;
+                5) arch="68040"; machine="mac99"; cpu_type="68040" ;;
+                6) arch="x86_64"; machine="q35"; cpu_type="host" ;;
                 *) arch="G4"; machine="mac99"; cpu_type="7455" ;;
             esac
             read -p "RAM en MB [768]: " ram; ram=${ram:-768}
