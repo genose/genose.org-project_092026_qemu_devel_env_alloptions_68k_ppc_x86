@@ -8,6 +8,7 @@ VM_DIR="$CONFIG_DIR/vms"
 DISK_DIR="$CONFIG_DIR/disks"
 ISO_DIR="$CONFIG_DIR/isos"
 SHARE_DIR="/tmp/volatile_hd"
+ROM_DIR="/tmp/volatile_hd/MacROMan/TestImages"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -40,6 +41,46 @@ qemu_device_exists() {
     else
         return 1
     fi
+}
+
+# Lister les ROMs disponibles
+list_roms() {
+    log_header "Liste des ROMs disponibles"
+    
+    if [ ! -d "$ROM_DIR" ]; then
+        echo "  Répertoire ROM non trouvé: $ROM_DIR"
+        return 1
+    fi
+    
+    local found_roms=()
+    local index=1
+    
+    # Chercher les fichiers .ROM et .rom
+    while IFS= read -r -d '' file; do
+        if [[ "$file" == *.ROM || "$file" == *.rom ]]; then
+            found_roms+=("$file")
+            local basename=$(basename "$file")
+            # Extraire le modèle
+            local model=$(echo "$basename" | sed 's/^[0-9-]* - //' | sed 's/ - [0-9A-F]*.*//')
+            echo "  [$index] $model - $(du -h "$file" | cut -f1)"
+            ((index++))
+        fi
+    done < <(find "$ROM_DIR" -type f \( -name "*.ROM" -o -name "*.rom" \) -print0 2>/dev/null)
+    
+    if [ ${#found_roms[@]} -eq 0 ]; then
+        echo "  Aucun ROM trouvé"
+        return 1
+    fi
+    
+    read -p "Sélectionner un ROM [1-${#found_roms[@]}]: " rom_choice
+    rom_choice=${rom_choice:-1}
+    
+    if [ "$rom_choice" -ge 1 ] && [ "$rom_choice" -le ${#found_roms[@]} ]; then
+        selected_rom="${found_roms[$((rom_choice-1))]}"
+        return 0
+    fi
+    
+    return 1
 }
 
 list_isos() {
@@ -145,9 +186,10 @@ edit_vm() {
         echo "  [4] Display (display/num_screens/multi_screen_method)"
         echo "  [5] Network (network_mode)"
         echo "  [6] Sharing (share_dir)"
-        echo "  [7] Show current config"
-        echo "  [8] Save and exit"
-        echo "  [9] Exit without saving"
+        echo "  [7] ROM file (for old Mac OS)"
+        echo "  [8] Show current config"
+        echo "  [9] Save and exit"
+        echo "  [0] Exit without saving"
         echo ""
         read -p "Select option [8]: " choice
         choice=${choice:-8}
@@ -208,14 +250,18 @@ edit_vm() {
                 share_dir=${share_dir:-/tmp/volatile_hd}
                 ;;
             7)
+                list_roms && rom_file="$selected_rom" || echo "No ROM selected"
+                ;;
+            8)
                 echo "Current configuration:"
                 echo "  arch=$arch machine=$machine cpu_type=$cpu_type via=$via"
                 echo "  ram=$ram cpu=$cpu"
                 echo "  disk=$disk iso=$iso"
                 echo "  display=$display num_screens=$num_screens method=$multi_screen_method"
                 echo "  network_mode=$network_mode share_dir=$share_dir"
+                echo "  rom_file=${rom_file:-none}"
                 ;;
-            8)
+            9)
                 cat > "$vm_config" << CONFIG
 # Configuration de la VM: $vm_name
 # Date: $(date)
@@ -239,11 +285,12 @@ multi_screen_method=${multi_screen_method:-auto}
 # Partages
 share_dir=${share_dir:-/tmp/volatile_hd}
 via=${via:-cuda}
+rom_file=${rom_file:-}
 CONFIG
                 log_info "Configuration saved for $vm_name"
                 return 0
                 ;;
-            9) return 0 ;;
+            0) return 0 ;;
             *) echo "Invalid option" ;;
         esac
         echo ""
@@ -277,11 +324,23 @@ start_qemu_vm() {
     local network_mode="${network_mode:-nat}"
     local via="${via:-cuda}"
     local multi_screen_method="${multi_screen_method:-auto}"
+    local rom_file="${rom_file:-}"
     local qemu_args=()
     qemu_args+=("qemu-system-ppc")
     local utm_resources="/Users/xenon/Library/Containers/com.utmapp.UTM/Data/Library/Caches/qemu"
     if [ -d "$utm_resources" ]; then
         qemu_args+=("-L" "$utm_resources")
+    fi
+    # ROM file (for old Mac OS like 7.6.1)
+    if [ -n "$rom_file" ] && [ -f "$rom_file" ]; then
+        # Check ROM size - QEMU PPC has 1MB limit for BIOS
+        local rom_size=$(stat -f%z "$rom_file" 2>/dev/null || echo 0)
+        if [ "$rom_size" -le 1048576 ]; then
+            qemu_args+=("-bios" "$rom_file")
+            log_info "Using ROM: $(basename "$rom_file")"
+        else
+            log_warn "ROM too large (${rom_size} bytes > 1MB). QEMU PPC BIOS limit is 1MB. ROM not loaded."
+        fi
     fi
     qemu_args+=("-m" "${ram}M")
     qemu_args+=("-smp" "$cpu")
@@ -681,6 +740,14 @@ create_vm() {
                 3) network_mode="none" ;;
             esac
             read -p "Repertoire de partage [$SHARE_DIR]: " share_dir; share_dir=${share_dir:-$SHARE_DIR}
+            echo "Fichier ROM (optionnel pour Mac OS ancien):"
+            echo "  [1] Selectionner un ROM"
+            echo "  [2] Aucun"
+            read -p "Option [2]: " rom_choice; rom_choice=${rom_choice:-2}
+            local rom_file=""
+            if [ "$rom_choice" = "1" ]; then
+                list_roms && rom_file="$selected_rom" || rom_file=""
+            fi
             echo "Mode daffichage:"
             echo "  [1] Cocoa (GUI)"
             echo "  [2] None (console)"
@@ -706,6 +773,7 @@ num_screens=$num_screens
 multi_screen_method=$multi_screen_method
 via=$via
 share_dir=$share_dir
+rom_file=${rom_file:-}
 CONFIG
             log_info "VM QEMU creee: $vm_name"
             ;;
