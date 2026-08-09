@@ -1184,7 +1184,7 @@ launch_custom() {
     local arch
     arch=$(ask "QEMU system emulator (e.g. x86_64, i386, m68k, ppc, ppc64)" "x86_64")
     arch="${arch#qemu-system-}"
-    [[ "${arch}" =~ ^[A-Za-z0-9][A-Za-z0-9_-]+$ ]] || die "Invalid QEMU emulator suffix '${arch}'. Use values like x86_64, i386, m68k, ppc, or ppc64."
+    [[ "${arch}" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || die "Invalid QEMU emulator suffix '${arch}'. Use values like x86_64, i386, m68k, ppc, or ppc64."
     local qemu
     qemu=$(qemu_bin "qemu-system-${arch}")
 
