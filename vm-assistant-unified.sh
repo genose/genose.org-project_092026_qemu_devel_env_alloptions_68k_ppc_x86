@@ -717,6 +717,26 @@ start_qemu_vm() {
         "sdl") qemu_args+=("-display" "sdl") ;;
         "gtk") qemu_args+=("-display" "gtk") ;;
         "vnc") qemu_args+=("-vnc" ":${VNC_PORT}") ;;
+        "spice")
+            if command -v qemu-system-x86_64 &>/dev/null && qemu-system-x86_64 -device virtio-serial-pci,help >/dev/null 2>&1; then
+                local spice_port=${SPICE_PORT:-5900}
+                local spice_socket="/tmp/vm_${vm_name}_spice.sock"
+                qemu_args+=("-spice" "unix=on,addr=${spice_socket},disable-ticketing=on,image-compression=off,playback-compression=off,streaming-video=off,gl=off")
+                qemu_args+=("-device" "virtio-serial-pci")
+                qemu_args+=("-device" "virtserialport,chardev=spicechannel0,name=com.redhat.spice.0")
+                qemu_args+=("-chardev" "spicevmc,id=spicechannel0,name=vdagent")
+                # For PPC, use -vga none and add VGA device separately
+                if [[ "${arch}" =~ ^(G4|604ev|604|68040|601|604|750|7400|ppc)$ ]]; then
+                    qemu_args+=("-vga" "none")
+                    qemu_args+=("-device" "VGA,vgamem_mb=16,edid=on")
+                fi
+                log "SPICE socket: ${spice_socket}"
+                log "Connect with: remote-viewer spice://${spice_socket} or use virt-viewer"
+            else
+                log_warn "SPICE support not detected in QEMU. Falling back to VNC."
+                qemu_args+=("-vnc" ":${VNC_PORT:-5900}")
+            fi
+            ;;
         "none") qemu_args+=("-nographic") ;;
         *) qemu_args+=("-display" "cocoa") ;;
     esac
@@ -797,7 +817,8 @@ start_qemu_vm() {
                 "/usr/share/qemu/ppc-ndrvloader" \
                 "/opt/local/share/qemu/ppc-ndrvloader" \
                 "${HOME}/Library/Containers/com.utmapp.UTM/Data/Library/Caches/qemu/ppc-ndrvloader" \
-                "/Applications/UTM.app/Contents/Resources/qemu/share/qemu/ppc-ndrvloader"; do
+                "/Applications/UTM.app/Contents/Resources/qemu/share/qemu/ppc-ndrvloader" \
+                "/tmp/volatile_hd/ppc-ndrvloader"; do
                 if [ -f "${path}" ]; then
                     ndrv_loader="${path}"
                     break
@@ -805,6 +826,10 @@ start_qemu_vm() {
             done
             if [ -n "${ndrv_loader}" ]; then
                 qemu_args+=("-device" "loader,addr=0x4000000,file=${ndrv_loader}")
+                log "Using NDRV loader: ${ndrv_loader}"
+            else
+                log_warn "NDRV loader not found. Some Mac OS versions may not boot properly."
+                log_warn "Download from: https://github.com/cesarblum/openbios/raw/master/bin/ppc-ndrvloader"
             fi
             ;;
 
@@ -1069,7 +1094,8 @@ create_vm() {
             echo "  [2] SDL"
             echo "  [3] GTK"
             echo "  [4] VNC"
-            echo "  [5] None (console)"
+            echo "  [5] SPICE (multi-ecran + USB redirection)"
+            echo "  [6] None (console)"
             read -rp "Mode [1]: " display_choice
             display_choice=${display_choice:-1}
             local display=""
@@ -1078,7 +1104,8 @@ create_vm() {
                 2) display="sdl" ;;
                 3) display="gtk" ;;
                 4) display="vnc" ;;
-                5) display="none" ;;
+                5) display="spice" ;;
+                6) display="none" ;;
             esac
 
             # Save configuration
@@ -1400,7 +1427,7 @@ edit_vm() {
                 ;;
 
             4)
-                read -rp "Display (cocoa/sdl/gtk/vnc/none) [${display:-cocoa}]: " display
+                read -rp "Display (cocoa/sdl/gtk/vnc/spice/none) [${display:-cocoa}]: " display
                 read -rp "Number of screens [${num_screens:-1}]: " num_screens
                 read -rp "Multi-screen method (auto/dual-pci-vga/graphic-engine) [${multi_screen_method:-auto}]: " multi_screen_method
                 display=${display:-cocoa}
