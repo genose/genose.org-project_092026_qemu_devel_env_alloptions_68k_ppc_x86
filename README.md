@@ -152,6 +152,12 @@ bash build_qemu.sh patch
 `vm_assist.sh` provides an interactive menu for launching VMs and managing
 disk images.
 
+Across all launcher targets, `vm_assist.sh` now accepts:
+- multi-screen device lists via repeated `-device` entries
+- RAM sizes beyond 2 GiB using QEMU size suffixes such as `4G`
+- optional firmware / ROM images with automatic `-bios` vs `pflash`
+  attachment when the image exceeds 1 MiB
+
 ```bash
 # Interactive menu
 bash vm_assist.sh
@@ -194,7 +200,7 @@ bash vm_assist.sh images
 - **QEMU machine:** `q800` (Quadra 800 — Motorola 68040)
 - **RAM:** up to 256 MiB
 - Requires a MacOS 68k hard disk image (or installation CD-ROM).
-- `vm_assist.sh` can prepare dual-display, clipboard exchange, `/tmp/volatile_hd`
+- `vm_assist.sh` can prepare multi-display, clipboard exchange, `/tmp/volatile_hd`
   host-share notes, Netatalk/AFP and TLS proxy endpoints, and guest GDB bridging.
 - The launcher now lets you pick across the common 68k family CPU models
   supported by QEMU (`m68000` → `m68040`) when you need a different target profile.
@@ -343,7 +349,9 @@ qemu-system-i386 -machine pc -cpu pentium -m 256 \
 - TCP service forwards for guest services
 - optional SMB host exports for compatible x86 guests
 - optional 9P/VirtFS sharing for guests that support it
-- optional second display adapters in the presets that can use them
+- optional extra display adapters across all presets via user-supplied `-device` lists
+- optional firmware / ROM attachment with automatic `pflash` fallback for images larger than 1 MiB
+- RAM sizing with raw MiB values or QEMU suffixes such as `512M` and `4G`
 
 For classic Mac guests:
 

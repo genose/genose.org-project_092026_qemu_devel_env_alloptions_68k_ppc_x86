@@ -80,6 +80,18 @@ ask() {
     echo "${answer:-${default}}"
 }
 
+ask_ram_size() {
+    local prompt="$1" default="$2" answer
+    while true; do
+        answer=$(ask "${prompt}" "${default}")
+        if [[ "${answer}" =~ ^[0-9]+([kKmMgGtT])?$ ]]; then
+            echo "${answer}"
+            return 0
+        fi
+        warn "Invalid RAM size '${answer}'. Use a plain MiB value or a suffix such as 512M, 2G, or 4G."
+    done
+}
+
 is_yes() {
     case "${1,,}" in
         y|yes|true|1|on) return 0 ;;
@@ -92,6 +104,17 @@ trim_spaces() {
     value="${value#"${value%%[![:space:]]*}"}"
     value="${value%"${value##*[![:space:]]}"}"
     echo "${value}"
+}
+
+file_size_bytes() {
+    local path="$1"
+    if stat -c '%s' "${path}" >/dev/null 2>&1; then
+        stat -c '%s' "${path}"
+    elif stat -f '%z' "${path}" >/dev/null 2>&1; then
+        stat -f '%z' "${path}"
+    else
+        echo 0
+    fi
 }
 
 merge_csv_values() {
@@ -112,6 +135,70 @@ merge_csv_values() {
 config_path() {
     local name="$1"
     echo "${VM_CONFIG_DIR}/${name}.env"
+}
+
+append_extra_display_devices() {
+    local -n _display_cmd="$1"
+    local spec
+    spec=$(trim_spaces "${2:-}")
+    [[ -n "${spec}" ]] || return 0
+
+    local IFS=';'
+    local -a devices=()
+    read -r -a devices <<< "${spec}"
+
+    local device
+    for device in "${devices[@]}"; do
+        device=$(trim_spaces "${device}")
+        [[ -n "${device}" ]] || continue
+        _display_cmd+=(-device "${device}")
+    done
+}
+
+append_firmware_attachment() {
+    local -n _firmware_cmd="$1"
+    local firmware_path="$2"
+    local firmware_mode="${3:-auto}"
+    local firmware_label="${4:-firmware/ROM}"
+    firmware_path=$(trim_spaces "${firmware_path}")
+    firmware_mode="${firmware_mode,,}"
+
+    [[ -n "${firmware_path}" ]] || return 0
+    if [[ ! -f "${firmware_path}" ]]; then
+        warn "Skipping ${firmware_label}: file not found: ${firmware_path}"
+        return 0
+    fi
+
+    local resolved_mode="${firmware_mode}"
+    case "${resolved_mode}" in
+        ""|auto|bios|pflash|none) ;;
+        *)
+            warn "Unknown firmware mode '${firmware_mode}' for ${firmware_label}; using auto detection."
+            resolved_mode="auto"
+            ;;
+    esac
+
+    if [[ -z "${resolved_mode}" || "${resolved_mode}" == "auto" ]]; then
+        local size_bytes
+        size_bytes=$(file_size_bytes "${firmware_path}")
+        if [[ "${size_bytes}" =~ ^[0-9]+$ ]] && (( size_bytes > 1048576 )); then
+            resolved_mode="pflash"
+            log "Firmware image > 1 MiB detected — attaching ${firmware_label} via pflash."
+        else
+            resolved_mode="bios"
+        fi
+    fi
+
+    case "${resolved_mode}" in
+        bios)
+            _firmware_cmd+=(-bios "${firmware_path}")
+            ;;
+        pflash)
+            _firmware_cmd+=(-drive "if=pflash,format=raw,readonly=on,file=${firmware_path}")
+            ;;
+        none)
+            ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -348,7 +435,7 @@ launch_macos_68k() {
     qemu=$(qemu_bin "qemu-system-m68k")
 
     local ram
-    ram=$(ask "RAM in MiB" "128")
+    ram=$(ask_ram_size "RAM size (MiB or suffix such as 512M / 4G)" "128")
     local cpu
     cpu=$(ask_m68k_cpu "m68040")
     local disk
@@ -357,8 +444,8 @@ launch_macos_68k() {
     cdrom=$(pick_cdrom "macos-68k")
     local display
     display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
-    local dual_display
-    dual_display=$(ask "Add a second Nubus display adapter? (yes/no)" "no")
+    local extra_displays
+    extra_displays=$(ask "Extra display devices (blank to skip; separate multiple devices with ';', e.g. nubus-macfb;nubus-macfb)" "")
     local shared_dir
     shared_dir=$(ask "Host Mac share/export path" "${DEFAULT_MACOS_SHARE_DIR}")
     local afp_endpoint
@@ -371,6 +458,12 @@ launch_macos_68k() {
     gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
     local combined_forwards
     combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
+    local firmware_path
+    firmware_path=$(ask "Optional ROM / firmware path (blank to skip)" "")
+    local firmware_mode="auto"
+    if [[ -n "${firmware_path}" ]]; then
+        firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
+    fi
 
     local -a dflags; display_flags dflags "${display}"
     local -a netflags; append_user_network netflags "dp83932" "${combined_forwards}"
@@ -389,9 +482,8 @@ launch_macos_68k() {
         "${dbgflags[@]}"
     )
 
-    if is_yes "${dual_display}"; then
-        cmd+=(-device nubus-macfb)
-    fi
+    append_extra_display_devices cmd "${extra_displays}"
+    append_firmware_attachment cmd "${firmware_path}" "${firmware_mode}" "ROM / firmware"
 
     if [[ -n "${disk}" ]]; then
         cmd+=(-hda "${disk}")
@@ -422,7 +514,7 @@ launch_macos_ppc() {
     qemu=$(qemu_bin "qemu-system-ppc")
 
     local ram
-    ram=$(ask "RAM in MiB" "${DEFAULT_RAM_MB}")
+    ram=$(ask_ram_size "RAM size (MiB or suffix such as 512M / 4G)" "${DEFAULT_RAM_MB}")
     local cpu
     cpu=$(ask_ppc_cpu "7455")
     local smp_flags
@@ -433,8 +525,8 @@ launch_macos_ppc() {
     cdrom=$(pick_cdrom "macos-ppc")
     local display
     display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
-    local dual_display
-    dual_display=$(ask "Add a second PCI display adapter? (yes/no)" "no")
+    local extra_displays
+    extra_displays=$(ask "Extra display devices (blank to skip; separate multiple devices with ';', e.g. secondary-vga,vgamem_mb=16;secondary-vga,vgamem_mb=16)" "")
     local shared_dir
     shared_dir=$(ask "Host Mac share/export path" "${DEFAULT_MACOS_SHARE_DIR}")
     local afp_endpoint
@@ -448,8 +540,12 @@ launch_macos_ppc() {
     local combined_forwards
     combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
 
-    local prom_file
-    prom_file=$(ask "Path to ROM/BIOS file (leave blank for OpenBIOS)" "")
+    local firmware_path
+    firmware_path=$(ask "Path to ROM / firmware file (leave blank for OpenBIOS)" "")
+    local firmware_mode="auto"
+    if [[ -n "${firmware_path}" ]]; then
+        firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
+    fi
 
     local -a dflags; display_flags dflags "${display}"
     local -a netflags; append_user_network netflags "sungem" "${combined_forwards}"
@@ -472,13 +568,8 @@ launch_macos_ppc() {
         "${dbgflags[@]}"
     )
 
-    if is_yes "${dual_display}"; then
-        cmd+=(-device secondary-vga,vgamem_mb=16)
-    fi
-
-    if [[ -n "${prom_file}" && -f "${prom_file}" ]]; then
-        cmd+=(-bios "${prom_file}")
-    fi
+    append_extra_display_devices cmd "${extra_displays}"
+    append_firmware_attachment cmd "${firmware_path}" "${firmware_mode}" "ROM / firmware"
     if [[ -n "${disk}" ]]; then
         cmd+=(-hda "${disk}")
     fi
@@ -511,7 +602,7 @@ launch_macos_ppc64() {
     qemu=$(qemu_bin "qemu-system-ppc64")
 
     local ram
-    ram=$(ask "RAM in MiB" "512")
+    ram=$(ask_ram_size "RAM size (MiB or suffix such as 512M / 4G)" "512")
     local cpu
     cpu=$(ask "PowerPC 64-bit CPU (970/970fx/970mp)" "970")
     local smp_flags
@@ -522,8 +613,8 @@ launch_macos_ppc64() {
     cdrom=$(pick_cdrom "macos-ppc64")
     local display
     display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
-    local dual_display
-    dual_display=$(ask "Add a second PCI display adapter? (yes/no)" "no")
+    local extra_displays
+    extra_displays=$(ask "Extra display devices (blank to skip; separate multiple devices with ';', e.g. secondary-vga,vgamem_mb=16;secondary-vga,vgamem_mb=16)" "")
     local shared_dir
     shared_dir=$(ask "Host Mac share/export path" "${DEFAULT_MACOS_SHARE_DIR}")
     local afp_endpoint
@@ -537,8 +628,12 @@ launch_macos_ppc64() {
     local combined_forwards
     combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
 
-    local prom_file
-    prom_file=$(ask "Path to ROM/BIOS file (leave blank for OpenBIOS)" "")
+    local firmware_path
+    firmware_path=$(ask "Path to ROM / firmware file (leave blank for OpenBIOS)" "")
+    local firmware_mode="auto"
+    if [[ -n "${firmware_path}" ]]; then
+        firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
+    fi
 
     local -a dflags; display_flags dflags "${display}"
     local -a netflags; append_user_network netflags "sungem" "${combined_forwards}"
@@ -561,13 +656,8 @@ launch_macos_ppc64() {
         "${dbgflags[@]}"
     )
 
-    if is_yes "${dual_display}"; then
-        cmd+=(-device secondary-vga,vgamem_mb=16)
-    fi
-
-    if [[ -n "${prom_file}" && -f "${prom_file}" ]]; then
-        cmd+=(-bios "${prom_file}")
-    fi
+    append_extra_display_devices cmd "${extra_displays}"
+    append_firmware_attachment cmd "${firmware_path}" "${firmware_mode}" "ROM / firmware"
     if [[ -n "${disk}" ]]; then
         cmd+=(-hda "${disk}")
     fi
@@ -609,13 +699,21 @@ launch_atari() {
     fi
 
     local ram
-    ram=$(ask "RAM in MiB (max 14 for ST, 128 for TT/Falcon)" "14")
+    ram=$(ask_ram_size "RAM size (MiB or suffix; guest/machine limits still apply)" "14")
     local cpu
     cpu=$(ask_m68k_cpu "m68040")
     local disk
     disk=$(pick_image "atari")
     local display
     display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
+    local extra_displays
+    extra_displays=$(ask "Extra display devices (blank to skip; separate multiple devices with ';')" "")
+    local firmware_path
+    firmware_path=$(ask "Optional ROM / firmware path for QEMU fallback (blank to skip)" "")
+    local firmware_mode="auto"
+    if [[ -n "${firmware_path}" ]]; then
+        firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
+    fi
 
     local -a dflags; display_flags dflags "${display}"
 
@@ -628,6 +726,8 @@ launch_atari() {
         -nic user
         -rtc base=localtime
     )
+    append_extra_display_devices cmd "${extra_displays}"
+    append_firmware_attachment cmd "${firmware_path}" "${firmware_mode}" "ROM / firmware"
     if [[ -n "${disk}" ]]; then
         cmd+=(-hda "${disk}")
     fi
@@ -665,13 +765,21 @@ launch_amiga() {
     qemu=$(qemu_bin "qemu-system-m68k")
 
     local ram
-    ram=$(ask "RAM in MiB" "128")
+    ram=$(ask_ram_size "RAM size (MiB or suffix such as 512M / 4G)" "128")
     local cpu
     cpu=$(ask_m68k_cpu "m68040")
     local disk
     disk=$(pick_image "amiga-aros")
     local display
     display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
+    local extra_displays
+    extra_displays=$(ask "Extra display devices (blank to skip; separate multiple devices with ';')" "")
+    local firmware_path
+    firmware_path=$(ask "Optional ROM / firmware path (blank to skip)" "")
+    local firmware_mode="auto"
+    if [[ -n "${firmware_path}" ]]; then
+        firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
+    fi
 
     local -a dflags; display_flags dflags "${display}"
 
@@ -684,6 +792,8 @@ launch_amiga() {
         -nic user
         -rtc base=localtime
     )
+    append_extra_display_devices cmd "${extra_displays}"
+    append_firmware_attachment cmd "${firmware_path}" "${firmware_mode}" "ROM / firmware"
     if [[ -n "${disk}" ]]; then
         cmd+=(-hda "${disk}")
     fi
@@ -711,7 +821,7 @@ launch_haiku() {
     fi
 
     local ram
-    ram=$(ask "RAM in MiB" "512")
+    ram=$(ask_ram_size "RAM size (MiB or suffix such as 512M / 4G)" "512")
     local disk
     disk=$(pick_image "haiku-${arch}")
     local cdrom
@@ -731,6 +841,14 @@ launch_haiku() {
     gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
     local combined_forwards
     combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
+    local extra_displays
+    extra_displays=$(ask "Extra display devices (blank to skip; separate multiple devices with ';', e.g. secondary-vga,vgamem_mb=32;secondary-vga,vgamem_mb=32)" "")
+    local firmware_path
+    firmware_path=$(ask "Optional ROM / firmware path (blank to skip)" "")
+    local firmware_mode="auto"
+    if [[ -n "${firmware_path}" ]]; then
+        firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
+    fi
 
     local -a dflags; display_flags dflags "${display}"
     local -a netflags; append_user_network netflags "e1000" "${combined_forwards}"
@@ -751,6 +869,8 @@ launch_haiku() {
         -virtfs local,path="${shared_dir}",mount_tag=shared,security_model=mapped-xattr
         "${dbgflags[@]}"
     )
+    append_extra_display_devices cmd "${extra_displays}"
+    append_firmware_attachment cmd "${firmware_path}" "${firmware_mode}" "ROM / firmware"
 
     if is_yes "${kvm}" && [[ -e /dev/kvm ]]; then
         cmd+=(-enable-kvm -cpu host)
@@ -782,7 +902,7 @@ launch_solaris_x86() {
     qemu=$(qemu_bin "qemu-system-i386")
 
     local ram
-    ram=$(ask "RAM in MiB" "1024")
+    ram=$(ask_ram_size "RAM size (MiB or suffix such as 1024M / 4G)" "1024")
     local cores
     cores=$(ask "CPU cores" "2")
     local disk
@@ -802,6 +922,14 @@ launch_solaris_x86() {
     gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
     local combined_forwards
     combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
+    local extra_displays
+    extra_displays=$(ask "Extra display devices (blank to skip; separate multiple devices with ';', e.g. secondary-vga,vgamem_mb=16;secondary-vga,vgamem_mb=16)" "")
+    local firmware_path
+    firmware_path=$(ask "Optional ROM / firmware path (blank to skip)" "")
+    local firmware_mode="auto"
+    if [[ -n "${firmware_path}" ]]; then
+        firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
+    fi
 
     local -a dflags; display_flags dflags "${display}"
     local -a netflags; append_user_network netflags "e1000" "${combined_forwards}" "${smb_share}"
@@ -821,6 +949,8 @@ launch_solaris_x86() {
         -rtc base=localtime
         "${dbgflags[@]}"
     )
+    append_extra_display_devices cmd "${extra_displays}"
+    append_firmware_attachment cmd "${firmware_path}" "${firmware_mode}" "ROM / firmware"
 
     if [[ -n "${disk}" ]]; then
         cmd+=(-hda "${disk}")
@@ -846,7 +976,7 @@ launch_solaris_sparc() {
     qemu=$(qemu_bin "qemu-system-sparc64")
 
     local ram
-    ram=$(ask "RAM in MiB" "1024")
+    ram=$(ask_ram_size "RAM size (MiB or suffix such as 1024M / 4G)" "1024")
     local disk
     disk=$(pick_image "solaris-sparc")
     local cdrom
@@ -859,6 +989,14 @@ launch_solaris_sparc() {
     gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
     local combined_forwards
     combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
+    local extra_displays
+    extra_displays=$(ask "Extra display devices (blank to skip; separate multiple devices with ';', e.g. tcx;tcx)" "")
+    local firmware_path
+    firmware_path=$(ask "Optional ROM / firmware path (blank to skip)" "")
+    local firmware_mode="auto"
+    if [[ -n "${firmware_path}" ]]; then
+        firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
+    fi
 
     local -a dflags; display_flags dflags "${display}"
     local -a netflags; append_user_network netflags "sunhme" "${combined_forwards}"
@@ -874,6 +1012,8 @@ launch_solaris_sparc() {
         -rtc base=localtime
         "${dbgflags[@]}"
     )
+    append_extra_display_devices cmd "${extra_displays}"
+    append_firmware_attachment cmd "${firmware_path}" "${firmware_mode}" "ROM / firmware"
 
     if [[ -n "${disk}" ]]; then
         cmd+=(-hda "${disk}")
@@ -898,7 +1038,7 @@ launch_windows_xp() {
     qemu=$(qemu_bin "qemu-system-i386")
 
     local ram
-    ram=$(ask "RAM in MiB" "1024")
+    ram=$(ask_ram_size "RAM size (MiB or suffix such as 1024M / 4G)" "1024")
     local cores
     cores=$(ask "CPU cores" "2")
     local disk
@@ -918,6 +1058,14 @@ launch_windows_xp() {
     gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
     local combined_forwards
     combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
+    local extra_displays
+    extra_displays=$(ask "Extra display devices (blank to skip; separate multiple devices with ';', e.g. secondary-vga,vgamem_mb=16;secondary-vga,vgamem_mb=16)" "")
+    local firmware_path
+    firmware_path=$(ask "Optional ROM / firmware path (blank to skip)" "")
+    local firmware_mode="auto"
+    if [[ -n "${firmware_path}" ]]; then
+        firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
+    fi
 
     local -a dflags; display_flags dflags "${display}"
     local -a netflags; append_user_network netflags "rtl8139" "${combined_forwards}" "${smb_share}"
@@ -938,6 +1086,8 @@ launch_windows_xp() {
         -rtc base=localtime
         "${dbgflags[@]}"
     )
+    append_extra_display_devices cmd "${extra_displays}"
+    append_firmware_attachment cmd "${firmware_path}" "${firmware_mode}" "ROM / firmware"
 
     if [[ -n "${disk}" ]]; then
         cmd+=(-hda "${disk}")
@@ -962,7 +1112,7 @@ launch_openstep() {
     qemu=$(qemu_bin "qemu-system-i386")
 
     local ram
-    ram=$(ask "RAM in MiB" "256")
+    ram=$(ask_ram_size "RAM size (MiB or suffix such as 256M / 4G)" "256")
     local disk
     disk=$(pick_image "openstep")
     local cdrom
@@ -980,6 +1130,14 @@ launch_openstep() {
     gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
     local combined_forwards
     combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
+    local extra_displays
+    extra_displays=$(ask "Extra display devices (blank to skip; separate multiple devices with ';', e.g. secondary-vga,vgamem_mb=8;secondary-vga,vgamem_mb=8)" "")
+    local firmware_path
+    firmware_path=$(ask "Optional ROM / firmware path (blank to skip)" "")
+    local firmware_mode="auto"
+    if [[ -n "${firmware_path}" ]]; then
+        firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
+    fi
 
     local -a dflags; display_flags dflags "${display}"
     local -a netflags; append_user_network netflags "ne2k_pci" "${combined_forwards}" "${smb_share}"
@@ -996,6 +1154,8 @@ launch_openstep() {
         -rtc base=localtime
         "${dbgflags[@]}"
     )
+    append_extra_display_devices cmd "${extra_displays}"
+    append_firmware_attachment cmd "${firmware_path}" "${firmware_mode}" "ROM / firmware"
 
     if [[ -n "${disk}" ]]; then
         cmd+=(-hda "${disk}")
@@ -1025,7 +1185,7 @@ launch_custom() {
     local cpu
     cpu=$(ask "CPU model (leave blank for default)" "")
     local ram
-    ram=$(ask "RAM in MiB" "${DEFAULT_RAM_MB}")
+    ram=$(ask_ram_size "RAM size (MiB or suffix such as 512M / 4G)" "${DEFAULT_RAM_MB}")
     local disk
     disk=$(pick_image "custom-${arch}")
     local cdrom
@@ -1049,8 +1209,14 @@ launch_custom() {
     gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
     local combined_forwards
     combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
-    local second_display
-    second_display=$(ask "Second display device (blank to skip, e.g. secondary-vga or VGA)" "")
+    local extra_displays
+    extra_displays=$(ask "Extra display devices (blank to skip; separate multiple devices with ';', e.g. secondary-vga,vgamem_mb=16;VGA)" "")
+    local firmware_path
+    firmware_path=$(ask "Optional ROM / firmware path (blank to skip)" "")
+    local firmware_mode="auto"
+    if [[ -n "${firmware_path}" ]]; then
+        firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
+    fi
     local extra
     extra=$(ask "Extra QEMU flags (space-separated simple flags without values containing spaces)" "")
 
@@ -1086,9 +1252,8 @@ launch_custom() {
     if [[ "${share_mode}" == "virtfs" && -n "${shared_dir}" ]]; then
         cmd+=(-virtfs "local,path=${shared_dir},mount_tag=shared,security_model=mapped-xattr")
     fi
-    if [[ -n "${second_display}" ]]; then
-        cmd+=(-device "${second_display}")
-    fi
+    append_extra_display_devices cmd "${extra_displays}"
+    append_firmware_attachment cmd "${firmware_path}" "${firmware_mode}" "ROM / firmware"
     [[ ${#dbgflags[@]} -gt 0 ]] && cmd+=("${dbgflags[@]}")
     [[ ${#extra_arr[@]} -gt 0 ]] && cmd+=("${extra_arr[@]}")
 
