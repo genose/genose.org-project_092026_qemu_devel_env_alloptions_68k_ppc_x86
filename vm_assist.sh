@@ -84,11 +84,11 @@ ask_ram_size() {
     local prompt="$1" default="$2" answer
     while true; do
         answer=$(ask "${prompt}" "${default}")
-        if [[ "${answer}" =~ ^[0-9]+([kKmMgGtT])?$ ]]; then
+        if [[ "${answer}" =~ ^[0-9]+([Mm]|[Gg])?$ ]]; then
             echo "${answer}"
             return 0
         fi
-        warn "Invalid RAM size '${answer}'. Use a plain MiB value or a suffix such as 512M, 2G, or 4G."
+        warn "Invalid RAM size '${answer}'. Use a plain MiB value or an M/G suffix such as 512M, 2G, or 4G."
     done
 }
 
@@ -1177,6 +1177,8 @@ launch_custom() {
 
     local arch
     arch=$(ask "QEMU system emulator (e.g. x86_64, i386, m68k, ppc, ppc64)" "x86_64")
+    arch="${arch#qemu-system-}"
+    [[ "${arch}" =~ ^[A-Za-z0-9_-]+$ ]] || die "Invalid QEMU emulator suffix '${arch}'. Use values like x86_64, i386, m68k, ppc, or ppc64."
     local qemu
     qemu=$(qemu_bin "qemu-system-${arch}")
 
@@ -1237,8 +1239,8 @@ launch_custom() {
         read -r -a extra_arr <<<"${extra}"
         local opt
         for opt in "${extra_arr[@]}"; do
-            if [[ "${opt}" == "-drive" || "${opt}" == "-netdev" ]]; then
-                warn "Advanced extra flags like '${opt}' can override first-class launcher options."
+            if [[ "${opt}" =~ ^-(drive|netdev|nic|machine|cpu|m|bios|device|smp|cdrom|hda|virtfs)$ ]]; then
+                warn "Extra flag '${opt}' can override first-class launcher options."
             fi
         done
     fi
