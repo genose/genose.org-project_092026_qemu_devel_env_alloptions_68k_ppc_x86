@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
 # build_qemu.sh — Custom QEMU build script
-# Targets: m68k, ppc, ppc64, i386, x86_64, sparc, sparc64
+# Targets: retro defaults (m68k, ppc, ppc64, i386, x86_64, sparc, sparc64)
+#          x86 hosts auto-expand to all qemu-system-* targets, without AVX/AVX2
 # Retro platforms: MacOS 7.1-9.2.2 (PPC/68k), Atari ST (68k),
 #                  Amiga (68k), HaikuOS (x86/x86_64), Solaris family (x86/SPARC)
 # =============================================================================
@@ -19,9 +20,10 @@ QEMU_TARBALL_URL="https://download.qemu.org/${QEMU_TARBALL}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)}"
 # Patches directory — .patch files are applied in lexicographic order
 PATCHES_DIR="${PATCHES_DIR:-$(cd "$(dirname "$0")" && pwd)/patches}"
+QEMU_X86_COMPAT_CFLAGS="${QEMU_X86_COMPAT_CFLAGS:--march=x86-64 -mtune=westmere -mno-avx -mno-avx2}"
 
-# Target list — all retro-relevant system emulators
-QEMU_TARGETS=(
+# Default target list — retro-relevant system emulators
+QEMU_SOFTMMU_TARGETS=(
     m68k-softmmu       # Motorola 68000 family (Amiga, Atari ST, Mac 68k)
     ppc-softmmu        # PowerPC 32-bit (MacOS 7.5–9.2.2 on Old World / New World)
     ppc64-softmmu      # PowerPC 64-bit
@@ -29,7 +31,10 @@ QEMU_TARGETS=(
     x86_64-softmmu     # x86 64-bit (HaikuOS, modern Linux)
     sparc-softmmu      # SPARC 32-bit (legacy Solaris where applicable)
     sparc64-softmmu    # SPARC 64-bit (Solaris / sun4u)
-    # User-mode emulation (Linux host only)
+)
+
+# User-mode emulation (Linux host only)
+QEMU_LINUX_USER_TARGETS=(
     m68k-linux-user
     ppc-linux-user
     ppc64-linux-user
@@ -61,6 +66,52 @@ EXTRA_CONFIG_FLAGS=(
 log()  { printf '\033[1;32m[build_qemu]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[build_qemu] WARN:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[build_qemu] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+
+host_is_x86() {
+    case "$(uname -m)" in
+        x86_64|amd64|i386|i486|i586|i686) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+list_all_softmmu_targets() {
+    local targets_dir="${QEMU_SRC_DIR}/configs/targets"
+    [[ -d "${targets_dir}" ]] || return 1
+
+    find "${targets_dir}" -maxdepth 1 -type f -name '*-softmmu.mak' -printf '%f\n' \
+        | sed 's/\.mak$//' \
+        | sort
+}
+
+resolve_qemu_targets() {
+    local targets=()
+
+    if host_is_x86; then
+        if mapfile -t targets < <(list_all_softmmu_targets) && [[ ${#targets[@]} -gt 0 ]]; then
+            log "x86 host detected — enabling all qemu-system-* targets."
+        else
+            warn "Could not enumerate all softmmu targets from ${QEMU_SRC_DIR}; falling back to retro defaults."
+            targets=("${QEMU_SOFTMMU_TARGETS[@]}")
+        fi
+    else
+        targets=("${QEMU_SOFTMMU_TARGETS[@]}")
+    fi
+
+    if [[ "$(uname -s)" == "Linux" ]]; then
+        targets+=("${QEMU_LINUX_USER_TARGETS[@]}")
+    fi
+
+    printf '%s\n' "${targets[@]}"
+}
+
+configure_x86_compat() {
+    host_is_x86 || return 0
+    [[ -n "${QEMU_X86_COMPAT_CFLAGS}" ]] || return 0
+
+    export CFLAGS="${CFLAGS:+${CFLAGS} }${QEMU_X86_COMPAT_CFLAGS}"
+    export CXXFLAGS="${CXXFLAGS:+${CXXFLAGS} }${QEMU_X86_COMPAT_CFLAGS}"
+    log "Using x86 compatibility flags: ${QEMU_X86_COMPAT_CFLAGS}"
+}
 
 check_deps() {
     local missing=()
@@ -161,16 +212,10 @@ configure_qemu() {
     cd "${QEMU_BUILD_DIR}"
 
     local target_list
-    target_list=$(printf '%s,' "${QEMU_TARGETS[@]}"); target_list="${target_list%,}"
-
-    # Detect whether user-mode is supported (Linux only)
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        local softmmu_targets=()
-        for t in "${QEMU_TARGETS[@]}"; do
-            [[ "${t}" != *linux-user* ]] && softmmu_targets+=("${t}")
-        done
-        target_list=$(printf '%s,' "${softmmu_targets[@]}"); target_list="${target_list%,}"
-    fi
+    local resolved_targets=()
+    mapfile -t resolved_targets < <(resolve_qemu_targets)
+    target_list=$(printf '%s,' "${resolved_targets[@]}"); target_list="${target_list%,}"
+    configure_x86_compat
 
     "${QEMU_SRC_DIR}/configure" \
         --prefix="${QEMU_INSTALL_PREFIX}" \
@@ -218,10 +263,15 @@ Environment variables:
   QEMU_BUILD_DIR        Path to build directory    (default: \${QEMU_SRC_DIR}/build)
   QEMU_INSTALL_PREFIX   Installation prefix        (default: \${HOME}/.local/qemu-retro)
   PATCHES_DIR           Directory of .patch files  (default: ./patches)
+  QEMU_X86_COMPAT_CFLAGS x86 host C/C++ flags      (default: ${QEMU_X86_COMPAT_CFLAGS})
   JOBS                  Parallel build jobs        (default: nproc)
 
 Enabled targets:
-$(printf '  %s\n' "${QEMU_TARGETS[@]}")
+  Retro softmmu defaults:
+$(printf '    %s\n' "${QEMU_SOFTMMU_TARGETS[@]}")
+  Linux-user targets on Linux:
+$(printf '    %s\n' "${QEMU_LINUX_USER_TARGETS[@]}")
+  On x86 hosts, configure auto-expands softmmu targets to every qemu-system-* target.
 
 Extra configure flags:
 $(printf '  %s\n' "${EXTRA_CONFIG_FLAGS[@]}")
