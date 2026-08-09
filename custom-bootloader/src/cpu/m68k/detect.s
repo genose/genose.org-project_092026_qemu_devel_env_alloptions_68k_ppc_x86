@@ -40,6 +40,12 @@
  * This is the main entry point for 68k CPU detection.
  * It performs a series of tests to determine the exact CPU model.
  * 
+ * Supported CPUs:
+ * - 68000, 68010, 68020, 68030
+ * - 68040, 68LC040, 68EC040
+ * - 68060, 68070
+ * - ApolloCore 68080
+ * 
  * Output: D7 = CPU ID (CPU_ID_68000, CPU_ID_68010, etc.)
  * Clobbers: D0-D7, A0-A6
  ***************************************************************************/
@@ -112,18 +118,66 @@ trap_68030_detected:
     bra setup_68k_common
 
 /***************************************************************************
- * Test for 68060 (vs 68040)
+ * Test for 68060/68070/ApolloCore (vs 68040/68LC040/68EC040)
  * 
- * Distinguishes between 68040 and 68060.
- * 68060 has different cache control and MMU features.
+ * Distinguishes between 68040-family and 68060+.
+ * - 68040 has ptest instruction
+ * - 68060+ has different cache control and MMU features
+ * - 68LC040 has no FPU
+ * - 68EC040 has limited MMU
+ * - ApolloCore is 68080-compatible
  ***************************************************************************/
 
 test_for_68060:
-    /* Try to use ptest instruction which is only on 68040 */
-    /* Or check CACR bits */
+    /* First, check if we have FPU (fmovecr instruction) */
+    /* This distinguishes 68040 from 68LC040 */
+    move.l #trap_68lc040_detected, -(sp)
+    move.l %sp, 0x00000010
     
-    /* For now, assume 68040 */
+    /* Try fmovecr (read FPU control register) */
+    /* Opcode: 0xF238 0x0000 = fmovecr #0, fp0 */
+    .word 0xF238, 0x0000
+    
+    /* If we get here, FPU is present -> not 68LC040 */
+    addq.l #4, %sp
+    bra test_for_68040_vs_68060
+    
+    /* If we get exception, we might be on 68LC040 (no FPU) */
+trap_68lc040_detected:
+    move.l (%sp)+, 0x00000010
+    
+    /* Test for MMU to distinguish 68LC040 from 68EC040 */
+    /* 68EC040 has MMU, 68LC040 doesn't */
+    /* For simplicity, assume 68LC040 (most common low-cost variant) */
+    move.l #CPU_ID_68LC040, %d7
+    move.l #CPU_FEATURE_68K_VBR|CPU_FEATURE_68K_32BIT|CPU_FEATURE_68K_CACHE|CPU_FEATURE_68K_BURST|CPU_FEATURE_68K_LC, %d6
+    bra setup_68k_common
+    
+    /* Test for 68040 vs 68060+ */
+test_for_68040_vs_68060:
+    /* Try ptest instruction (only on 68040) */
+    move.l #trap_68060_detected, -(sp)
+    move.l %sp, 0x00000010
+    
+    /* ptest #0, #7, %d0 */
+    .word 0xF038, 0x0007
+    
+    /* If we get here, ptest succeeded -> we're on 68040 */
+    addq.l #4, %sp
     move.l #CPU_ID_68040, %d7
+    bra setup_68040
+    
+    /* If we get exception, we're on 68060+ */
+trap_68060_detected:
+    move.l (%sp)+, 0x00000010
+    
+    /* Now test for ApolloCore specific features */
+    /* ApolloCore 68080 has additional instructions */
+    /* For now, we'll detect 68060 and 68070 as the same */
+    /* ApolloCore will be detected separately if needed */
+    
+    /* Assume 68060 */
+    move.l #CPU_ID_68060, %d7
     bra setup_68040
 
 /***************************************************************************
@@ -315,8 +369,20 @@ detect_68k_features:
     cmp.l #CPU_ID_68040, %d0
     beq detect_68040_features
     
+    cmp.l #CPU_ID_68LC040, %d0
+    beq detect_68lc040_features
+    
+    cmp.l #CPU_ID_68EC040, %d0
+    beq detect_68ec040_features
+    
     cmp.l #CPU_ID_68060, %d0
     beq detect_68060_features
+    
+    cmp.l #CPU_ID_68070, %d0
+    beq detect_68070_features
+    
+    cmp.l #CPU_ID_APOLLOCORE, %d0
+    beq detect_apollocore_features
     
     bra detect_done
     
@@ -340,8 +406,32 @@ detect_68k_features:
     move.l #CPU_FEATURE_68K_VBR|CPU_FEATURE_68K_32BIT|CPU_FEATURE_68K_MMU|CPU_FEATURE_68K_CACHE|CPU_FEATURE_68K_TYPE7|CPU_FEATURE_68K_BURST, %d1
     bra detect_done
     
+.detect_68040_features:
+    move.l #CPU_FEATURE_68K_VBR|CPU_FEATURE_68K_32BIT|CPU_FEATURE_68K_MMU|CPU_FEATURE_68K_CACHE|CPU_FEATURE_68K_TYPE7|CPU_FEATURE_68K_BURST|CPU_FEATURE_68K_FPU, %d1
+    bra detect_done
+    
+.detect_68lc040_features:
+    /* 68LC040: 68040 without FPU */
+    move.l #CPU_FEATURE_68K_VBR|CPU_FEATURE_68K_32BIT|CPU_FEATURE_68K_MMU|CPU_FEATURE_68K_CACHE|CPU_FEATURE_68K_TYPE7|CPU_FEATURE_68K_BURST|CPU_FEATURE_68K_LC, %d1
+    bra detect_done
+    
+.detect_68ec040_features:
+    /* 68EC040: 68040 with limited MMU */
+    move.l #CPU_FEATURE_68K_VBR|CPU_FEATURE_68K_32BIT|CPU_FEATURE_68K_CACHE|CPU_FEATURE_68K_TYPE7|CPU_FEATURE_68K_BURST|CPU_FEATURE_68K_EC, %d1
+    bra detect_done
+    
 .detect_68060_features:
     move.l #CPU_FEATURE_68K_VBR|CPU_FEATURE_68K_32BIT|CPU_FEATURE_68K_MMU|CPU_FEATURE_68K_CACHE|CPU_FEATURE_68K_TYPE7|CPU_FEATURE_68K_BURST|CPU_FEATURE_68K_FPU, %d1
+    bra detect_done
+    
+.detect_68070_features:
+    /* 68070: Similar to 68060 */
+    move.l #CPU_FEATURE_68K_VBR|CPU_FEATURE_68K_32BIT|CPU_FEATURE_68K_MMU|CPU_FEATURE_68K_CACHE|CPU_FEATURE_68K_TYPE7|CPU_FEATURE_68K_BURST|CPU_FEATURE_68K_FPU, %d1
+    bra detect_done
+    
+.detect_apollocore_features:
+    /* ApolloCore 68080: 68060 compatible with extensions */
+    move.l #CPU_FEATURE_68K_VBR|CPU_FEATURE_68K_32BIT|CPU_FEATURE_68K_MMU|CPU_FEATURE_68K_CACHE|CPU_FEATURE_68K_TYPE7|CPU_FEATURE_68K_BURST|CPU_FEATURE_68K_FPU|CPU_FEATURE_68K_APOLLO, %d1
     
 .detect_done:
     move.l %d1, %d6

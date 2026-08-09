@@ -87,6 +87,10 @@
 #define CPU_ID_68030               4
 #define CPU_ID_68040               5
 #define CPU_ID_68060               6
+#define CPU_ID_68LC040             7
+#define CPU_ID_68EC040             8
+#define CPU_ID_68070               9
+#define CPU_ID_APOLLOCORE          10
 
 /*** PowerPC Family ***/
 #define CPU_ID_PPC601              101
@@ -115,6 +119,9 @@
 #define CPU_FEATURE_68K_BURST       (1 << 4)   /* Burst mode support */
 #define CPU_FEATURE_68K_TYPE7       (1 << 5)   /* Type 7 stack frames */
 #define CPU_FEATURE_68K_FPU         (1 << 6)   /* Floating Point Unit */
+#define CPU_FEATURE_68K_LC          (1 << 7)   /* Low-power/EC variant (no or limited FPU/MMU) */
+#define CPU_FEATURE_68K_EC          (1 << 8)   /* Embedded Controller variant */
+#define CPU_FEATURE_68K_APOLLO      (1 << 9)   /* Apollo Core specific features */
 
 /*** PPC Features ***/
 #define CPU_FEATURE_PPC_64BIT       (1 << 16)  /* 64-bit mode support */
@@ -298,6 +305,10 @@
 #define CPU_NAME_68030             "Motorola 68030"
 #define CPU_NAME_68040             "Motorola 68040"
 #define CPU_NAME_68060             "Motorola 68060"
+#define CPU_NAME_68LC040           "Motorola 68LC040"
+#define CPU_NAME_68EC040           "Motorola 68EC040"
+#define CPU_NAME_68070             "Motorola 68070"
+#define CPU_NAME_APOLLOCORE         "Apollo Core 68080"
 #define CPU_NAME_PPC601            "PowerPC 601"
 #define CPU_NAME_PPC603            "PowerPC 603"
 #define CPU_NAME_PPC604            "PowerPC 604"

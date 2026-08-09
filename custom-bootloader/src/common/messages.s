@@ -111,6 +111,18 @@ display_cpu_name:
     cmp.l #CPU_ID_68060, %d0
     beq display_68060
     
+    cmp.l #CPU_ID_68LC040, %d0
+    beq display_68lc040
+    
+    cmp.l #CPU_ID_68EC040, %d0
+    beq display_68ec040
+    
+    cmp.l #CPU_ID_68070, %d0
+    beq display_68070
+    
+    cmp.l #CPU_ID_APOLLOCORE, %d0
+    beq display_apollocore
+    
     /* Unknown CPU */
     pea msg_unknown_running(%pc)
     bra display_string_common
@@ -137,6 +149,23 @@ display_68040:
 
 display_68060:
     pea msg_68060_running(%pc)
+    bra display_string_common
+
+display_68lc040:
+    pea msg_68lc040_running(%pc)
+    bra display_string_common
+
+display_68ec040:
+    pea msg_68ec040_running(%pc)
+    bra display_string_common
+
+display_68070:
+    pea msg_68070_running(%pc)
+    bra display_string_common
+
+display_apollocore:
+    pea msg_apollocore_running(%pc)
+    bra display_string_common
     
 display_string_common:
     jsr display_string
