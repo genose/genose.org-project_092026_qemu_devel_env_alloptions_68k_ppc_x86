@@ -134,6 +134,14 @@ qemu_has_feature() {
         "virtio-fs")
             "$qemu_test" -device vhost-user-fs-pci,help >/dev/null 2>&1 && return 0
             ;;
+        "opengl")
+            # Check for OpenGL support
+            "$qemu_test" -display sdl,gl=on,help >/dev/null 2>&1 && return 0
+            ;;
+        "smartcard")
+            # Check for smartcard support
+            "$qemu_test" -device ccid-card-emulated,help >/dev/null 2>&1 && return 0
+            ;;
         *)
             return 1
             ;;
@@ -150,10 +158,10 @@ detect_qemu_capabilities() {
     
     heading "Detecting QEMU Build Capabilities"
     
-    local features=("spice" "virtfs" "virtio-fs" "usb-redir" "vnc" "sdl" "gtk" "cocoa")
+    local features=("spice" "virtfs" "virtio-fs" "usb-redir" "vnc" "sdl" "gtk" "cocoa" "opengl" "smartcard")
     local feature_names=(
         "SPICE" "VirtFS (9p)" "virtio-fs" "USB Redirection" 
-        "VNC" "SDL" "GTK" "Cocoa"
+        "VNC" "SDL" "GTK" "Cocoa" "OpenGL" "SmartCard"
     )
     local feature_available=()
     
@@ -826,33 +834,64 @@ start_qemu_vm() {
     local file_sharing_method="${file_sharing_method:-9p}"
     local enable_clipboard="${enable_clipboard:-n}"
     local enable_dnd="${enable_dnd:-n}"
+    local enable_opengl="${enable_opengl:-n}"
 
     local qemu_args=()
     local qemu_mode="${qemu_mode:-softmmu}"
 
     # Use custom QEMU if available
     local qemu_ppc_bin=$(qemu_bin "qemu-system-ppc")
+    local qemu_ppc64_bin=$(qemu_bin "qemu-system-ppc64")
     local qemu_x86_bin=$(qemu_bin "qemu-system-x86_64")
     local qemu_arm_bin=$(qemu_bin "qemu-system-aarch64")
     local qemu_sparc_bin=$(qemu_bin "qemu-system-sparc64")
+    local qemu_m68k_bin=$(qemu_bin "qemu-system-m68k")
     
     # For system mode, use qemu-<arch> instead of qemu-system-<arch>
     if [ "${qemu_mode}" = "system" ]; then
         case "${arch}" in
             "x86_64"|"i386"|"i86")
                 qemu_ppc_bin=""  # Reset PPC binary for system mode
+                qemu_ppc64_bin=""
                 qemu_arm_bin=""
                 qemu_sparc_bin=""
+                qemu_m68k_bin=""
                 if [ -n "$(qemu_bin "qemu-x86_64")" ]; then
                     qemu_x86_bin=$(qemu_bin "qemu-x86_64")
                 else
                     qemu_x86_bin="qemu-x86_64"
                 fi
                 ;;
-            "arm"|"arm64")
+            "ppc64")
                 qemu_ppc_bin=""
                 qemu_x86_bin=""
+                qemu_arm_bin=""
                 qemu_sparc_bin=""
+                qemu_m68k_bin=""
+                if [ -n "$(qemu_bin "qemu-ppc64")" ]; then
+                    qemu_ppc64_bin=$(qemu_bin "qemu-ppc64")
+                else
+                    qemu_ppc64_bin="qemu-ppc64"
+                fi
+                ;;
+            "m68k")
+                qemu_ppc_bin=""
+                qemu_ppc64_bin=""
+                qemu_x86_bin=""
+                qemu_arm_bin=""
+                qemu_sparc_bin=""
+                if [ -n "$(qemu_bin "qemu-m68k")" ]; then
+                    qemu_m68k_bin=$(qemu_bin "qemu-m68k")
+                else
+                    qemu_m68k_bin="qemu-m68k"
+                fi
+                ;;
+            "arm"|"arm64")
+                qemu_ppc_bin=""
+                qemu_ppc64_bin=""
+                qemu_x86_bin=""
+                qemu_sparc_bin=""
+                qemu_m68k_bin=""
                 if [ -n "$(qemu_bin "qemu-arm")" ]; then
                     qemu_arm_bin=$(qemu_bin "qemu-arm")
                 else
@@ -867,15 +906,46 @@ start_qemu_vm() {
     fi
 
     case "${arch}" in
-        "G4"|"604ev"|"604"|"601"|"68040"|"apollocore"|"68k"|"ppc")
+        "G4"|"604ev"|"604"|"601"|"68040"|"apollocore"|"68k"|"ppc"|"m68k")
             if [ "${qemu_mode}" = "system" ]; then
-                log_warn "System mode not available for PPC. Using SoftMMU."
+                log_warn "System mode not available for PPC/m68k. Using SoftMMU."
                 qemu_mode="softmmu"
             fi
-            if [ -n "${qemu_ppc_bin}" ]; then
-                qemu_args+=("${qemu_ppc_bin}")
+            # Use appropriate binary based on architecture
+            if [ "${arch}" = "m68k" ]; then
+                if [ -n "${qemu_m68k_bin}" ]; then
+                    qemu_args+=("${qemu_m68k_bin}")
+                else
+                    qemu_args+=("qemu-system-m68k")
+                fi
             else
-                qemu_args+=("qemu-system-ppc")
+                if [ -n "${qemu_ppc_bin}" ]; then
+                    qemu_args+=("${qemu_ppc_bin}")
+                else
+                    qemu_args+=("qemu-system-ppc")
+                fi
+            fi
+            ;;
+        "ppc64")
+            if [ "${qemu_mode}" = "system" ]; then
+                # For ppc64 in system mode
+                if [ -n "${qemu_ppc64_bin}" ]; then
+                    qemu_ppc64_bin=$(echo "${qemu_ppc64_bin}" | sed 's/qemu-system-ppc64/qemu-ppc64/g')
+                else
+                    qemu_ppc64_bin="qemu-ppc64"
+                fi
+            fi
+            if [ -n "${qemu_ppc64_bin}" ]; then
+                qemu_args+=("${qemu_ppc64_bin}")
+            else
+                qemu_args+=("qemu-system-ppc64")
+            fi
+            ;;
+        "m68k")
+            if [ -n "${qemu_m68k_bin}" ]; then
+                qemu_args+=("${qemu_m68k_bin}")
+            else
+                qemu_args+=("qemu-system-m68k")
             fi
             ;;
         "x86_64"|"i386"|"i86")
@@ -971,10 +1041,41 @@ start_qemu_vm() {
         fi
     fi
     
+    # OpenGL acceleration
+    local qemu_test_bin_for_gl="${qemu_x86_bin:-qemu-system-x86_64}"
+    if [ "${enable_opengl}" = "y" ] && qemu_has_feature "opengl" "$qemu_test_bin_for_gl"; then
+        case "${display}" in
+            "sdl") qemu_args+=("-display" "sdl,gl=on") ;;
+            "gtk") qemu_args+=("-display" "gtk,gl=on") ;;
+            "cocoa") qemu_args+=("-display" "cocoa,gl=on") ;;
+            *) 
+                if [ "${display}" != "none" ] && [ "${display}" != "vnc" ] && [ "${display}" != "spice" ]; then
+                    qemu_args+=("-display" "${display},gl=on")
+                else
+                    log_warn "OpenGL not compatible with display mode: ${display}"
+                fi
+                ;;
+        esac
+        log "OpenGL acceleration enabled"
+    fi
+    
+    # Handle display modes
     case "${display}" in
-        "cocoa") qemu_args+=("-display" "cocoa") ;;
-        "sdl") qemu_args+=("-display" "sdl") ;;
-        "gtk") qemu_args+=("-display" "gtk") ;;
+        "cocoa") 
+            if [ "${enable_opengl}" != "y" ]; then
+                qemu_args+=("-display" "cocoa")
+            fi
+            ;;
+        "sdl") 
+            if [ "${enable_opengl}" != "y" ]; then
+                qemu_args+=("-display" "sdl")
+            fi
+            ;;
+        "gtk") 
+            if [ "${enable_opengl}" != "y" ]; then
+                qemu_args+=("-display" "gtk")
+            fi
+            ;;
         "vnc") qemu_args+=("-vnc" ":${VNC_PORT}") ;;
         "spice")
             # Detect SPICE support from custom build
@@ -1053,7 +1154,7 @@ start_qemu_vm() {
 
     # Architecture-specific settings
     case "${arch}" in
-        "G4"|"604ev"|"ppc"|"68040"|"601"|"604"|"750"|"7400")
+        "G4"|"604ev"|"ppc"|"68040"|"601"|"604"|"750"|"7400"|"m68k")
             local ppc_machine="${machine:-mac99}"
             case "${arch}" in
                 "604ev"|"604"|"68040"|"601"|"750"|"7400") ppc_machine="g3beige" ;;
@@ -1134,6 +1235,48 @@ start_qemu_vm() {
             else
                 log_warn "NDRV loader not found. Some Mac OS versions may not boot properly."
                 log_warn "Download from: https://github.com/cesarblum/openbios/raw/master/bin/ppc-ndrvloader"
+            fi
+            ;;
+        
+        "ppc64")
+            qemu_args+=("-machine" "powernv,accel=tcg")
+            qemu_args+=("-cpu" "POWER8")
+            
+            if [ "${num_screens}" -gt 1 ]; then
+                qemu_args+=("-vga" "virtio")
+                for (( s=1; s<num_screens; s++ )); do
+                    qemu_args+=("-device" "virtio-gpu-pci")
+                done
+            else
+                qemu_args+=("-vga" "virtio")
+            fi
+            
+            if [ -n "${disk}" ] && [ -f "${disk}" ]; then
+                qemu_args+=("-drive" "file=${disk},format=qcow2,if=virtio")
+            fi
+            
+            if [ -n "${iso}" ] && [ -f "${iso}" ]; then
+                qemu_args+=("-cdrom" "${iso}")
+            fi
+            ;;
+        
+        "m68k")
+            # m68k (Motorola 68000) - for Atari, Amiga, etc.
+            qemu_args+=("-machine" "q800")
+            qemu_args+=("-cpu" "${cpu_type:-m68040}")
+            
+            if [ "${num_screens}" -gt 1 ]; then
+                qemu_args+=("-vga" "cg3")
+            else
+                qemu_args+=("-vga" "cg3")
+            fi
+            
+            if [ -n "${disk}" ] && [ -f "${disk}" ]; then
+                qemu_args+=("-drive" "file=${disk},format=qcow2,if=scsi")
+            fi
+            
+            if [ -n "${iso}" ] && [ -f "${iso}" ]; then
+                qemu_args+=("-cdrom" "${iso}")
             fi
             ;;
 
@@ -1278,13 +1421,15 @@ create_vm() {
             echo "  [2] 604ev (PowerPC)"
             echo "  [3] 604 (PowerPC)"
             echo "  [4] 601 (PowerPC)"
-            echo "  [5] 68040 (Motorola)"
+            echo "  [5] 68040 (Motorola 68k)"
             echo "  [6] apollocore (68080)"
-            echo "  [7] x86_64 (Intel/AMD)"
-            echo "  [8] arm"
-            echo "  [9] arm64"
-            echo "  [10] sparc"
-            echo "  [11] sparc64"
+            echo "  [7] m68k (Motorola 68000 generic)"
+            echo "  [8] ppc64 (PowerPC 64-bit)"
+            echo "  [9] x86_64 (Intel/AMD)"
+            echo "  [10] arm"
+            echo "  [11] arm64"
+            echo "  [12] sparc"
+            echo "  [13] sparc64"
             read -rp "Architecture [1]: " arch_choice
             arch_choice=${arch_choice:-1}
 
@@ -1298,11 +1443,13 @@ create_vm() {
                 4) arch="601"; machine="g3beige"; cpu_type="601" ;;
                 5) arch="68040"; machine="mac99"; cpu_type="68040" ;;
                 6) arch="apollocore"; machine="q800"; cpu_type="68080" ;;
-                7) arch="x86_64"; machine="q35"; cpu_type="host" ;;
-                8) arch="arm"; machine="virt"; cpu_type="cortina-a9" ;;
-                9) arch="arm64"; machine="virt"; cpu_type="host" ;;
-                10) arch="sparc"; machine="sun4m"; cpu_type="Fujitsu+MB86904" ;;
-                11) arch="sparc64"; machine="sun4u"; cpu_type="Fujitsu+Sparc64IV+" ;;
+                7) arch="m68k"; machine="q800"; cpu_type="m68040" ;;
+                8) arch="ppc64"; machine="powernv"; cpu_type="POWER8" ;;
+                9) arch="x86_64"; machine="q35"; cpu_type="host" ;;
+                10) arch="arm"; machine="virt"; cpu_type="cortina-a9" ;;
+                11) arch="arm64"; machine="virt"; cpu_type="host" ;;
+                12) arch="sparc"; machine="sun4m"; cpu_type="Fujitsu+MB86904" ;;
+                13) arch="sparc64"; machine="sun4u"; cpu_type="Fujitsu+Sparc64IV+" ;;
                 *) arch="G4"; machine="mac99"; cpu_type="7455" ;;
             esac
 
@@ -1405,6 +1552,18 @@ create_vm() {
             case ${dnd_choice} in
                 1) enable_dnd="y" ;;
                 *) enable_dnd="n" ;;
+            esac
+
+            # OpenGL acceleration
+            echo "Enable OpenGL acceleration?"
+            echo "  [1] Yes"
+            echo "  [2] No"
+            read -rp "Option [2]: " opengl_choice
+            opengl_choice=${opengl_choice:-2}
+            local enable_opengl=""
+            case ${opengl_choice} in
+                1) enable_opengl="y" ;;
+                *) enable_opengl="n" ;;
             esac
 
             echo "ROM file (optional for old Mac OS):"
@@ -1758,7 +1917,9 @@ edit_vm() {
                 echo "  604  - PowerPC 604"
                 echo "  601  - PowerPC 601"
                 echo "  68040 - Motorola 68040"
-                read -rp "Architecture (G4/601/604ev/604/ppc/68040/apollocore/arm/arm64/sparc/sparc64) [${arch:-G4}]: " arch
+                echo "  POWER8 - ppc64"
+                echo "  m68040 - m68k"
+                read -rp "Architecture (G4/601/604ev/604/ppc/68040/apollocore/m68k/ppc64/arm/arm64/sparc/sparc64) [${arch:-G4}]: " arch
                 read -rp "Machine [${machine:-mac99}]: " machine
                 read -rp "CPU type [${cpu_type:-7455}]: " cpu_type
                 read -rp "VIA type (pmu/cuda/none) [${via:-cuda}]: " via
@@ -1821,9 +1982,11 @@ edit_vm() {
             9)
                 read -rp "Enable clipboard sharing (y/n) [${enable_clipboard:-n}]: " enable_clipboard
                 read -rp "Enable Drag & Drop (y/n) [${enable_dnd:-n}]: " enable_dnd
+                read -rp "Enable OpenGL acceleration (y/n) [${enable_opengl:-n}]: " enable_opengl
                 read -rp "QEMU Mode (softmmu/system) [${qemu_mode:-softmmu}]: " qemu_mode
                 enable_clipboard=${enable_clipboard:-n}
                 enable_dnd=${enable_dnd:-n}
+                enable_opengl=${enable_opengl:-n}
                 qemu_mode=${qemu_mode:-softmmu}
                 ;;
                 enable_gdb=${enable_gdb:-n}
@@ -1866,7 +2029,7 @@ edit_vm() {
                 echo "  GDB: ${enable_gdb:-no} port=${gdb_port:-none}"
                 echo "  SSH: ${enable_ssh:-no} port=${ssh_port:-none}"
                 echo "  Netatalk: ${enable_netatalk:-no} share=${netatalk_share_name:-none}"
-                echo "  Clipboard: ${enable_clipboard:-no} DnD: ${enable_dnd:-no}"
+                echo "  Clipboard: ${enable_clipboard:-no} DnD: ${enable_dnd:-no} OpenGL: ${enable_opengl:-no}"
                 ;;
             
             V|v)
@@ -1904,6 +2067,7 @@ rom_file=${rom_file:-}
 file_sharing_method=${file_sharing_method:-9p}
 enable_clipboard=${enable_clipboard:-n}
 enable_dnd=${enable_dnd:-n}
+enable_opengl=${enable_opengl:-n}
 # Debug/Network
 enable_gdb=${enable_gdb:-n}
 gdb_port=${gdb_port:-}
