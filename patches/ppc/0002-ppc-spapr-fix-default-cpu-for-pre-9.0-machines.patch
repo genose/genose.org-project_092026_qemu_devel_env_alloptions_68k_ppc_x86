@@ -1,0 +1,41 @@
+From 64e16e388648948758c7dca533be541131a0e64b Mon Sep 17 00:00:00 2001
+From: Harsh Prateek Bora <harshpb@linux.ibm.com>
+Date: Thu, 20 Mar 2025 14:50:24 +1000
+Subject: [PATCH] ppc/spapr: fix default cpu for pre-9.0 machines.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When POWER10 CPU was made as default, we missed keeping POWER9 as
+default for older pseries releases (pre-9.0) at that time.
+This caused breakge in default cpu evaluation for older pseries
+machines and hence this fix.
+
+Fixes: 51113013f3 ("ppc/spapr: change pseries machine default to POWER10 CPU")
+Cc: qemu-stable@nongnu.org
+Signed-off-by: Harsh Prateek Bora <harshpb@linux.ibm.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+Reviewed-by: Philippe Mathieu-Daudé <philmd@linaro.org>
+Message-ID: <20250313094705.2361997-1-harshpb@linux.ibm.com>
+Signed-off-by: Nicholas Piggin <npiggin@gmail.com>
+(cherry picked from commit 1490d0bcdfcb78b4503cae42353d3dd50f4e9d96)
+Signed-off-by: Michael Tokarev <mjt@tls.msk.ru>
+---
+ hw/ppc/spapr.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/hw/ppc/spapr.c b/hw/ppc/spapr.c
+index 0d4efaa0..e11b6866 100644
+--- a/hw/ppc/spapr.c
++++ b/hw/ppc/spapr.c
+@@ -4771,6 +4771,7 @@ static void spapr_machine_8_2_class_options(MachineClass *mc)
+ {
+     spapr_machine_9_0_class_options(mc);
+     compat_props_add(mc->compat_props, hw_compat_8_2, hw_compat_8_2_len);
++    mc->default_cpu_type = POWERPC_CPU_TYPE_NAME("power9_v2.2");
+ }
+ 
+ DEFINE_SPAPR_MACHINE(8, 2);
+-- 
+2.54.0
+
