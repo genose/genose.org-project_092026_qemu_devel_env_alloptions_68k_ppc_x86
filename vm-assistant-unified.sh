@@ -453,6 +453,7 @@ list_roms() {
     export selected_rom
 }
 
+
 # ---------------------------------------------------------------------------
 # Validate VM configuration
 # ---------------------------------------------------------------------------
@@ -469,23 +470,84 @@ validate_vm_config() {
         die "Config not found: ${vm_config}"
     fi
     
-    # Source the config
     source "${vm_config}" 2>/dev/null || true
     
-    # Validate required fields
-    if [ -z "${arch:-}" ]; then
-        die "Architecture not specified"
+    # Check required fields
+    local errors=0
+    
+    # Check architecture
+    if [ -z "${arch}" ]; then
+        warn "Configuration error: 'arch' is not set"
+        errors=$((errors + 1))
     fi
     
-    if [ -n "${disk:-}" ] && [ ! -f "${disk}" ]; then
-        warn "Disk file not found: ${disk}"
+    # Check RAM
+    if [ -z "${ram}" ]; then
+        warn "Configuration error: 'ram' is not set"
+        errors=$((errors + 1))
+    elif ! [[ "${ram}" =~ ^[0-9]+$ ]]; then
+        warn "Configuration error: 'ram' must be a number (${ram})"
+        errors=$((errors + 1))
     fi
     
-    if [ -n "${iso:-}" ] && [ ! -f "${iso}" ]; then
-        warn "ISO file not found: ${iso}"
+    # Check disk if set
+    if [ -n "${disk}" ] && [ ! -f "${disk}" ]; then
+        warn "Configuration error: Disk file not found: ${disk}"
+        errors=$((errors + 1))
     fi
     
-    log "VM configuration is valid"
+    # Check ISO if set
+    if [ -n "${iso}" ] && [ ! -f "${iso}" ]; then
+        warn "Configuration error: ISO file not found: ${iso}"
+        errors=$((errors + 1))
+    fi
+    
+    # Check share directory
+    if [ -n "${share_dir}" ] && [ ! -d "${share_dir}" ]; then
+        warn "Configuration warning: Share directory not found: ${share_dir}"
+    fi
+    
+    # Check display mode
+    if [ -n "${display}" ] && [ "${display}" != "cocoa" ] && [ "${display}" != "sdl" ] && \
+       [ "${display}" != "gtk" ] && [ "${display}" != "vnc" ] && \
+       [ "${display}" != "spice" ] && [ "${display}" != "none" ]; then
+        warn "Configuration warning: Unknown display mode: ${display}"
+    fi
+    
+    # Architecture-specific checks
+    case "${arch}" in
+        "G4"|"604ev"|"604"|"601"|"68040"|"apollocore"|"68k"|"ppc")
+            # PPC is valid
+            ;;
+        "x86_64"|"i386"|"i86")
+            # x86 is valid
+            ;;
+        "arm"|"arm64")
+            # ARM is valid
+            ;;
+        "sparc"|"sparc64")
+            # SPARC is valid
+            ;;
+        "")
+            ;;
+        *)
+            warn "Configuration warning: Unknown architecture: ${arch}"
+            ;;
+    esac
+    
+    # Check if SPICE features are enabled but display is not SPICE
+    if [ "${enable_clipboard}" = "y" ] || [ "${enable_dnd}" = "y" ]; then
+        if [ "${display}" != "spice" ]; then
+            log "Note: Clipboard/DnD require SPICE display. Auto-enabling SPICE."
+        fi
+    fi
+    
+    if [ ${errors} -gt 0 ]; then
+        die "Configuration has ${errors} error(s). Please fix before starting."
+    else
+        log "Configuration validated successfully"
+    fi
+    
     return 0
 }
 
@@ -692,102 +754,6 @@ delete_vm() {
     die "Failed to delete ${vm_name}"
 }
 
-# ---------------------------------------------------------------------------
-# Validate VM configuration
-# ---------------------------------------------------------------------------
-validate_vm_config() {
-    local vm_name="$1"
-    local vm_dir="${VM_DIR}/${vm_name}"
-    local vm_config="${vm_dir}/config"
-    
-    if [ ! -d "${vm_dir}" ]; then
-        die "VM not found: ${vm_name}"
-    fi
-    
-    if [ ! -f "${vm_config}" ]; then
-        die "Config not found: ${vm_config}"
-    fi
-    
-    source "${vm_config}" 2>/dev/null || true
-    
-    # Check required fields
-    local errors=0
-    
-    # Check architecture
-    if [ -z "${arch}" ]; then
-        warn "Configuration error: 'arch' is not set"
-        errors=$((errors + 1))
-    fi
-    
-    # Check RAM
-    if [ -z "${ram}" ]; then
-        warn "Configuration error: 'ram' is not set"
-        errors=$((errors + 1))
-    elif ! [[ "${ram}" =~ ^[0-9]+$ ]]; then
-        warn "Configuration error: 'ram' must be a number (${ram})"
-        errors=$((errors + 1))
-    fi
-    
-    # Check disk if set
-    if [ -n "${disk}" ] && [ ! -f "${disk}" ]; then
-        warn "Configuration error: Disk file not found: ${disk}"
-        errors=$((errors + 1))
-    fi
-    
-    # Check ISO if set
-    if [ -n "${iso}" ] && [ ! -f "${iso}" ]; then
-        warn "Configuration error: ISO file not found: ${iso}"
-        errors=$((errors + 1))
-    fi
-    
-    # Check share directory
-    if [ -n "${share_dir}" ] && [ ! -d "${share_dir}" ]; then
-        warn "Configuration warning: Share directory not found: ${share_dir}"
-    fi
-    
-    # Check display mode
-    if [ -n "${display}" ] && [ "${display}" != "cocoa" ] && [ "${display}" != "sdl" ] && \
-       [ "${display}" != "gtk" ] && [ "${display}" != "vnc" ] && \
-       [ "${display}" != "spice" ] && [ "${display}" != "none" ]; then
-        warn "Configuration warning: Unknown display mode: ${display}"
-    fi
-    
-    # Architecture-specific checks
-    case "${arch}" in
-        "G4"|"604ev"|"604"|"601"|"68040"|"apollocore"|"68k"|"ppc")
-            # PPC is valid
-            ;;
-        "x86_64"|"i386"|"i86")
-            # x86 is valid
-            ;;
-        "arm"|"arm64")
-            # ARM is valid
-            ;;
-        "sparc"|"sparc64")
-            # SPARC is valid
-            ;;
-        "")
-            ;;
-        *)
-            warn "Configuration warning: Unknown architecture: ${arch}"
-            ;;
-    esac
-    
-    # Check if SPICE features are enabled but display is not SPICE
-    if [ "${enable_clipboard}" = "y" ] || [ "${enable_dnd}" = "y" ]; then
-        if [ "${display}" != "spice" ]; then
-            log "Note: Clipboard/DnD require SPICE display. Auto-enabling SPICE."
-        fi
-    fi
-    
-    if [ ${errors} -gt 0 ]; then
-        die "Configuration has ${errors} error(s). Please fix before starting."
-    else
-        log "Configuration validated successfully"
-    fi
-    
-    return 0
-}
 
 # ---------------------------------------------------------------------------
 # Start QEMU VM
@@ -822,7 +788,7 @@ start_qemu_vm() {
     local iso="${iso:-}"
     local share_dir="${share_dir:-/tmp/volatile_hd}"
     local network_mode="${network_mode:-nat}"
-    local via="${via:-cuda}"
+    local via="${via:-pmu}"
     local multi_screen_method="${multi_screen_method:-auto}"
     local rom_file="${rom_file:-}"
     local enable_gdb="${enable_gdb:-n}"
