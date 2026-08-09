@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2054  # QEMU flags legitimately contain commas (e.g. audio driver lists)
 # =============================================================================
 # build_qemu.sh — Custom QEMU build script
 # Targets: retro defaults (m68k, ppc, ppc64, i386, x86_64, sparc, sparc64)
