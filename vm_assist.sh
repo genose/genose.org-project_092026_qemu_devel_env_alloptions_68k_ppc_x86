@@ -225,6 +225,7 @@ append_user_network() {
     fi
 
     if [[ -n "${forwards}" ]]; then
+        local -a pairs
         local pair host guest
         IFS=',' read -r -a pairs <<<"${forwards}"
         for pair in "${pairs[@]}"; do
@@ -497,6 +498,7 @@ launch_atari() {
         fi
         local tos_img
         tos_img=$(ask "Path to TOS ROM image" "${VM_IMAGE_DIR}/atari/tos.img")
+        # Hatari GEMDOS mode expects a host directory, so pass the parent folder.
         hatari --tos "${tos_img}" --harddrive "$(dirname "${disk}")" &
         return
     fi
@@ -962,6 +964,12 @@ launch_custom() {
     if [[ -n "${extra}" ]]; then
         # Word-split intentionally; values with spaces must be passed via env config files
         read -r -a extra_arr <<<"${extra}"
+        local opt
+        for opt in "${extra_arr[@]}"; do
+            if [[ "${opt}" == "-drive" || "${opt}" == "-netdev" ]]; then
+                warn "Advanced extra flags like '${opt}' can override first-class launcher options."
+            fi
+        done
     fi
 
     local cmd=("${qemu}" -m "${ram}" "${dflags[@]}")
