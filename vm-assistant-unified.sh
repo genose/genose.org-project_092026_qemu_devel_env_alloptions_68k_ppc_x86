@@ -95,6 +95,97 @@ qemu_img_bin() {
 }
 
 # ---------------------------------------------------------------------------
+# Detect QEMU features (from custom build)
+# ---------------------------------------------------------------------------
+qemu_has_feature() {
+    local feature="$1"
+    local qemu_test="$2"
+    
+    if [ -z "$qemu_test" ]; then
+        qemu_test=$(qemu_bin "qemu-system-x86_64") || return 1
+    fi
+    
+    case "$feature" in
+        "spice")
+            # Check for SPICE support
+            "$qemu_test" -device virtio-serial-pci,help >/dev/null 2>&1 && return 0
+            ;;
+        "virtfs"|"9p")
+            # Check for VirtFS/9P support
+            "$qemu_test" -fsdev local,help >/dev/null 2>&1 && return 0
+            ;;
+        "usb-redir")
+            # Check for USB redirection support
+            "$qemu_test" -device usb-redir,help >/dev/null 2>&1 && return 0
+            ;;
+        "vnc")
+            # Check for VNC support
+            "$qemu_test" -vnc help >/dev/null 2>&1 && return 0
+            ;;
+        "sdl")
+            "$qemu_test" -display sdl,help >/dev/null 2>&1 && return 0
+            ;;
+        "gtk")
+            "$qemu_test" -display gtk,help >/dev/null 2>&1 && return 0
+            ;;
+        "cocoa")
+            "$qemu_test" -display cocoa,help >/dev/null 2>&1 && return 0
+            ;;
+        "virtio-fs")
+            "$qemu_test" -device vhost-user-fs-pci,help >/dev/null 2>&1 && return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+    
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# Detect QEMU capabilities
+# ---------------------------------------------------------------------------
+detect_qemu_capabilities() {
+    local qemu_test_bin=$(qemu_bin "qemu-system-x86_64") || return 1
+    
+    heading "Detecting QEMU Build Capabilities"
+    
+    local features=("spice" "virtfs" "virtio-fs" "usb-redir" "vnc" "sdl" "gtk" "cocoa")
+    local feature_names=(
+        "SPICE" "VirtFS (9p)" "virtio-fs" "USB Redirection" 
+        "VNC" "SDL" "GTK" "Cocoa"
+    )
+    local feature_available=()
+    
+    for i in "${!features[@]}"; do
+        if qemu_has_feature "${features[$i]}" "$qemu_test_bin"; then
+            feature_available[$i]="✓"
+        else
+            feature_available[$i]="✗"
+        fi
+    done
+    
+    echo ""
+    echo "  Feature Detection:"
+    for i in "${!feature_names[@]}"; do
+        printf "    ${feature_available[$i]} %-20s" "${feature_names[$i]}"
+        if [ "${feature_available[$i]}" = "✗" ]; then
+            echo " (Build QEMU with --enable-${features[$i]})"
+        else
+            echo ""
+        fi
+    done
+    
+    # Check custom build
+    if [ -d "${QEMU_INSTALL_PREFIX}" ]; then
+        echo ""
+        log "Custom QEMU build detected at: ${QEMU_INSTALL_PREFIX}"
+    fi
+    
+    echo ""
+}
+
+# ---------------------------------------------------------------------------
 # Detect UTM
 # ---------------------------------------------------------------------------
 detect_utm() {
@@ -116,6 +207,9 @@ detect_utm() {
 detect_dependencies() {
     # Detection de UTM
     detect_utm
+    
+    # Detection des capabilities QEMU
+    detect_qemu_capabilities 2>/dev/null || true
 
     # Detection de XQuartz
     if [ -d "/Applications/Utilities/XQuartz.app" ]; then
@@ -883,7 +977,9 @@ start_qemu_vm() {
         "gtk") qemu_args+=("-display" "gtk") ;;
         "vnc") qemu_args+=("-vnc" ":${VNC_PORT}") ;;
         "spice")
-            if command -v qemu-system-x86_64 &>/dev/null && qemu-system-x86_64 -device virtio-serial-pci,help >/dev/null 2>&1; then
+            # Detect SPICE support from custom build
+            local qemu_test_bin="${qemu_x86_bin:-qemu-system-x86_64}"
+            if qemu_has_feature "spice" "$qemu_test_bin"; then
                 local spice_port=${SPICE_PORT:-5900}
                 local spice_socket="/tmp/vm_${vm_name}_spice.sock"
                 qemu_args+=("-spice" "unix=on,addr=${spice_socket},disable-ticketing=on,image-compression=off,playback-compression=off,streaming-video=off,gl=off")
@@ -908,8 +1004,12 @@ start_qemu_vm() {
 
     # File sharing
     if [ -d "${share_dir}" ]; then
-        if [ "${file_sharing_method}" = "virtiofs" ]; then
-            # virtio-fs for better performance
+        # Check if virtio-fs is available in custom build
+        local qemu_test_bin="${qemu_x86_bin:-qemu-system-x86_64}"
+        local has_virtiofs=$(qemu_has_feature "virtio-fs" "$qemu_test_bin" && echo "yes" || echo "no")
+        
+        if [ "${file_sharing_method}" = "virtiofs" ] && [ "$has_virtiofs" = "yes" ]; then
+            # virtio-fs for better performance (requires custom build with --enable-virtfs)
             local virtiofs_socket="/tmp/vm_${vm_name}_virtiofs.sock"
             qemu_args+=("-chardev" "socket,id=char0,path=${virtiofs_socket}")
             qemu_args+=("-device" "vhost-user-fs-pci,queue-size=1024,chardev=char0,tag=shared_fs")
@@ -917,6 +1017,10 @@ start_qemu_vm() {
             log "Using virtio-fs with socket: ${virtiofs_socket}"
             log "Start daemon: vhost-user-fs --socket-path=${virtiofs_socket} --shared-dir=${share_dir} --cache=always"
         else
+            if [ "${file_sharing_method}" = "virtiofs" ] && [ "$has_virtiofs" = "no" ]; then
+                log_warn "virtio-fs not available in this QEMU build. Falling back to virtio-9p."
+                log_info "Build QEMU with --enable-virtfs for virtio-fs support"
+            fi
             # Standard virtio-9p
             qemu_args+=("-fsdev" "local,security_model=mapped,id=fsdev0,path=${share_dir}")
             qemu_args+=("-device" "virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare")
@@ -1837,6 +1941,7 @@ show_main_menu() {
         echo "QEMU Management:"
         echo "  [1] Build QEMU with patches (custom version)"
         echo "  [2] Check QEMU installation"
+        echo "  [2b] Check QEMU build capabilities (features)"
         echo ""
         echo "VM Management:"
         echo "  [3] Create a new VM"
@@ -1896,6 +2001,12 @@ show_main_menu() {
                         warn "qemu-system-${arch}: ✗ not found"
                     fi
                 done
+                read -rp "Press Enter to continue..." 
+                ;;
+            
+            2b)
+                heading "Checking QEMU Build Capabilities"
+                detect_qemu_capabilities
                 read -rp "Press Enter to continue..." 
                 ;;
 
