@@ -158,6 +158,10 @@ configure_samba() {
                 sudo ln -sf "$samba_private_dir" "$homebrew_samba_private"
                 log_info "Lien symbolique: $homebrew_samba_private -> $samba_private_dir"
             fi
+            # Créer aussi le répertoire msg.sock spécifiquement pour éviter l'erreur
+            ensure_dir "$homebrew_samba_private/msg.sock"
+            sudo chmod 1777 "$homebrew_samba_private/msg.sock"
+            sudo chown root:wheel "$homebrew_samba_private/msg.sock"
         fi
     fi
 
@@ -282,11 +286,13 @@ SMBCONF
             sudo killall nmbd 2>/dev/null || true
             sleep 1
         fi
-        sudo "$smbd_bin" -D -s "$samba_config" -l "$samba_private_dir/log_smbd.log" -p "$samba_private_dir/smbd.pid" &
+        # Utiliser nohup pour éviter que le script bloque
+        nohup sudo "$smbd_bin" -D -s "$samba_config" -l "$samba_private_dir/log_smbd.log" -p "$samba_private_dir/smbd.pid" >/dev/null 2>&1 &
         if [ -n "$nmbd_bin" ]; then
-            sudo "$nmbd_bin" -D -l "$samba_private_dir/log_nmbd.log" -p "$samba_private_dir/nmbd.pid" &
+            nohup sudo "$nmbd_bin" -D -l "$samba_private_dir/log_nmbd.log" -p "$samba_private_dir/nmbd.pid" >/dev/null 2>&1 &
         fi
-        log_info "Samba démarré manuellement"
+        sleep 1
+        log_info "Samba démarré manuellement (PIDs: $(pgrep -x smbd | tr '\n' ' ' || echo 'aucun'))"
     fi
 
     sleep 2
@@ -400,8 +406,9 @@ APPLEVOL
             sudo killall cnid_metad 2>/dev/null || true
             sleep 1
         fi
-        sudo "$afpd_bin" -d -F "$netatalk_config" &
-        log_info "Netatalk démarré (PID: $!)"
+        nohup sudo "$afpd_bin" -d -F "$netatalk_config" >/dev/null 2>&1 &
+        sleep 1
+        log_info "Netatalk démarré (PID: $(pgrep -x afpd | tr '\n' ' ' || echo 'aucun'))"
     fi
 
     sleep 2
