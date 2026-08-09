@@ -123,7 +123,7 @@ bash vm_assist.sh images
 | `VM_LOG_DIR` | `~/vm-logs` | Session log directory |
 | `DEFAULT_DISPLAY` | `sdl` | Display backend (sdl/gtk/vnc/curses/none) |
 | `DEFAULT_MACOS_SHARE_DIR` | `/tmp/volatile_hd` | Host export path prepared for classic Mac guests |
-| `DEFAULT_GDB_BRIDGE_PORT` | `2345` | Default guest gdbserver bridge port |
+| `DEFAULT_GDB_BRIDGE_PORT` | `2346` | Default host-side bridge port for guest gdbserver |
 | `DEFAULT_QEMU_GDB_PORT` | `1234` | Default QEMU GDB stub port |
 
 ---
@@ -159,7 +159,7 @@ qemu-system-m68k -machine q800 -cpu m68040 -m 128 \
   for both MacPorts and Homebrew.
 
 ```bash
-qemu-system-ppc -machine mac99,via=pmu -cpu G4 -m 256 \
+qemu-system-ppc -machine mac99,via=pmu -cpu 7455 -m 256 \
   -display sdl -audiodev sdl,id=snd0 \
   -device VGA,vgamem_mb=16 \
   -device secondary-vga,vgamem_mb=16 \
