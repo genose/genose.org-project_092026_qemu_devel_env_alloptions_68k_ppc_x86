@@ -1,0 +1,295 @@
+# Makefile.retro68 - Makefile pour compilation avec Retro68
+# Projet: MacOS71_GDB_ICMP_Test - Application de test GDB/ICMP pour Mac OS 7.1
+#
+# Ce Makefile utilise Retro68 pour compiler une application Mac OS classique (68k)
+# Compatible avec Mac OS 7.1, 8.x et 9.x
+
+# -------------------------------------------
+# Configuration du projet
+# -------------------------------------------
+
+PROJECT = MacOS71_GDB_ICMP_Test
+VERSION = 1.0
+
+# Répertoire source et build
+SRC_DIR = src
+BUILD_DIR = build
+
+# Fichiers source
+SRCS = \
+	$(SRC_DIR)/main.c \
+	$(SRC_DIR)/gdb_test.c \
+	$(SRC_DIR)/icmp_test.c
+
+# Fichiers headers
+INCLUDES = $(SRC_DIR)/mac_toolbox.h $(SRC_DIR)/gdb_test.h $(SRC_DIR)/icmp_test.h
+
+# -------------------------------------------
+# Configuration Retro68
+# -------------------------------------------
+
+# Chemin vers Retro68 (peut être personnalisé)
+RETRO68 ?= Retro68
+
+# Options par défaut
+CFLAGS = -g -O0 -m68040 -I$(SRC_DIR)
+
+# Options supplémentaires
+DEFS =
+WARN_FLAGS = -Wall -Wextra
+
+# Options de compilation complètes
+CFLAGS += $(DEFS) $(WARN_FLAGS)
+
+# Fichier de sortie
+TARGET = $(BUILD_DIR)/$(PROJECT)
+
+# -------------------------------------------
+# Cibles principales
+# -------------------------------------------
+
+all: $(TARGET)
+
+$(TARGET): $(SRCS) $(INCLUDES)
+	@echo "Compilation de $(PROJECT) avec Retro68..."
+	@mkdir -p $(BUILD_DIR)
+	$(RETRO68) $(CFLAGS) $^ -o $@
+	@echo "✓ Application générée: $@"
+
+# -------------------------------------------
+# Cibles de nettoyage
+# -------------------------------------------
+
+clean:
+	rm -rf $(BUILD_DIR)
+	@echo "Nettoyage terminé"
+
+cleanall: clean
+	@echo "Nettoyage complet"
+
+# -------------------------------------------
+# Cibles pour différentes architectures 68k
+# -------------------------------------------
+
+# 68000 (Macintosh original)
+target_68000: CFLAGS += -m68000
+	target_68000: $(TARGET)
+
+# 68020 (Macintosh II, SE/30)
+target_68020: CFLAGS += -m68020
+	target_68020: $(TARGET)
+
+# 68030 (Macintosh IIci, Quadra)
+target_68030: CFLAGS += -m68030
+	target_68030: $(TARGET)
+
+# 68040 (Quadra, Centris - RECOMMANDÉ pour Mac OS 7.1)
+target_68040: CFLAGS += -m68040
+	target_68040: $(TARGET)
+
+# -------------------------------------------
+# Cibles avec différents niveaux d'optimisation
+# -------------------------------------------
+
+# Avec optimisation maximale (pour release)
+target_release: CFLAGS += -O2 -g
+	target_release: $(TARGET)
+
+# Avec debug complet (pour développement)
+target_debug: CFLAGS += -g -O0
+	target_debug: $(TARGET)
+
+# Sans debug (pour production)
+target_production: CFLAGS += -O2
+	target_production: $(TARGET)
+
+# -------------------------------------------
+# Cibles pour compilation avec ressources
+# -------------------------------------------
+
+# Compiler avec ressources (nécessite un fichier .r)
+REZ = Rez
+RESOURCE_FILE = $(SRC_DIR)/resources.r
+RESOURCE_OUTPUT = $(BUILD_DIR)/$(PROJECT).rsrc
+
+resources: $(RESOURCE_FILE)
+	@echo "Compilation des ressources..."
+	@mkdir -p $(BUILD_DIR)
+	$(REZ) -o $(RESOURCE_OUTPUT) $(RESOURCE_FILE)
+	@echo "✓ Ressources générées: $(RESOURCE_OUTPUT)"
+
+# Compiler avec ressources intégrées
+target_with_resources: $(TARGET) $(RESOURCE_OUTPUT)
+	@echo "Création de l'application avec ressources..."
+	$(RETRO68) $(CFLAGS) -r -a $^ -o $(TARGET)
+	@echo "✓ Application avec ressources: $(TARGET)"
+
+# -------------------------------------------
+# Cibles utilitaires
+# -------------------------------------------
+
+# Afficher les options de compilation
+show_config:
+	@echo "Configuration Retro68 pour $(PROJECT)"
+	@echo "----------------------------------------"
+	@echo "Compilateur: $(RETRO68)"
+	@echo "Options: $(CFLAGS)"
+	@echo "Architecture: 68040 (par défaut)"
+	@echo "Répertoire source: $(SRC_DIR)"
+	@echo "Répertoire build: $(BUILD_DIR)"
+	@echo "Fichiers source: $(SRCS)"
+	@echo "Cible: $(TARGET)"
+
+# Vérifier l'installation de Retro68
+check_retro68:
+	@echo "Vérification de Retro68..."
+	@if command -v $(RETRO68) >/dev/null 2>&1; then \
+		echo "✓ $(RETRO68) est installé: $(shell $(RETRO68) --version 2>&1 | head -1)"; \
+	else \
+		echo "✗ $(RETRO68) non trouvé"; \
+		echo "  Installez Retro68 depuis: https://github.com/automatedjdw/Retro68"; \
+		false; \
+	fi
+
+# Vérifier les outils nécessaires
+check_tools:
+	@echo "Vérification des outils nécessaires..."
+	@if command -v $(RETRO68) >/dev/null 2>&1; then \
+		echo "✓ Retro68"; \
+	else \
+		echo "✗ Retro68"; \
+	fi
+	@if command -v $(REZ) >/dev/null 2>&1; then \
+		echo "✓ Rez"; \
+	else \
+		echo "✗ Rez (nécessite Xcode Command Line Tools)"; \
+	fi
+	@if command -v xcodebuild >/dev/null 2>&1; then \
+		echo "✓ Xcode Command Line Tools"; \
+	else \
+		echo "✗ Xcode Command Line Tools (xcode-select --install)"; \
+	fi
+
+# -------------------------------------------
+# Cibles pour la gestion du projet
+# -------------------------------------------
+
+# Créer un paquet distributable
+dist:
+	@mkdir -p dist
+	cp $(TARGET) dist/
+	@echo "✓ Paquet créé dans dist/"
+
+# Installer dans /usr/local/bin
+install:
+	@mkdir -p /usr/local/bin
+	cp $(TARGET) /usr/local/bin/$(PROJECT)
+	chmod +x /usr/local/bin/$(PROJECT)
+	@echo "✓ Installé dans /usr/local/bin/"
+
+# Désinstaller
+uninstall:
+	rm -f /usr/local/bin/$(PROJECT)
+	@echo "✓ Désinstallé"
+
+# -------------------------------------------
+# Aide
+# -------------------------------------------
+
+help:
+	@echo "Makefile pour $(PROJECT) avec Retro68"
+	@echo ""
+	@echo "Cibles principales:"
+	@echo "  make              - Compiler l'application (par défaut)"
+	@echo "  make clean        - Nettoyer les fichiers de build"
+	@echo "  make cleanall    - Nettoyage complet"
+	@echo ""
+	@echo "Cibles d'architecture:"
+	@echo "  make target_68000 - Compiler pour 68000"
+	@echo "  make target_68020 - Compiler pour 68020"
+	@echo "  make target_68030 - Compiler pour 68030"
+	@echo "  make target_68040 - Compiler pour 68040 (recommandé)"
+	@echo ""
+	@echo "Cibles d'optimisation:"
+	@echo "  make target_release     - Avec optimisation (-O2)"
+	@echo "  make target_debug      - Avec debug complet (-g -O0)"
+	@echo "  make target_production - Sans debug (-O2)"
+	@echo ""
+	@echo "Cibles avec ressources:"
+	@echo "  make resources          - Compiler les ressources (.r -> .rsrc)"
+	@echo "  make target_with_resources - Compiler avec ressources"
+	@echo ""
+	@echo "Cibles utilitaires:"
+	@echo "  make check_retro68     - Vérifier l'installation de Retro68"
+	@echo "  make check_tools       - Vérifier tous les outils nécessaires"
+	@echo "  make show_config       - Afficher la configuration"
+	@echo "  make dist             - Créer un paquet distributable"
+	@echo "  make install          - Installer dans /usr/local/bin"
+	@echo "  make uninstall        - Désinstaller"
+	@echo "  make help             - Afficher cette aide"
+	@echo ""
+	@echo "Exemples:"
+	@echo "  make                                    # Compiler avec 68040"
+	@echo "  make target_68040                      # Compiler pour 68040"
+	@echo "  make CFLAGS=\"-g -O0 -m68020\"           # Compiler pour 68020 avec debug"
+	@echo "  RETRO68=/chemin/vers/Retro68 make      # Utiliser un Retro68 spécifique"
+
+# -------------------------------------------
+# Cibles spéciales pour le debugging
+# -------------------------------------------
+
+# Compiler avec des options spécifiques pour GDB
+target_gdb: CFLAGS += -g -O0
+	target_gdb: $(TARGET)
+	@echo "✓ Compilé avec options GDB: $(TARGET)"
+	@echo "  Pour debugger:"
+	@echo "  1. qemu-system-ppc -gdb tcp::1234 -S ..."
+	@echo "  2. gdb-multiarch"
+	@echo "  3. (gdb) target remote localhost:1234"
+	@echo "  4. (gdb) file $(TARGET)"
+
+# Compiler avec des symboles étendus
+target_gdb_extended: CFLAGS += -g -O0 -DDEBUG=1
+	target_gdb_extended: $(TARGET)
+
+# -------------------------------------------
+# Cibles pour différentes configurations de test
+# -------------------------------------------
+
+# Compiler pour test GDB uniquement
+test_gdb: CFLAGS += -g -O0 -DTEST_GDB=1
+	test_gdb: $(TARGET)
+
+# Compiler pour test ICMP uniquement
+test_icmp: CFLAGS += -g -O0 -DTEST_ICMP=1
+	test_icmp: $(TARGET)
+
+# Compiler pour test complet
+test_full: CFLAGS += -g -O0 -DTEST_GDB=1 -DTEST_ICMP=1
+	test_full: $(TARGET)
+
+# -------------------------------------------
+# Configuration personnalisée
+# -------------------------------------------
+
+# Vous pouvez surcharger les variables en ligne de commande:
+# make CFLAGS="-g -O0 -m68030"
+# make RETRO68=/chemin/vers/mon/Retro68
+# make BUILD_DIR=/tmp/build
+
+# -------------------------------------------
+# Cibles PHONY (pour éviter les conflits de fichiers)
+# -------------------------------------------
+
+.PHONY: all clean cleanall target_68000 target_68020 target_68030 target_68040
+.PHONY: target_release target_debug target_production target_with_resources
+.PHONY: resources check_retro68 check_tools show_config help
+.PHONY: dist install uninstall target_gdb target_gdb_extended
+.PHONY: test_gdb test_icmp test_full
+
+# -------------------------------------------
+# Fin du Makefile
+# -------------------------------------------
+
+# Note: Ce Makefile est spécialement conçu pour Retro68 et Mac OS classique
+# Pour plus d'informations: https://github.com/automatedjdw/Retro68

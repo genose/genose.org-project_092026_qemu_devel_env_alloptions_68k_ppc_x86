@@ -1,0 +1,22 @@
+# Ignorer les fichiers binaires volumineux
+*.ISO
+*.iso
+*.img
+*.qcow2
+*.raw
+
+# Ignorer le dossier MacROMan (contient .git interne)
+resources/roms/MacROMan/.git
+resources/roms/MacROMan/*.xcodeproj
+resources/roms/MacROMan/*.icns
+resources/roms/MacROMan/*.png
+resources/roms/MacROMan/DMG Canvas/
+
+# Ignorer les fichiers temporaires
+*.swp
+*~
+.DS_Store
+
+# Ignorer les fichiers de build
+*.o
+*.exe
