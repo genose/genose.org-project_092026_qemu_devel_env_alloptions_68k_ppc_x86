@@ -4,6 +4,10 @@ Custom QEMU build and VM-assist launcher for retro programming.
 
 **Supported target architectures:** Motorola 68k · PowerPC (32/64-bit) · x86 / x86_64 · SPARC / SPARC64
 
+On x86 hosts, the build script now auto-enables **all** `qemu-system-*` targets
+found in the QEMU source tree, while forcing a Westmere/X5690-safe host build
+profile with **no AVX / AVX2** code generation.
+
 **Supported guest platforms:**
 - Apple MacOS 7.1 – 9.2.2 (68k and PowerPC, Old World & New World)
 - Atari ST / STE / TT / Falcon (68k)
@@ -45,6 +49,9 @@ vm-configs/
 
 `build_qemu.sh` configures and builds QEMU with all retro-relevant targets
 enabled (`m68k`, `ppc`, `ppc64`, `i386`, `x86_64`, `sparc`, `sparc64`).
+When run on an x86 host, it expands the softmmu target list to every
+available `qemu-system-*` target and adds `-march=x86-64 -mtune=westmere
+-mno-avx -mno-avx2` to the host compiler flags by default.
 
 The QEMU 9.2.0 sources are included in this repository as a **git submodule**
 (`qemu-9.2.0/`).  When cloning, initialise the submodule first:
@@ -80,6 +87,7 @@ bash build_qemu.sh install
 |---|---|---|
 | `QEMU_VERSION` | `9.2.0` | QEMU version to build |
 | `QEMU_INSTALL_PREFIX` | `~/.local/qemu-retro` | Installation prefix |
+| `QEMU_X86_COMPAT_CFLAGS` | `-march=x86-64 -mtune=westmere -mno-avx -mno-avx2` | Extra host C/C++ flags automatically applied on x86 hosts |
 | `JOBS` | `nproc` | Parallel build jobs |
 
 After installation, add the binary directory to your `PATH`:
