@@ -5,8 +5,11 @@
 - Local path: `/home/runner/work/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86`
 
 ## Current Task Snapshot
-- Request: add and use `.github/copilot-instructions.md`.
-- Status: file created with full project conventions, build system notes, platform table, and "what to avoid" rules.
+- Request: resolve conflicts between branch `copilot/pr-2-review-feedback` and `origin/main`.
+- Status: conflicts resolved and committed.
+  - `build_qemu.sh`: two conflict regions resolved (SPICE comment + macOS/Fedora dep hints — kept correct package names `spice-gtk` / `spice-server-devel`).
+  - `COPILOT-CONTEXT.MD`: kept branch version (main had deleted it).
+  - `vm_assist.sh` / `README.md`: merged cleanly; branch versions retained (SPICE deps, shellcheck directive, safer printf).
 
 ## Project Snapshot
 - Purpose: custom QEMU retro development environment with build and VM-assist tooling.
