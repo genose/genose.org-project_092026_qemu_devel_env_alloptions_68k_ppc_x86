@@ -367,7 +367,7 @@ Netatalk/AFP or similar network services remain the preferred file-exchange path
 
 ## 5. Disk image management
 
-`vm_assist.sh` includes a built-in image management menu (option 11 or
+`vm_assist.sh` includes a built-in image management menu (option 12 or
 `bash vm_assist.sh images`), providing:
 
 - Create new blank qcow2 image
