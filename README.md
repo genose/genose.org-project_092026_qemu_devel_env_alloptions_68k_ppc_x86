@@ -143,7 +143,6 @@ bash vm_assist.sh images
 ```bash
 qemu-system-m68k -machine q800 -cpu m68040 -m 128 \
   -display sdl -audiodev sdl,id=snd0 \
-  -device nubus-macfb \
   -nic user,model=dp83932 \
   -rtc base=localtime \
   -hda ~/vm-images/macos-68k/macos-hdd.qcow2

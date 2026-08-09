@@ -27,6 +27,7 @@ DEFAULT_RAM_MB="${DEFAULT_RAM_MB:-256}"
 DEFAULT_DISPLAY="${DEFAULT_DISPLAY:-sdl}"
 VNC_PORT="${VNC_PORT:-5900}"
 DEFAULT_GDB_BRIDGE_PORT="${DEFAULT_GDB_BRIDGE_PORT:-2345}"
+DEFAULT_GDB_GUEST_PORT="${DEFAULT_GDB_GUEST_PORT:-2345}"
 DEFAULT_QEMU_GDB_PORT="${DEFAULT_QEMU_GDB_PORT:-1234}"
 DEFAULT_TLS_PROXY_HOST="${DEFAULT_TLS_PROXY_HOST:-10.0.2.2}"
 DEFAULT_TLS_PROXY_PORT="${DEFAULT_TLS_PROXY_PORT:-8443}"
@@ -258,7 +259,7 @@ ask_gdb_bridge_forward() {
 
     local host_port guest_port
     host_port=$(ask "Host TCP port for the GDB bridge" "${default_port}")
-    guest_port=$(ask "Guest TCP port for gdbserver" "${default_port}")
+    guest_port=$(ask "Guest TCP port for gdbserver" "${DEFAULT_GDB_GUEST_PORT}")
     echo "${host_port}:${guest_port}"
 }
 
@@ -371,7 +372,6 @@ launch_macos_68k() {
         -m "${ram}"
         -cpu "${cpu}"
         "${dflags[@]}"
-        -device nubus-macfb
         "${netflags[@]}"
         -rtc base=localtime
         "${dbgflags[@]}"
@@ -491,6 +491,10 @@ launch_atari() {
         log "Hatari found — launching Hatari for best Atari compatibility."
         local disk
         disk=$(pick_image "atari")
+        if [[ -z "${disk}" ]]; then
+            warn "No Atari disk or harddrive path selected; skipping Hatari launch."
+            return
+        fi
         local tos_img
         tos_img=$(ask "Path to TOS ROM image" "${VM_IMAGE_DIR}/atari/tos.img")
         hatari --tos "${tos_img}" --harddrive "$(dirname "${disk}")" &
