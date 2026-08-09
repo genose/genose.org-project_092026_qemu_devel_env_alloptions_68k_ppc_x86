@@ -78,8 +78,8 @@ list_all_softmmu_targets() {
     local targets_dir="${QEMU_SRC_DIR}/configs/targets"
     [[ -d "${targets_dir}" ]] || return 1
 
-    find "${targets_dir}" -maxdepth 1 -type f -name '*-softmmu.mak' -printf '%f\n' \
-        | sed 's/\.mak$//' \
+    find "${targets_dir}" -maxdepth 1 -type f -name '*-softmmu.mak' \
+        -exec sh -c 'for path do basename "$path" .mak; done' sh {} + \
         | sort
 }
 
@@ -251,7 +251,7 @@ Usage: $(basename "$0") [COMMAND]
 Commands:
   download    Download and extract QEMU ${QEMU_VERSION} source (no-op if submodule present)
   patch       Apply upstream backport patches from ${PATCHES_DIR}
-  configure   Run ./configure with retro-target flags
+  configure   Run ./configure with target-selection flags
   build       Compile QEMU
   install     Install QEMU to ${QEMU_INSTALL_PREFIX}
   all         download → patch → configure → build → install  (default)
