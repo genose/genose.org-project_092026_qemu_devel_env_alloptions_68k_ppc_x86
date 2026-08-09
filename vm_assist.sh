@@ -274,6 +274,16 @@ qemu_gdb_flags() {
     fi
 }
 
+ask_m68k_cpu() {
+    local default_cpu="${1:-m68040}"
+    ask "68k CPU (m68000/m68010/m68020/m68030/m68040/m68060)" "${default_cpu}"
+}
+
+ask_ppc_cpu() {
+    local default_cpu="${1:-7455}"
+    ask "PowerPC CPU (601/604/7455/G4)" "${default_cpu}"
+}
+
 prepare_macos_integration() {
     local share_dir="$1" afp_endpoint="$2" tls_endpoint="$3"
     local shared_dir clipboard_dir
@@ -319,6 +329,8 @@ launch_macos_68k() {
 
     local ram
     ram=$(ask "RAM in MiB" "128")
+    local cpu
+    cpu=$(ask_m68k_cpu "m68040")
     local disk
     disk=$(pick_image "macos-68k")
     local cdrom
@@ -346,7 +358,7 @@ launch_macos_68k() {
         "${qemu}"
         -machine q800
         -m "${ram}"
-        -cpu m68040
+        -cpu "${cpu}"
         "${dflags[@]}"
         -device nubus-macfb
         "${netflags[@]}"
@@ -386,6 +398,8 @@ launch_macos_ppc() {
 
     local ram
     ram=$(ask "RAM in MiB" "${DEFAULT_RAM_MB}")
+    local cpu
+    cpu=$(ask_ppc_cpu "7455")
     local disk
     disk=$(pick_image "macos-ppc")
     local cdrom
@@ -416,7 +430,7 @@ launch_macos_ppc() {
         "${qemu}"
         -machine mac99,via=pmu
         -m "${ram}"
-        -cpu G4
+        -cpu "${cpu}"
         "${dflags[@]}"
         -device VGA,vgamem_mb=16
         -device usb-kbd
@@ -470,6 +484,8 @@ launch_atari() {
 
     local ram
     ram=$(ask "RAM in MiB (max 14 for ST, 128 for TT/Falcon)" "14")
+    local cpu
+    cpu=$(ask_m68k_cpu "m68040")
     local disk
     disk=$(pick_image "atari")
     local display
@@ -481,7 +497,7 @@ launch_atari() {
         "${qemu}"
         -machine virt
         -m "${ram}"
-        -cpu m68040
+        -cpu "${cpu}"
         "${dflags[@]}"
         -nic user
         -rtc base=localtime
@@ -524,6 +540,8 @@ launch_amiga() {
 
     local ram
     ram=$(ask "RAM in MiB" "128")
+    local cpu
+    cpu=$(ask_m68k_cpu "m68040")
     local disk
     disk=$(pick_image "amiga-aros")
     local display
@@ -535,7 +553,7 @@ launch_amiga() {
         "${qemu}"
         -machine virt
         -m "${ram}"
-        -cpu m68040
+        -cpu "${cpu}"
         "${dflags[@]}"
         -nic user
         -rtc base=localtime

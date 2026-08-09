@@ -137,6 +137,8 @@ bash vm_assist.sh images
 - Requires a MacOS 68k hard disk image (or installation CD-ROM).
 - `vm_assist.sh` can prepare dual-display, clipboard exchange, `/tmp/volatile_hd`
   host-share notes, Netatalk/AFP and TLS proxy endpoints, and guest GDB bridging.
+- The launcher now lets you pick across the common 68k family CPU models
+  (`m68000` → `m68060`) when you need a different target profile.
 
 ```bash
 qemu-system-m68k -machine q800 -cpu m68040 -m 128 \
@@ -151,6 +153,7 @@ qemu-system-m68k -machine q800 -cpu m68040 -m 128 \
 
 - **QEMU machine:** `mac99,via=pmu` (PowerMac G3/G4)
 - Uses OpenBIOS by default; Old World ROMs require a physical ROM dump.
+- The launcher now exposes `601`, `604`, and `7455` (`G4`) CPU selections.
 - `vm-configs/macos-ppc.env` documents the default host integration endpoints:
   AFP/Netatalk on `10.0.2.2:548`, TLS proxy on `10.0.2.2:8443`,
   clipboard exchange via `/tmp/volatile_hd/clipboard`, and host-side setup notes
@@ -186,6 +189,9 @@ QEMU does not emulate Amiga custom chips. Two options are supported:
 
 1. **AROS** (open-source AmigaOS-compatible) via `qemu-system-m68k`
 2. **FS-UAE** (`sudo apt install fs-uae`) — most accurate, requires Kickstart ROMs
+
+The QEMU-backed 68k launchers now expose the common CPU family options from
+`m68000` through `m68060`.
 
 ```bash
 # AROS via QEMU
