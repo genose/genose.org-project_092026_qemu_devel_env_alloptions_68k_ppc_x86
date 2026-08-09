@@ -79,7 +79,7 @@ list_all_softmmu_targets() {
     [[ -d "${targets_dir}" ]] || return 1
 
     find "${targets_dir}" -maxdepth 1 -type f -name '*-softmmu.mak' \
-        -exec sh -c 'for path do basename "$path" .mak; done' sh {} + \
+        -exec sh -c 'for file_path in "$@"; do basename "$file_path" .mak; done' sh {} + \
         | sort
 }
 
