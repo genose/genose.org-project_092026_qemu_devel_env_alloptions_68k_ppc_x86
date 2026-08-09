@@ -152,7 +152,12 @@ pick_image() {
 
     local choice
     choice=$(ask "Select image number" "1")
-    echo "${images[$((choice - 1))]}"
+    if [[ ! "${choice}" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#images[@]} )); then
+        warn "Invalid image selection '${choice}'"
+        echo ""
+    else
+        echo "${images[$((choice - 1))]}"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -186,6 +191,9 @@ pick_cdrom() {
     local choice
     choice=$(ask "Select ISO number" "0")
     if [[ "${choice}" == "0" || -z "${choice}" ]]; then
+        echo ""
+    elif [[ ! "${choice}" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#isos[@]} )); then
+        warn "Invalid ISO selection '${choice}'"
         echo ""
     else
         echo "${isos[$((choice - 1))]}"
@@ -275,12 +283,12 @@ qemu_gdb_flags() {
 
 ask_m68k_cpu() {
     local default_cpu="${1:-m68040}"
-    ask "68k CPU (m68000/m68010/m68020/m68030/m68040/m68060)" "${default_cpu}"
+    ask "68k CPU (m68000/m68010/m68020/m68030/m68040)" "${default_cpu}"
 }
 
 ask_ppc_cpu() {
     local default_cpu="${1:-7455}"
-    ask "PowerPC CPU (601/604/7455/G4)" "${default_cpu}"
+    ask "PowerPC CPU (601/604/7455)" "${default_cpu}"
 }
 
 prepare_macos_integration() {
@@ -344,11 +352,15 @@ launch_macos_68k() {
     afp_endpoint=$(ask "Netatalk/AFP endpoint for the guest" "${DEFAULT_AFP_HOST}:${DEFAULT_AFP_PORT}")
     local tls_proxy
     tls_proxy=$(ask "TLS proxy endpoint for the guest" "${DEFAULT_TLS_PROXY_HOST}:${DEFAULT_TLS_PROXY_PORT}")
+    local port_forwards
+    port_forwards=$(ask_port_forwards "")
     local gdb_forward
     gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
+    local combined_forwards
+    combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
 
     local -a dflags; display_flags dflags "${display}"
-    local -a netflags; append_user_network netflags "dp83932" "${gdb_forward}"
+    local -a netflags; append_user_network netflags "dp83932" "${combined_forwards}"
     local -a dbgflags; qemu_gdb_flags dbgflags
 
     prepare_macos_integration "${shared_dir}" "${afp_endpoint}" "${tls_proxy}"
@@ -413,14 +425,18 @@ launch_macos_ppc() {
     afp_endpoint=$(ask "Netatalk/AFP endpoint for the guest" "${DEFAULT_AFP_HOST}:${DEFAULT_AFP_PORT}")
     local tls_proxy
     tls_proxy=$(ask "TLS proxy endpoint for the guest" "${DEFAULT_TLS_PROXY_HOST}:${DEFAULT_TLS_PROXY_PORT}")
+    local port_forwards
+    port_forwards=$(ask_port_forwards "")
     local gdb_forward
     gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
+    local combined_forwards
+    combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
 
     local prom_file
     prom_file=$(ask "Path to ROM/BIOS file (leave blank for OpenBIOS)" "")
 
     local -a dflags; display_flags dflags "${display}"
-    local -a netflags; append_user_network netflags "sungem" "${gdb_forward}"
+    local -a netflags; append_user_network netflags "sungem" "${combined_forwards}"
     local -a dbgflags; qemu_gdb_flags dbgflags
 
     prepare_macos_integration "${shared_dir}" "${afp_endpoint}" "${tls_proxy}"
@@ -743,7 +759,6 @@ launch_solaris_sparc() {
         -cpu "TI UltraSparc IIi"
         -m "${ram}"
         "${dflags[@]}"
-        -device VGA,vgamem_mb=16
         "${netflags[@]}"
         -rtc base=localtime
         "${dbgflags[@]}"
