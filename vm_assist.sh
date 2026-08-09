@@ -130,12 +130,12 @@ pick_image() {
         warn "No disk images found in ${dir}"
         local create
         create=$(ask "Create a new blank 2 GiB image? (yes/no)" "yes")
-        if [[ "${create}" == "yes" ]]; then
+        if is_yes "${create}"; then
             local imgname
             imgname=$(ask "Image filename" "${platform}-disk.qcow2")
             local size
             size=$(ask "Image size (e.g. 512M, 2G)" "2G")
-            $(qemu_img_bin) create -f qcow2 "${dir}/${imgname}" "${size}"
+            "$(qemu_img_bin)" create -f qcow2 "${dir}/${imgname}" "${size}"
             echo "${dir}/${imgname}"
         else
             echo ""
@@ -216,9 +216,8 @@ append_user_network() {
     fi
 
     if [[ -n "${forwards}" ]]; then
-        local IFS=','
         local pair host guest
-        read -r -a pairs <<<"${forwards}"
+        IFS=',' read -r -a pairs <<<"${forwards}"
         for pair in "${pairs[@]}"; do
             pair=$(trim_spaces "${pair}")
             [[ -z "${pair}" ]] && continue
@@ -626,7 +625,7 @@ launch_haiku() {
         "${dbgflags[@]}"
     )
 
-    if [[ "${kvm}" == "yes" ]] && [[ -e /dev/kvm ]]; then
+    if is_yes "${kvm}" && [[ -e /dev/kvm ]]; then
         cmd+=(-enable-kvm -cpu host)
     else
         cmd+=(-cpu qemu64)
