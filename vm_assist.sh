@@ -44,7 +44,6 @@ C_CYAN='\033[1;36m'
 C_GREEN='\033[1;32m'
 C_YELLOW='\033[1;33m'
 C_RED='\033[1;31m'
-C_MAGENTA='\033[1;35m'
 
 log()     { printf "${C_GREEN}[vm_assist]${C_RESET} %s\n" "$*"; }
 warn()    { printf "${C_YELLOW}[vm_assist] WARN:${C_RESET} %s\n" "$*" >&2; }
@@ -76,7 +75,7 @@ qemu_img_bin() {
 # ---------------------------------------------------------------------------
 ask() {
     local prompt="$1" default="$2" answer
-    read -rp "$(printf "${C_BOLD}${prompt}${C_RESET} [${default}]: ")" answer
+    read -rp "$(printf '%b%s%b [%s]: ' "${C_BOLD}" "${prompt}" "${C_RESET}" "${default}")" answer
     echo "${answer:-${default}}"
 }
 
@@ -1323,7 +1322,7 @@ manage_images() {
 main_menu() {
     while true; do
         clear
-        printf "${C_CYAN}${C_BOLD}"
+        printf '%b%b' "${C_CYAN}" "${C_BOLD}"
         cat <<'BANNER'
   ██████  ███████ ████████ ██████   ██████      ██████  ███████ ████████ ██████   ██████
  ██    ██ ██         ██    ██   ██ ██    ██     ██    ██ ██         ██    ██   ██ ██    ██
@@ -1331,8 +1330,8 @@ main_menu() {
  ██    ██ ██         ██    ██   ██ ██    ██     ██   ██ ██         ██    ██   ██ ██    ██
   ██████  ███████    ██    ██   ██  ██████      ██   ██ ███████    ██    ██   ██  ██████
 BANNER
-        printf "${C_RESET}"
-        printf "\n${C_BOLD}  VM-Assist — Retro QEMU Launcher${C_RESET}\n"
+        printf '%b' "${C_RESET}"
+        printf '\n%b  VM-Assist — Retro QEMU Launcher%b\n' "${C_BOLD}" "${C_RESET}"
         printf "  QEMU prefix : %s\n"  "${QEMU_PREFIX}"
         printf "  Images dir  : %s\n"  "${VM_IMAGE_DIR}"
         printf "  Shared dir  : %s\n\n" "${VM_SHARED_DIR}"
