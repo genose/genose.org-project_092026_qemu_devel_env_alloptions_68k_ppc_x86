@@ -1,551 +1,396 @@
-# VM Assistant - Environnement de développement rétro complet
+# VM Assistant - Gestion Complete de Machines Virtuelles pour macOS
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Platform: macOS](https://img.shields.io/badge/Platform-macOS-blue.svg)](https://apple.com)
-[![QEMU: Supported](https://img.shields.io/badge/QEMU-Supported-green.svg)](https://qemu.org)
+## Description
 
-**VM Assistant** est un outil complet pour créer, gérer et configurer des machines virtuelles QEMU/UTM avec toutes les options nécessaires pour un environnement de développement logiciel rétro.
+**VM Assistant** est un ensemble de scripts bash conçus pour faciliter la gestion complete de machines virtuelles sur macOS. Il offre une interface utilisateur interactive pour:
 
-## 🎯 Fonctionnalités
+- Gérer les dépendances avec MacPorts
+- Configurer XQuartz pour l'affichage X11
+- Utiliser le RAMDISK existant `/tmp/volatile_hd` pour le partage
+- Configurer plusieurs écrans
+- Gérer l'accès réseau et internet
+- Créer et gérer des volumes de démarrage (.img)
+- Choisir et gérer les ISOs d'installation
+- Configurer différentes architectures: 68k, G4, 601, i86, X86_64
+- Activer le copier/coller entre VM et HOST
+- Activer le glisser-déposer entre VM et HOST
+- Configurer le debugging GDB d'applications de la VM vers HOST
 
-### ✅ Fonctionnalités implémentées
+## Architecture
 
-| Catégorie | Fonctionnalité | Statut |
-|-----------|---------------|--------|
-| **Création** | Création de VM QEMU et UTM | ✅ |
-| **Architectures** | PowerPC (G4, 604ev, 604, 601, 750), 68k, x86_64, ARM | ✅ |
-| **Multi-écrans** | Dual-PCI VGA, Graphic Engine, Auto-détection | ✅ |
-| **Stockage** | Disques qcow2, CDROM, création automatique | ✅ |
-| **Réseau** | NAT, User, Bridged, Déconnecté | ✅ |
-| **Partage** | Dossiers partagés via virtio-9p | ✅ |
-| **ROMs** | Support de 100+ ROMs Macintosh | ✅ |
-| **GDB** | Debugging distant avec GDB | ✅ NEW |
-| **SSH** | Accès SSH à la VM | ✅ NEW |
-| **Netatalk** | Partage AppleShare (Apple Filing Protocol) | ✅ NEW |
-| **Menu interactif** | Interface complète | ✅ |
+Le VM Assistant est compose de plusieurs modules:
 
-### 🚧 En développement
+1. **vm-assistant-main.sh** - Interface principale avec menus interactifs
+2. **vm-assistant-vm.sh** - Gestion des machines virtuelles (creation, demarrage, arret)
+3. **vm-assistant-macports.sh** - Gestion de MacPorts et des dependances
+4. **vm-assistant-network.sh** - Configuration reseau (Samba, Netatalk, XQuartz, RAMDISK)
 
-- Intégration CodeWarrior
-- Templates de VM pour différents OS
-- Support Docker pour l'environnement
-- Interface graphique (futur)
-
-## 📋 Table des matières
-
-- [Installation](#-installation)
-- [Utilisation rapide](#-utilisation-rapide)
-- [Configuration détaillée](#-configuration-détaillée)
-- [Debugging avec GDB](#-debugging-avec-gdb)
-- [Accès SSH](#-accès-ssh)
-- [Partage AppleShare](#-partage-appleshare)
-- [Collection de ROMs](#-collection-de-roms)
-- [Exemples](#-exemples)
-- [Problèmes connus](#-problèmes-connus)
-- [Contribution](#-contribution)
-- [Licence](#-licence)
-
----
-
-## 📥 Installation
+## Installation
 
 ### Prérequis
 
-#### macOS
-- **QEMU** : `brew install qemu` ou via MacPorts
-- **MacPorts** : Optionnel, pour les dépendances supplémentaires
-- **Homebrew** : Optionnel, pour les outils réseau
-- **UTM.app** : Optionnel, pour les VMs graphiques (https://mac.getutm.app/)
-- **XQuartz** : Optionnel, pour l'affichage graphique
+1. **macOS** (teste sur macOS 10.15+)
+2. **Bash** (inclus par defaut)
+3. **Droits administrateur** (pour l'installation)
 
-#### Linux
-- **QEMU** : `sudo apt install qemu qemu-system-ppc qemu-system-x86_64`
-- **Netatalk** : `sudo apt install netatalk`
+### Etapes d'installation
 
-#### Outils recommandés
+1. Telechargez tous les fichiers du projet
+2. Executez le script d'installation:
+
 ```bash
-# Sur macOS avec Homebrew
-brew install qemu netatalk samba
+# Se placer dans le repertoire contenant les scripts
+cd /tmp
 
-# Sur macOS avec MacPorts
-sudo port install qemu netatalk samba
+# Rendre le script d'installation executable
+chmod +x install-vm-assistant.sh
+
+# Executer l'installation (requiert sudo)
+sudo ./install-vm-assistant.sh
 ```
 
-### Installation de VM Assistant
+### Installation manuelle
+
+Si vous ne voulez pas utiliser le script d'installation, vous pouvez:
 
 ```bash
-# Cloner ou copier le repository
-git clone /path/to/vm-assistant.git
-cd vm-assistant
+# Copier les scripts dans /usr/local/bin
+sudo cp /tmp/vm-assistant-*.sh /usr/local/bin/
 
-# Rendre les scripts exécutables
-chmod +x vm-assistant-*.sh
+# Les rendre executables
+sudo chmod +x /usr/local/bin/vm-assistant-*.sh
 
-# Initialiser l'environnement
-./vm-assistant-vm.sh menu
+# Creer un alias pour le script principal
+sudo ln -s /usr/local/bin/vm-assistant-main.sh /usr/local/bin/vm-assistant
 ```
 
-## 🚀 Utilisation rapide
+## Configuration Initiale
 
-### Démarrer le menu interactif
+Avant de pouvoir utiliser le VM Assistant, vous devez:
+
+1. **Installer MacPorts**:
+   ```bash
+   vm-assistant-macports.sh install
+   ```
+   Ou telechargez depuis https://www.macports.org
+
+2. **Installer XQuartz**:
+   Telechargez depuis https://www.xquartz.org
+
+3. **Installer les dependances**:
+   ```bash
+   vm-assistant-macports.sh install-deps
+   ```
+
+4. **Configurer XQuartz et le RAMDISK**:
+   ```bash
+   vm-assistant-network.sh xquartz
+   vm-assistant-network.sh ramdisk
+   ```
+
+## Utilisation
+
+### Demarrage de l'interface principale
+
 ```bash
-./vm-assistant-vm.sh menu
+vm-assistant
 ```
 
-### Commandes directes
+Cela lancera le menu interactif principal.
+
+### Commandes individuelles
+
+#### Gestion de MacPorts
 
 ```bash
-# Créer une VM
-./vm-assistant-vm.sh create ma_vm
+# Verifier l'installation
+vm-assistant-macports.sh verify
 
-# Démarrer une VM
-./vm-assistant-vm.sh start ma_vm
+# Installer MacPorts
+vm-assistant-macports.sh install
 
-# Éditer une VM
-./vm-assistant-vm.sh edit ma_vm
+# Mettre a jour MacPorts
+vm-assistant-macports.sh update
 
+# Installer toutes les dependances pour les VMs
+vm-assistant-macports.sh install-deps
+```
+
+#### Configuration Reseau
+
+```bash
+# Configurer Samba
+vm-assistant-network.sh samba
+
+# Configurer Netatalk (AFP)
+vm-assistant-network.sh netatalk
+
+# Lister les partages configures
+vm-assistant-network.sh shares
+
+# Configurer XQuartz
+vm-assistant-network.sh xquartz
+
+# Configurer le RAMDISK
+vm-assistant-network.sh ramdisk
+
+# Configurer tout
+vm-assistant-network.sh all
+```
+
+#### Gestion des VMs
+
+```bash
 # Lister les VMs
-./vm-assistant-vm.sh list
+vm-assistant-vm.sh list
 
-# Arrêter une VM
-./vm-assistant-vm.sh stop ma_vm
+# Creer une nouvelle VM
+vm-assistant-vm.sh create
+
+# Demarrer une VM
+vm-assistant-vm.sh start [nom_vm]
+
+# Arreter une VM
+vm-assistant-vm.sh stop [nom_vm]
 
 # Supprimer une VM
-./vm-assistant-vm.sh delete ma_vm
+vm-assistant-vm.sh delete [nom_vm]
+
+# Inserer un ISO
+vm-assistant-vm.sh insert-iso [nom_vm]
+
+# Ejecter un ISO
+vm-assistant-vm.sh eject-iso [nom_vm]
+
+# Lister les disques
+vm-assistant-vm.sh disks
+
+# Creer un disque
+vm-assistant-vm.sh create-disk
+
+# Lister les ISOs
+vm-assistant-vm.sh isos
+
+# Telecharger un ISO
+vm-assistant-vm.sh download-iso
 ```
 
----
+## Fonctionnalités Detaillees
 
-## ⚙️ Configuration détaillée
+### Creation d'une VM
 
-### Structure des fichiers
+La creation d'une VM vous permet de configurer:
 
-```
-~/.vm-assistant/
-├── vms/                          # Configurations des VMs
-│   └── nom_vm/
-│       ├── config               # Fichier de configuration
-│       ├── start.sh             # Script de démarrage généré
-│       └── pid                  # PID du processus QEMU
-├── disks/                       # Disques virtuels
-│   └── nom_disque.qcow2
-└── isos/                        # Fichiers ISO
-    └── nom_iso.iso
+- **Architecture**: 68k, G4, 601, i86, X86_64
+- **Ressources**: RAM, CPU
+- **Stockage**: Taille du disque, format (qcow2, raw, vmdk)
+- **Reseau**: NAT, User, Aucun
+- **Affichage**: X11 (XQuartz), SPICE
+- **Options avancees**:
+  - Clipboard partage (necessite SPICE)
+  - Drag & drop (necessite SPICE)
+  - Debugging GDB
+  - Nombre d'ecrans
+- **Boot**: ISO, disque dur, ou les deux
 
-/tmp/volatile_hd/vm-assistant/
-├── vm-assistant-vm.sh          # Script principal
-├── vm-assistant-macports.sh    # Gestion MacPorts
-├── vm-assistant-network.sh     # Gestion réseau/Samba
-├── resources/
-│   ├── scripts/                 # Copies des scripts
-│   ├── isos/                    # ISO files
-│   └── roms/MacROMan/           # Collection de ROMs
-└── README.md                    # Ce fichier
-```
+### Gestion des ISOs
 
-### Fichier de configuration
+- Telechargement d'ISOs preconfigures (Debian, Ubuntu, Arch Linux)
+- Telechargement depuis une URL personnalisee
+- Insertion et ejection d'ISOs dans les VMs
 
-Un fichier `config` typique :
+### Gestion des Disques
 
-```bash
+- Creation de disques virtuels (.qcow2, .raw, .vmdk)
+- Attachement de disques existants
+- Liste des disques disponibles
+
+### Configuration Reseau
+
+#### Samba
+- Partage des repertoires via SMB
+- Configuration automatic pour les VMs
+- Acces depuis l'hote et d'autres machines du reseau
+
+#### Netatalk (AFP)
+- Partage via le protocol Apple Filing Protocol
+- Compatible avec macOS
+- Configuration pour les repertoires du VM Assistant
+
+#### XQuartz
+- Configuration pour l'affichage X11
+- Permet l'affichage des VMs via X11
+- Configuration des permissions
+
+#### RAMDISK
+- Utilisation de `/tmp/volatile_hd` pour le partage
+- Configuration des permissions
+- Accessible par toutes les VMs
+
+### Fonctionnalités Avancees
+
+#### Clipboard Partage
+
+Pour activer le clipboard partage:
+
+1. Configurez votre VM pour utiliser SPICE
+2. Installez `spice-vdagent` dans la VM:
+   - Debian/Ubuntu: `sudo apt install spice-vdagent`
+   - Fedora: `sudo dnf install spice-vdagent`
+3. Connectez-vous avec: `spicy -h 127.0.0.1 -p <port>`
+
+#### Drag & Drop
+
+Le drag & drop fonctionne automatiquement avec SPICE une fois que:
+
+1. La VM utilise SPICE comme affichage
+2. `spice-vdagent` est installe dans la VM
+
+#### Multi-Ecrans
+
+Pour configurer plusieurs ecrans:
+
+1. Dans la creation de la VM, selectionnez SPICE comme affichage
+2. Specifiez le nombre d'ecrans souhaite (jusqu'a 4)
+3. Connectez-vous avec `spicy`
+
+#### Debugging GDB
+
+Pour debugger une application dans une VM depuis l'hote:
+
+1. Activez le debugging GDB dans la configuration de la VM
+2. Demarrez la VM
+3. Dans la VM, installez `gdbserver`:
+   - Debian/Ubuntu: `sudo apt install gdbserver`
+   - RHEL/CentOS: `sudo yum install gdbserver`
+   - Fedora: `sudo dnf install gdbserver`
+4. Dans la VM, lancez votre application avec gdbserver:
+   ```bash
+   gdbserver :1234 /chemin/vers/votre/application
+   ```
+5. Sur l'hote, connectez GDB:
+   ```bash
+   gdb /chemin/vers/votre/application
+   (gdb) target remote localhost:1234
+   (gdb) continue
+   ```
+
+## Repertoires de Configuration
+
+Tous les fichiers de configuration et donnees sont stockes dans:
+
+- `~/.vm-assistant/` - Repertoire principal de configuration
+- `~/.vm-assistant/vms/` - Configuration des VMs
+- `~/.vm-assistant/isos/` - ISOs telecharges
+- `~/.vm-assistant/disks/` - Disques virtuels
+- `~/.vm-assistant/logs/` - Journaux
+- `/tmp/volatile_hd/` - RAMDISK partage
+
+## Configuration des VMs
+
+Chaque VM a un fichier de configuration dans `~/.vm-assistant/vms/[nom_vm]/config` avec les parametres suivants:
+
+```ini
 # Architecture
-arch=G4
-machine=mac99
-cpu_type=7455
+arch=X86_64
+machine=q35
+cpu_type=host
 
 # Ressources
-ram=768
-cpu=1
+ram=2048
+cpu=2
 
 # Stockage
-disk=/chemin/vers/disque.qcow2
-iso=/chemin/vers/iso.iso
+disk=/Users/user/.vm-assistant/disks/vm1.qcow2
+iso=/Users/user/.vm-assistant/isos/ubuntu.iso
 
-# Réseau
+# Reseau
 network_mode=nat
 
 # Affichage
-display=cocoa
-num_screens=1
-multi_screen_method=auto
+display=spice
+num_screens=2
 
-# VIA
-via=cuda
+# Options avancees
+enable_clipboard=y
+enable_dragdrop=y
+enable_gdb=n
 
-# Partage
+# Boot
+boot_order=dc
+
+# Partages
 share_dir=/tmp/volatile_hd
-
-# Debugging (NOUVEAU)
-enable_gdb=no
-gdb_port=1234
-
-# SSH (NOUVEAU)
-enable_ssh=no
-ssh_port=2222
-
-# Netatalk (NOUVEAU)
-enable_netatalk=no
-netatalk_share_name=VM_Shares
 ```
 
----
+## Resolution des Problemes
 
-## 🐛 Debugging avec GDB
+### XQuartz ne fonctionne pas
 
-### Prérequis
-- **GDB** : `brew install gdb` (macOS) ou `sudo apt install gdb` (Linux)
-- **GDB PowerPC** : Pour debugger les VMs PowerPC
+1. Verifiez que XQuartz est installe
+2. Lancez XQuartz manuellement: `open -a XQuartz`
+3. Executez: `xhost +local:`
 
-### Installation de GDB PowerPC sur macOS
+### Erreur de permissions sur /tmp/volatile_hd
 
 ```bash
-# Avec Homebrew
-brew install FiloSottile/musl-cross/musl-cross
-
-# Ou compiler depuis les sources
-# Voir : https://sourceware.org/gdb/
+sudo chmod 1777 /tmp/volatile_hd
+sudo chown root:wheel /tmp/volatile_hd
 ```
 
-### Configuration GDB dans la VM
+### Samba ne demarre pas
 
-Dans le menu de création/édition de VM, activez GDB :
+1. Verifiez que Samba est installe: `port installed samba4`
+2. Verifiez la configuration: `/opt/local/etc/samba/smb.conf`
+3. Demarrez manuellement: `sudo smbd -D`
 
-```
-Options avancées:
-  [X] Activer GDB debugging [y/N]: y
-  Port GDB [1234]: 1234
-```
+### Netatalk ne demarre pas
 
-### Commandes GDB
+1. Verifiez que Netatalk est installe: `port installed netatalk`
+2. Verifiez la configuration: `/opt/local/etc/netatalk/afpd.conf`
+3. Demarrez manuellement: `sudo afpd -d -F /opt/local/etc/netatalk/afpd.conf`
+
+### QEMU n'est pas trouve
+
+1. Verifiez que QEMU est installe: `port installed qemu`
+2. Verifiez que le chemin est correct: `/opt/local/bin/qemu-system-*`
+
+## Desinstallation
+
+Pour desinstaller le VM Assistant:
 
 ```bash
-# Démarrer la VM avec GDB
-./vm-assistant-vm.sh start ma_vm
+# Supprimer les scripts
+sudo rm -f /usr/local/bin/vm-assistant*
 
-# Dans un autre terminal, lancer GDB
-powerpc-apple-macos-gdb mon_programme
-(gdb) target remote localhost:1234
-(gdb) continue
+# Supprimer les repertoires de configuration
+rm -rf ~/.vm-assistant
 
-# Commandes GDB utiles
-(gdb) break main           # Poser un breakpoint
-(gdb) run                  # Démarrer
-(gdb) next                 # Exécuter la ligne suivante
-(gdb) step                 # Entrer dans la fonction
-(gdb) print variable      # Afficher une variable
-(gdb) backtrace            # Voir la pile d'appel
-(gdb) info registers       # Voir les registres
-(gdb) quit                 # Quitter
+# Optionnel: Supprimer le RAMDISK (attention, cela supprimera tous les fichiers)
+# sudo rm -rf /tmp/volatile_hd
 ```
 
-### Debugging 68k
+## Contribution
 
-Pour les VMs 68k, utilisez `gdb-68k` :
+Les contributions sont les bienvenues! Pour contribuer:
 
-```bash
-# Installation
-brew install --cask m68k-gdb
-
-# Utilisation
-m68k-elf-gdb mon_programme_68k
-(gdb) target remote localhost:1234
-```
-
----
-
-## 🔌 Accès SSH
-
-### Prérequis
-- **OpenSSH** : Préinstallé sur macOS/Linux
-
-### Configuration SSH dans la VM
-
-#### Pour Linux dans la VM
-```bash
-sudo apt update
-sudo apt install openssh-server
-sudo systemctl enable ssh
-sudo systemctl start ssh
-```
-
-#### Pour Mac OS X dans la VM
-```bash
-sudo systemsetup -setremotelogin on
-```
-
-### Configuration dans VM Assistant
-
-```
-Options réseau:
-  [X] Activer SSH [y/N]: y
-  Port SSH [2222]: 2222
-```
-
-### Connexion SSH
-
-```bash
-# Depuis votre hôte
-ssh utilisateur@localhost -p 2222
-
-# Exemple avec clé SSH
-ssh -i ~/.ssh/vm_key utilisateur@localhost -p 2222
-```
-
-### Génération de clés SSH automatiques
-
-Le script peut générer des clés SSH :
-
-```bash
-# Générer une paire de clés
-ssh-keygen -t rsa -b 4096 -f ~/.ssh/vm_key -N ""
-
-# Copier la clé publique dans la VM
-ssh-copy-id -i ~/.ssh/vm_key.pub utilisateur@localhost -p 2222
-```
-
----
-
-## 🍎 Partage AppleShare (Netatalk)
-
-### Prérequis
-- **Netatalk** : `brew install netatalk` ou `sudo port install netatalk`
-
-### Configuration Netatalk
-
-#### Démarrage automatique avec la VM
-
-```bash
-# Dans le menu VM Assistant
-Options avancées:
-  [X] Activer Netatalk [y/N]: y
-  Nom du partage [VM_Shares]: VM_Shares
-```
-
-#### Configuration manuelle
-
-```bash
-# Créer un fichier de configuration temporaire
-cat > /tmp/afp_vm.conf << EOF
-[Global]
-  host = 127.0.0.1
-  log file = /var/log/afpd.log
-  log level = default:2
-
-[VM_Shares]
-  path = /tmp/volatile_hd
-  valid users = $USER
-  rwlist = $USER
-  uamlist = $USER
-  volumetype = apple2
-EOF
-
-# Démarrer Netatalk
-sudo afpd -F /tmp/afp_vm.conf -d
-
-# Arrêter Netatalk
-sudo killall afpd
-```
-
-### Connexion AppleShare
-
-**Depuis un Mac :**
-```
-Fichier > Se connecter au serveur...
-Adresse : localhost
-Protocole : Apple File Protocol (AFP)
-```
-
-**Depuis la ligne de commande :**
-```bash
-open afp://localhost/VM_Shares
-```
-
-**Depuis un autre Mac :**
-```bash
-mount_afp afp://utilisateur@localhost/VM_Shares /Volumes/VM_Shares
-```
-
----
-
-## 💾 Collection de ROMs
-
-Le projet inclut une collection complète de **100+ ROMs Macintosh** dans :
-
-```
-resources/roms/MacROMan/TestImages/
-├── 64KB ROMs/      # Mac 128K, 512K
-├── 128KB ROMs/     # Mac Plus
-├── 256KB ROMs/     # Mac II, SE
-├── 512KB ROMs/     # Mac IIci, IIfx, IIsi
-├── 1MB ROMs/       # PowerBook 160, IIvx, LC III, etc. ← Pour Mac OS 7.6.1
-├── 2MB ROMs/       # PowerBook 520, Quadra 660av, etc.
-└── 4MB ROMs/       # Power Mac 6100, 7100, 8100, etc. (nécessite QEMU patché)
-```
-
-### Utilisation des ROMs
-
-**Via le menu d'édition :**
-```bash
-./vm-assistant-vm.sh edit ma_vm
-# Sélectionner option [7] : ROM file
-# Choisir un ROM dans la liste
-```
-
-**Manuellement dans la config :**
-```bash
-rom_file="/tmp/volatile_hd/vm-assistant/resources/roms/MacROMan/TestImages/1MB ROMs/1992-07-22 - E33B2724 - PB160, PB165, PB165c, PB180, PB180c - 7.1-7.6.1 - 4-14M.ROM"
-```
-
-**Note :** QEMU standard limite la taille du BIOS à 1MB pour PPC. Les ROMs 4MB nécessitent une version patchée de QEMU (comme celle de UTM).
-
----
-
-## 🎯 Exemples complets
-
-### Exemple 1 : Mac OS 7.6.1 avec ROM et GDB
-
-```bash
-# Créer la VM
-./vm-assistant-vm.sh create macos761
-
-# Configuration recommandée
-# - Architecture: 604 (PowerPC)
-# - Machine: mac99
-# - ROM: E33B2724 (PB160-180, 1MB)
-# - RAM: 256M
-# - GDB: Oui, port 1234
-# - SSH: Oui, port 2222
-# - Netatalk: Oui
-
-# Démarrer
-./vm-assistant-vm.sh start macos761
-
-# Dans un autre terminal, se connecter avec GDB
-powerpc-apple-macos-gdb
-(gdb) target remote localhost:1234
-(gdb) continue
-
-# Se connecter en SSH
-ssh utilisateur@localhost -p 2222
-
-# Accéder au partage AppleShare
-open afp://localhost/VM_Shares
-```
-
-### Exemple 2 : Mac OS 9 avec CodeWarrior
-
-```bash
-# Créer une VM Mac OS 9
-./vm-assistant-vm.sh create macos9_cw
-
-# Configuration
-# - Architecture: G4
-# - CPU: 7455
-# - RAM: 1024M
-# - ISO: Mac_OS_9.2.2.iso
-# - Partage CodeWarrior: /Applications/CodeWarrior
-# - GDB: Oui
-# - SSH: Oui
-
-# Démarrer
-./vm-assistant-vm.sh start macos9_cw
-
-# Dans la VM, CodeWarrior est accessible via
-# /Volumes/hostshare/Applications/CodeWarrior
-```
-
-### Exemple 3 : Linux x86_64 avec développement
-
-```bash
-./vm-assistant-vm.sh create linux_dev
-
-# Configuration
-# - Architecture: x86_64
-# - Machine: q35
-# - CPU: host
-# - RAM: 4096M
-# - Disque: 20G
-# - GDB: Oui
-# - SSH: Oui, port 2222
-# - Partage: /tmp/volatile_hd
-
-# Démarrer
-./vm-assistant-vm.sh start linux_dev
-
-# SSH
-ssh user@localhost -p 2222
-```
-
----
-
-## ⚠️ Problèmes connus et limitations
-
-### QEMU PPC
-- **Limite BIOS 1MB** : QEMU standard ne supporte pas les ROMs >1MB pour PPC
-- **Solution** : Utiliser UTM.app ou compiler QEMU avec des patches
-- **ROMs 4MB** : Power Mac 6100/7100/8100 nécessitent QEMU patché
-
-### Mac OS 7.6.1
-- **Boot depuis CDROM** : Certains ISOs nécessitent un disque dur
-- **ROM requis** : Utiliser un ROM 1MB compatible (PB160, IIvx, etc.)
-- **NDRV loader** : Nécessaire pour le support graphique
-
-### GDB
-- **GDB PowerPC** : Peut nécessiter une compilation cross-compile
-- **Breakpoints** : Certains systèmes anciens ont des limitations
-
-### SSH
-- **Mac OS 7-9** : SSH natif non disponible, utiliser DropBear ou autre
-- **Solution** : Monter un volume avec un SSH léger
-
-### Netatalk
-- **Permissions** : Nécessite sudo pour les ports < 1024
-- **Configuration** : Peut conflituer avec un Netatalk existant
-
----
-
-## 🤝 Contribution
-
-Les contributions sont les bienvenues !
-
-### Comment contribuer
-
-1. Forker le projet
-2. Créer une branche (`git checkout -b feature/amazing-feature`)
-3. Commiter vos changements (`git commit -m 'Add amazing feature'`)
-4. Pousser vers la branche (`git push origin feature/amazing-feature`)
+1. Fork le projet
+2. Creer une branche pour votre fonctionnalite
+3. Commit vos changements
+4. Push vers la branche
 5. Ouvrir une Pull Request
 
-### Idées de contribution
+## Licence
 
-- Ajouter le support de plus darchitectures
-- Intégration avec d'autres émulateurs (Basilisk II, Sheepshaver)
-- Interface graphique (Qt, Electron)
-- Support Docker
-- Tests automatisés
-- Documentation améliorée
+Ce projet est distribué sous la licence MIT. Voir le fichier LICENCE pour plus de details.
 
----
+## Auteur
 
-## 📜 Licence
+Developpe pour les developpeurs d'applications ayant besoin d'une solution complete de gestion de VMs sur macOS.
 
-Ce projet est sous licence **MIT License** - voir le fichier [LICENSE](LICENSE) pour plus de détails.
+## Remerciements
 
----
-
-## 🙏 Remerciements
-
-- **QEMU** : https://qemu.org
-- **UTM** : https://mac.getutm.app/
-- **Mac ROMan** : https://github.com/pruten/MacROMan
-- **Communauté du rétro computing**
-
----
-
-## 📞 Support
-
-Pour toute question ou problème, ouvre une issue sur le repository GitHub.
-
----
-
-**Made with ❤️ for retro developers**
+- La communaute QEMU pour leur excellent travail
+- Les mainteneurs de MacPorts pour la gestion des packages
+- Les developpeurs de SPICE pour les fonctionnalites avancees d'affichage
+- La communaute open source en general

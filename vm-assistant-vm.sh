@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # VM Assistant - Gestion de machines virtuelles QEMU/UTM
-# Version: 2.1 - Avec support GDB, SSH, Netatalk (Option C)
+# Version: 2.0 - Avec support UTM.app
 
 CONFIG_DIR="$HOME/.vm-assistant"
 VM_DIR="$CONFIG_DIR/vms"
@@ -9,11 +9,6 @@ DISK_DIR="$CONFIG_DIR/disks"
 ISO_DIR="$CONFIG_DIR/isos"
 SHARE_DIR="/tmp/volatile_hd"
 ROM_DIR="/tmp/volatile_hd/MacROMan/TestImages"
-
-# Default ports
-DEFAULT_GDB_PORT=1234
-DEFAULT_SSH_PORT=2222
-DEFAULT_NETATALK_PORT=548
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -37,104 +32,6 @@ detect_utm() {
         UTM_QEMU_PATH=""
     fi
     export UTM_INSTALLED UTM_PATH UTM_QEMU_PATH
-}
-
-detect_netatalk() {
-    if command -v afpd &>/dev/null; then
-        NETATALK_INSTALLED=true
-        NETATALK_BIN="afpd"
-    elif [ -x "/opt/local/sbin/afpd" ]; then
-        NETATALK_INSTALLED=true
-        NETATALK_BIN="/opt/local/sbin/afpd"
-    elif [ -x "/usr/local/sbin/afpd" ]; then
-        NETATALK_INSTALLED=true
-        NETATALK_BIN="/usr/local/sbin/afpd"
-    else
-        NETATALK_INSTALLED=false
-        NETATALK_BIN=""
-    fi
-    export NETATALK_INSTALLED NETATALK_BIN
-}
-
-detect_gdb() {
-    if command -v gdb &>/dev/null; then
-        GDB_INSTALLED=true
-        GDB_BIN="gdb"
-    elif command -v ggdb &>/dev/null; then
-        GDB_INSTALLED=true
-        GDB_BIN="ggdb"
-    else
-        GDB_INSTALLED=false
-        GDB_BIN=""
-    fi
-    export GDB_INSTALLED GDB_BIN
-}
-
-start_netatalk_share() {
-    local share_name="$1"
-    local share_path="$2"
-    local netatalk_config="/tmp/vm-assistant-netatalk.conf"
-    
-    if [ "$NETATALK_INSTALLED" != true ]; then
-        log_error "Netatalk non installe. Installez avec: brew install netatalk ou sudo port install netatalk"
-        return 1
-    fi
-    
-    mkdir -p "$share_path"
-    
-    cat > "$netatalk_config" << EOF
-[Global]
-  mimic model = RackMac
-  uam list = uams_guest.so,uams_dhx.so,uams_dhx2.so
-  guest account = guest
-  log file = /tmp/vm-assistant-netatalk.log
-  max connections = 20
-
-[$share_name]
-  path = $share_path
-  valid users = @* guest
-  rwlist = @* guest
-  file perm = 0664
-  directory perm = 0775
-  cnid scheme = dbd
-  aapl use sentry = no
-EOF
-    
-    log_info "Demarrage de Netatalk avec la configuration: $netatalk_config"
-    log_info "Partage: $share_name -> $share_path"
-    
-    # Kill any existing afpd
-    pkill afpd 2>/dev/null || true
-    sleep 1
-    
-    # Create private directory if needed
-    mkdir -p /tmp/samba_private
-    export ATLKD_PRI_DIR=/tmp/samba_private
-    
-    # Start afpd with custom config
-    sudo "$NETATALK_BIN" -F "$netatalk_config" -d 2>>/tmp/vm-assistant-netatalk.log &
-    local afpd_pid=$!
-    echo "$afpd_pid" > /tmp/vm-assistant-netatalk.pid
-    
-    log_info "Netatalk demarre avec PID: $afpd_pid"
-    log_info "Partage disponible via: afp://$(hostname):$DEFAULT_NETATALK_PORT/$share_name"
-    
-    sleep 2
-    if ps -p "$afpd_pid" > /dev/null 2>&1; then
-        return 0
-    else
-        log_error "Echec du demarrage de Netatalk. Voir /tmp/vm-assistant-netatalk.log"
-        return 1
-    fi
-}
-
-stop_netatalk_share() {
-    if [ -f /tmp/vm-assistant-netatalk.pid ]; then
-        local pid=$(cat /tmp/vm-assistant-netatalk.pid)
-        kill "$pid" 2>/dev/null || true
-        rm -f /tmp/vm-assistant-netatalk.pid
-        log_info "Netatalk arrete"
-    fi
 }
 
 qemu_device_exists() {
@@ -290,7 +187,6 @@ edit_vm() {
         echo "  [5] Network (network_mode)"
         echo "  [6] Sharing (share_dir)"
         echo "  [7] ROM file (for old Mac OS)"
-        echo "  [C] Option C - Debug/Network (GDB/SSH/Netatalk)"
         echo "  [8] Show current config"
         echo "  [9] Save and exit"
         echo "  [0] Exit without saving"
@@ -309,7 +205,7 @@ edit_vm() {
                 echo "  604  - PowerPC 604"
                 echo "  601  - PowerPC 601"
                 echo "  68040 - Motorola 68040"
-                read -p "Architecture (G4/601/604ev/604/ppc/68040) [${arch:-G4}]: " arch
+                read -p "Architecture (G4/601/604ev/604/ppc/68040/apollocore/arm/arm64/sparc/sparc64) [${arch:-G4}]: " arch
                 read -p "Machine [${machine:-mac99}]: " machine
                 read -p "CPU type [${cpu_type:-7455}]: " cpu_type
                 read -p "VIA type (pmu/cuda/none) [${via:-cuda}]: " via
@@ -356,34 +252,6 @@ edit_vm() {
             7)
                 list_roms && rom_file="$selected_rom" || echo "No ROM selected"
                 ;;
-            C|c)
-                echo "Option C - Configuration Debug/Network"
-                echo "======================================="
-                read -p "Activer GDB debugging [${enable_gdb:-n}]: " enable_gdb
-                enable_gdb=${enable_gdb:-n}
-                if [ "$enable_gdb" = "y" ]; then
-                    read -p "  Port GDB [$DEFAULT_GDB_PORT]: " gdb_port
-                    gdb_port=${gdb_port:-$DEFAULT_GDB_PORT}
-                else
-                    gdb_port=""
-                fi
-                read -p "Activer SSH forward [${enable_ssh:-n}]: " enable_ssh
-                enable_ssh=${enable_ssh:-n}
-                if [ "$enable_ssh" = "y" ]; then
-                    read -p "  Port SSH host [$DEFAULT_SSH_PORT]: " ssh_port
-                    ssh_port=${ssh_port:-$DEFAULT_SSH_PORT}
-                else
-                    ssh_port=""
-                fi
-                read -p "Activer Netatalk (AppleShare) [${enable_netatalk:-n}]: " enable_netatalk
-                enable_netatalk=${enable_netatalk:-n}
-                if [ "$enable_netatalk" = "y" ]; then
-                    read -p "  Nom du partage [VM_${vm_name}]: " netatalk_share_name
-                    netatalk_share_name=${netatalk_share_name:-VM_${vm_name}}
-                else
-                    netatalk_share_name=""
-                fi
-                ;;
             8)
                 echo "Current configuration:"
                 echo "  arch=$arch machine=$machine cpu_type=$cpu_type via=$via"
@@ -392,9 +260,6 @@ edit_vm() {
                 echo "  display=$display num_screens=$num_screens method=$multi_screen_method"
                 echo "  network_mode=$network_mode share_dir=$share_dir"
                 echo "  rom_file=${rom_file:-none}"
-                echo "  GDB: ${enable_gdb:-no} port=${gdb_port:-none}"
-                echo "  SSH: ${enable_ssh:-no} port=${ssh_port:-none}"
-                echo "  Netatalk: ${enable_netatalk:-no} share=${netatalk_share_name:-none}"
                 ;;
             9)
                 cat > "$vm_config" << CONFIG
@@ -421,13 +286,6 @@ multi_screen_method=${multi_screen_method:-auto}
 share_dir=${share_dir:-/tmp/volatile_hd}
 via=${via:-cuda}
 rom_file=${rom_file:-}
-# Option C - Debug/Network
-enable_gdb=${enable_gdb:-n}
-gdb_port=${gdb_port:-}
-enable_ssh=${enable_ssh:-n}
-ssh_port=${ssh_port:-}
-enable_netatalk=${enable_netatalk:-n}
-netatalk_share_name=${netatalk_share_name:-}
 CONFIG
                 log_info "Configuration saved for $vm_name"
                 return 0
@@ -467,12 +325,6 @@ start_qemu_vm() {
     local via="${via:-cuda}"
     local multi_screen_method="${multi_screen_method:-auto}"
     local rom_file="${rom_file:-}"
-    local enable_gdb="${enable_gdb:-n}"
-    local gdb_port="${gdb_port:-$DEFAULT_GDB_PORT}"
-    local enable_ssh="${enable_ssh:-n}"
-    local ssh_port="${ssh_port:-$DEFAULT_SSH_PORT}"
-    local enable_netatalk="${enable_netatalk:-n}"
-    local netatalk_share_name="${netatalk_share_name:-VM_$vm_name}"
     local qemu_args=()
     qemu_args+=("qemu-system-ppc")
     local utm_resources="/Users/xenon/Library/Containers/com.utmapp.UTM/Data/Library/Caches/qemu"
@@ -502,22 +354,6 @@ start_qemu_vm() {
             qemu_args+=("-device" "virtio-net-pci,netdev=net0")
             ;;
     esac
-    
-    # Option C: GDB debugging
-    if [ "$enable_gdb" = "y" ]; then
-        qemu_args+=("-gdb" "tcp::$gdb_port")
-        qemu_args+=("-S")
-        log_info "GDB debugging active sur port: $gdb_port"
-        log_info "Connectez-vous avec: gdb-multiarch -ex 'target remote localhost:$gdb_port'"
-    fi
-    
-    # Option C: SSH port forwarding
-    if [ "$enable_ssh" = "y" ]; then
-        qemu_args+=("-netdev" "user,id=sshnet0,hostfwd=tcp::$ssh_port-:22")
-        qemu_args+=("-device" "virtio-net-pci,netdev=sshnet0")
-        log_info "SSH forwarding active: host:$ssh_port -> guest:22"
-        log_info "Connectez-vous avec: ssh user@localhost -p $ssh_port"
-    fi
     case "$display" in
         "cocoa") qemu_args+=("-display" "cocoa") ;;
         "none") qemu_args+=("-nographic") ;;
@@ -614,6 +450,62 @@ start_qemu_vm() {
                 qemu_args+=("-cdrom" "$iso")
             fi
             ;;
+        "apollocore")
+            qemu_args+=("-machine" "q800")
+            qemu_args+=("-cpu" "68080")
+            qemu_args+=("-accel" "tcg")
+            if [ -n "$iso" ] && [ -f "$iso" ]; then
+                qemu_args+=("-cdrom" "$iso")
+            fi
+            if [ -n "$disk" ] && [ -f "$disk" ]; then
+                qemu_args+=("-drive" "file=$disk,format=qcow2,if=scsi")
+            fi
+            ;;
+        "arm"|"arm64")
+            qemu_args+=("-machine" "virt")
+            qemu_args+=("-cpu" "host")
+            if [ "$arch" = "arm" ]; then
+                qemu_args+=("-bios" "/usr/local/share/qemu-edk2/arm/edk2-arm-code.fd")
+            fi
+            if [ "$num_screens" -gt 1 ]; then
+                qemu_args+=("-vga" "virtio")
+                for (( s=1; s<num_screens; s++ )); do
+                    qemu_args+=("-device" "virtio-gpu-pci")
+                done
+            else
+                qemu_args+=("-vga" "virtio")
+            fi
+            if [ -n "$disk" ] && [ -f "$disk" ]; then
+                qemu_args+=("-drive" "file=$disk,format=qcow2,if=virtio")
+            fi
+            if [ -n "$iso" ] && [ -f "$iso" ]; then
+                qemu_args+=("-cdrom" "$iso")
+            fi
+            ;;
+        "sparc"|"sparc64")
+            local sparc_machine=""
+            local sparc_cpu=""
+            if [ "$arch" = "sparc" ]; then
+                sparc_machine="sun4m"
+                sparc_cpu="Fujitsu+MB86904"
+            else
+                sparc_machine="sun4u"
+                sparc_cpu="Fujitsu+Sparc64IV+"
+            fi
+            qemu_args+=("-machine" "$sparc_machine")
+            qemu_args+=("-cpu" "$sparc_cpu")
+            if [ "$num_screens" -gt 1 ]; then
+                qemu_args+=("-vga" "tcx")
+            else
+                qemu_args+=("-vga" "tcx")
+            fi
+            if [ -n "$disk" ] && [ -f "$disk" ]; then
+                qemu_args+=("-drive" "file=$disk,format=qcow2,if=scsi")
+            fi
+            if [ -n "$iso" ] && [ -f "$iso" ]; then
+                qemu_args+=("-cdrom" "$iso")
+            fi
+            ;;
         *)
             log_error "Architecture non supportee: $arch"
             return 1
@@ -629,21 +521,6 @@ start_qemu_vm() {
     echo "" >> "$vm_dir/start.sh"
     chmod +x "$vm_dir/start.sh"
     log_info "Command saved to: $vm_dir/start.sh"
-    
-    # Option C: Start Netatalk if enabled
-    if [ "$enable_netatalk" = "y" ]; then
-        detect_netatalk
-        if [ "$NETATALK_INSTALLED" = true ]; then
-            start_netatalk_share "$netatalk_share_name" "$share_dir" && {
-                log_info "Netatalk partage demarre: $netatalk_share_name"
-            } || {
-                log_warn "Netatalk non demarre - continuation sans partage AppleShare"
-            }
-        else
-            log_warn "Netatalk non installe - installez avec: brew install netatalk ou sudo port install netatalk"
-        fi
-    fi
-    
     "${qemu_args[@]}" &
     local qemu_pid=$!
     echo "$qemu_pid" > "$vm_dir/pid"
@@ -701,6 +578,9 @@ create_utm_vm() {
     echo "  [1] PowerPC (G3/G4)"
     echo "  [2] x86_64"
     echo "  [3] ARM64"
+    echo "  [4] ARM"
+    echo "  [5] SPARC"
+    echo "  [6] SPARC64"
     read -p "Architecture [1]: " utm_arch_choice
     utm_arch_choice=${utm_arch_choice:-1}
     local utm_architecture=""
@@ -708,6 +588,9 @@ create_utm_vm() {
         1) utm_architecture="ppc" ;;
         2) utm_architecture="x86_64" ;;
         3) utm_architecture="arm64" ;;
+        4) utm_architecture="arm" ;;
+        5) utm_architecture="sparc" ;;
+        6) utm_architecture="sparc64" ;;
         *) utm_architecture="ppc" ;;
     esac
     echo ""
@@ -762,9 +645,13 @@ create_utm_vm() {
     echo "  [2] System"
     local system_mode_available=false
     case $utm_architecture in
-        "arm64") system_mode_available=true ;;
-        "x86_64") system_mode_available=true ;;
-        "ppc") echo "  Note: PowerPC ne supporte que SoftMMU"; system_mode_available=false ;;
+        "arm64"|"arm"|"x86_64"|"sparc"|"sparc64")
+            system_mode_available=true 
+            ;;
+        "ppc") 
+            echo "  Note: PowerPC ne supporte que SoftMMU"; 
+            system_mode_available=false 
+            ;;
     esac
     local utm_emulator="softmmu"
     if [ "$system_mode_available" = true ]; then
@@ -860,7 +747,12 @@ create_vm() {
             echo "  [3] 604 (PowerPC)"
             echo "  [4] 601 (PowerPC)"
             echo "  [5] 68040 (Motorola)"
-            echo "  [6] x86_64 (Intel/AMD)"
+            echo "  [6] apollocore (68080)"
+            echo "  [7] x86_64 (Intel/AMD)"
+            echo "  [8] arm"
+            echo "  [9] arm64"
+            echo "  [10] sparc"
+            echo "  [11] sparc64"
             read -p "Architecture [1]: " arch_choice
             arch_choice=${arch_choice:-1}
             local arch=""; local machine=""; local cpu_type=""
@@ -870,7 +762,12 @@ create_vm() {
                 3) arch="604"; machine="g3beige"; cpu_type="604" ;;
                 4) arch="601"; machine="g3beige"; cpu_type="601" ;;
                 5) arch="68040"; machine="mac99"; cpu_type="68040" ;;
-                6) arch="x86_64"; machine="q35"; cpu_type="host" ;;
+                6) arch="apollocore"; machine="q800"; cpu_type="68080" ;;
+                7) arch="x86_64"; machine="q35"; cpu_type="host" ;;
+                8) arch="arm"; machine="virt"; cpu_type="cortina-a9" ;;
+                9) arch="arm64"; machine="virt"; cpu_type="host" ;;
+                10) arch="sparc"; machine="sun4m"; cpu_type="Fujitsu+MB86904" ;;
+                11) arch="sparc64"; machine="sun4u"; cpu_type="Fujitsu+Sparc64IV+" ;;
                 *) arch="G4"; machine="mac99"; cpu_type="7455" ;;
             esac
             read -p "RAM en MB [768]: " ram; ram=${ram:-768}
@@ -927,24 +824,6 @@ create_vm() {
             if [ "$rom_choice" = "1" ]; then
                 list_roms && rom_file="$selected_rom" || rom_file=""
             fi
-            echo ""
-            echo "Option C - Configuration Debug/Network"
-            echo "======================================="
-            read -p "Activer GDB debugging [n]: " enable_gdb; enable_gdb=${enable_gdb:-n}
-            local gdb_port=""
-            if [ "$enable_gdb" = "y" ]; then
-                read -p "  Port GDB [$DEFAULT_GDB_PORT]: " gdb_port; gdb_port=${gdb_port:-$DEFAULT_GDB_PORT}
-            fi
-            read -p "Activer SSH forward [n]: " enable_ssh; enable_ssh=${enable_ssh:-n}
-            local ssh_port=""
-            if [ "$enable_ssh" = "y" ]; then
-                read -p "  Port SSH host [$DEFAULT_SSH_PORT]: " ssh_port; ssh_port=${ssh_port:-$DEFAULT_SSH_PORT}
-            fi
-            read -p "Activer Netatalk (AppleShare) [n]: " enable_netatalk; enable_netatalk=${enable_netatalk:-n}
-            local netatalk_share_name=""
-            if [ "$enable_netatalk" = "y" ]; then
-                read -p "  Nom du partage [VM_${vm_name}]: " netatalk_share_name; netatalk_share_name=${netatalk_share_name:-VM_${vm_name}}
-            fi
             echo "Mode daffichage:"
             echo "  [1] Cocoa (GUI)"
             echo "  [2] None (console)"
@@ -971,13 +850,6 @@ multi_screen_method=$multi_screen_method
 via=$via
 share_dir=$share_dir
 rom_file=${rom_file:-}
-# Option C - Debug/Network
-enable_gdb=$enable_gdb
-gdb_port=$gdb_port
-enable_ssh=$enable_ssh
-ssh_port=$ssh_port
-enable_netatalk=$enable_netatalk
-netatalk_share_name=$netatalk_share_name
 CONFIG
             log_info "VM QEMU creee: $vm_name"
             ;;
@@ -1033,17 +905,17 @@ stop_vm() {
             kill "$pid" && {
                 log_info "VM $vm_name arreee (PID: $pid)"
                 rm -f "$pid_file"
+                return 0
             }
         else
             log_warn "Processus $pid deja termine"
+            rm -f "$pid_file"
+            return 0
         fi
-        rm -f "$pid_file"
+    else
+        log_error "Aucun PID trouve pour $vm_name"
+        return 1
     fi
-    
-    stop_netatalk_share
-    
-    log_info "VM $vm_name arreee"
-    return 0
 }
 
 delete_vm() {
@@ -1073,9 +945,145 @@ init_directories() {
     mkdir -p "$DISK_DIR"
     mkdir -p "$ISO_DIR"
     mkdir -p "$SHARE_DIR"
-    detect_netatalk
-    detect_gdb
-    detect_utm
+}
+
+validate_vm_config() {
+    local vm_name=$1
+    local vm_dir="$VM_DIR/$vm_name"
+    local vm_config="$vm_dir/config"
+    
+    if [ ! -d "$vm_dir" ]; then
+        log_error "VM not found: $vm_name"
+        return 1
+    fi
+    
+    if [ ! -f "$vm_config" ]; then
+        log_error "Config not found: $vm_config"
+        return 1
+    fi
+    
+    # Source the config
+    source "$vm_config" 2>/dev/null || true
+    
+    # Validate required fields
+    if [ -z "$arch" ]; then
+        log_error "Architecture not specified"
+        return 1
+    fi
+    
+    if [ -n "$disk" ] && [ ! -f "$disk" ]; then
+        log_warn "Disk file not found: $disk"
+    fi
+    
+    if [ -n "$iso" ] && [ ! -f "$iso" ]; then
+        log_warn "ISO file not found: $iso"
+    fi
+    
+    log_info "VM configuration is valid"
+    return 0
+}
+
+insert_iso() {
+    local vm_name=$1
+    local vm_dir="$VM_DIR/$vm_name"
+    local vm_config="$vm_dir/config"
+    
+    validate_vm_config "$vm_name" || return 1
+    
+    list_isos
+    if [ -z "$selected_iso" ]; then
+        log_error "No ISO selected"
+        return 1
+    fi
+    
+    # Update the config
+    if grep -q "^iso=" "$vm_config"; then
+        sed -i "s|^iso=.*|iso=$selected_iso|" "$vm_config"
+    else
+        echo "iso=$selected_iso" >> "$vm_config"
+    fi
+    
+    log_info "ISO inserted: $selected_iso"
+    return 0
+}
+
+eject_iso() {
+    local vm_name=$1
+    local vm_dir="$VM_DIR/$vm_name"
+    local vm_config="$vm_dir/config"
+    
+    validate_vm_config "$vm_name" || return 1
+    
+    # Clear the ISO
+    if grep -q "^iso=" "$vm_config"; then
+        sed -i "s|^iso=.*|iso=|" "$vm_config"
+    else
+        echo "iso=" >> "$vm_config"
+    fi
+    
+    log_info "ISO ejected"
+    return 0
+}
+
+export_utm() {
+    local vm_name=$1
+    local vm_dir="$VM_DIR/$vm_name"
+    local vm_config="$vm_dir/config"
+    
+    validate_vm_config "$vm_name" || return 1
+    
+    # Source the config
+    source "$vm_config" 2>/dev/null || true
+    
+    # Determine UTM architecture
+    local utm_arch=""
+    case "$arch" in
+        "ppc"|"G4"|"604ev"|"604"|"601"|"68040"|"apollocore"|"68k")
+            utm_arch="ppc"
+            ;;
+        "x86_64"|"i386"|"i86")
+            utm_arch="x86_64"
+            ;;
+        "arm"|"arm64")
+            utm_arch="arm64"
+            ;;
+        "sparc"|"sparc64")
+            utm_arch="sparc64"
+            ;;
+        *)
+            log_error "Unsupported architecture for UTM: $arch"
+            return 1
+            ;;
+    esac
+    
+    # Determine UTM OS type based on arch and disk
+    local utm_os_type="linux"
+    if [[ "$arch" == "ppc" || "$arch" == "G4" || "$arch" == "604ev" || "$arch" == "604" || "$arch" == "601" || "$arch" == "68040" ]]; then
+        utm_os_type="macOS9"
+    fi
+    
+    # Create UTM config JSON
+    local utm_config_file="$vm_dir/utm-config.json"
+    
+    cat > "$utm_config_file" << EOF
+{
+  "name": "$vm_name",
+  "target": "$utm_arch",
+  "emulator": "softmmu",
+  "memory": ${ram:-768},
+  "cpuCount": ${cpu:-1},
+  "disk": "${disk:-}",
+  "iso": "${iso:-}",
+  "network": {"mode": "${network_mode:-shared}"},
+  "display": {"mode": "gui"},
+  "sharing": {"enabled": true, "path": "$SHARE_DIR", "clipboard": true},
+  "vnc": {"enabled": false, "port": 5900},
+  "bootOrder": "${boot_order:-dc}"
+}
+EOF
+    
+    log_info "UTM configuration exported to: $utm_config_file"
+    return 0
 }
 
 case "$1" in
@@ -1095,6 +1103,18 @@ case "$1" in
     delete)
         if [ -n "$2" ]; then delete_vm "$2"; else log_error "Usage: $0 delete VMNAME"; fi
         ;;
+    insert_iso)
+        if [ -n "$2" ]; then insert_iso "$2"; else log_error "Usage: $0 insert_iso VMNAME"; fi
+        ;;
+    eject_iso)
+        if [ -n "$2" ]; then eject_iso "$2"; else log_error "Usage: $0 eject_iso VMNAME"; fi
+        ;;
+    validate)
+        if [ -n "$2" ]; then validate_vm_config "$2"; else log_error "Usage: $0 validate VMNAME"; fi
+        ;;
+    export)
+        if [ -n "$2" ]; then export_utm "$2"; else log_error "Usage: $0 export VMNAME"; fi
+        ;;
     menu|"")
         init_directories
         detect_utm
@@ -1108,18 +1128,20 @@ case "$1" in
             echo "  [4] Lister les VMs"
             echo "  [5] Arreter une VM"
             echo "  [6] Supprimer une VM"
-            echo "  [7] Verifier linstallation"
-            echo "  [8] Quitter"
+            echo "  [7] Inserer un ISO"
+            echo "  [8] Ejecter un ISO"
+            echo "  [9] Valider une VM"
+            echo "  [A] Exporter vers UTM"
+            echo "  [V] Verifier linstallation"
+            echo "  [Q] Quitter"
             echo ""
             if [ "$UTM_INSTALLED" = true ]; then echo "  UTM.app: ✓ Installe"; else echo "  UTM.app: ✗ Non installe"; fi
             command -v qemu-system-ppc &>/dev/null && echo "  QEMU PPC: ✓ Disponible" || echo "  QEMU PPC: ✗ Non disponible"
             command -v qemu-img &>/dev/null && echo "  qemu-img: ✓ Disponible" || echo "  qemu-img: ✗ Non disponible"
             command -v port &>/dev/null && echo "  MacPorts: ✓ Installe" || echo "  MacPorts: ✗ Non installe"
             command -v brew &>/dev/null && echo "  Homebrew: ✓ Installe" || echo "  Homebrew: ✗ Non installe"
-            [ "$NETATALK_INSTALLED" = true ] && echo "  Netatalk: ✓ Disponible" || echo "  Netatalk: ✗ Non disponible"
-            [ "$GDB_INSTALLED" = true ] && echo "  GDB: ✓ Disponible" || echo "  GDB: ✗ Non disponible"
             echo ""
-            read -p "Selectionnez une option [8]: " choice; choice=${choice:-8}
+            read -p "Selectionnez une option [Q]: " choice; choice=${choice:-Q}
             case "$choice" in
                 1) read -p "Nom de la VM: " vm_name; if [ -n "$vm_name" ]; then create_vm "$vm_name"; else log_error "Nom vide"; fi ;;
                 2) list_vms && read -p "Selectionner une VM: " vm_index && { vm_name=$(ls "$VM_DIR" | sed -n "${vm_index}p"); if [ -n "$vm_name" ]; then start_qemu_vm "$vm_name"; else log_error "VM non valide"; fi; } ;;
@@ -1127,7 +1149,11 @@ case "$1" in
                 4) list_vms ;;
                 5) list_vms && read -p "Selectionner une VM: " vm_index && { vm_name=$(ls "$VM_DIR" | sed -n "${vm_index}p"); if [ -n "$vm_name" ]; then stop_vm "$vm_name"; else log_error "VM non valide"; fi; } ;;
                 6) list_vms && read -p "Selectionner une VM: " vm_index && { vm_name=$(ls "$VM_DIR" | sed -n "${vm_index}p"); if [ -n "$vm_name" ]; then delete_vm "$vm_name"; else log_error "VM non valide"; fi; } ;;
-                7)
+                7) list_vms && read -p "Selectionner une VM: " vm_index && { vm_name=$(ls "$VM_DIR" | sed -n "${vm_index}p"); if [ -n "$vm_name" ]; then insert_iso "$vm_name"; else log_error "VM non valide"; fi; } ;;
+                8) list_vms && read -p "Selectionner une VM: " vm_index && { vm_name=$(ls "$VM_DIR" | sed -n "${vm_index}p"); if [ -n "$vm_name" ]; then eject_iso "$vm_name"; else log_error "VM non valide"; fi; } ;;
+                9) list_vms && read -p "Selectionner une VM: " vm_index && { vm_name=$(ls "$VM_DIR" | sed -n "${vm_index}p"); if [ -n "$vm_name" ]; then validate_vm_config "$vm_name"; else log_error "VM non valide"; fi; } ;;
+                A|a) list_vms && read -p "Selectionner une VM: " vm_index && { vm_name=$(ls "$VM_DIR" | sed -n "${vm_index}p"); if [ -n "$vm_name" ]; then export_utm "$vm_name"; else log_error "VM non valide"; fi; } ;;
+                V|v)
                     log_header "Verification de linstallation"
                     for arch in ppc x86_64; do
                         command -v "qemu-system-$arch" &>/dev/null && log_info "qemu-system-$arch: ✓ trouve" || log_warn "qemu-system-$arch: ✗ non trouve"
@@ -1135,11 +1161,9 @@ case "$1" in
                     command -v qemu-img &>/dev/null && log_info "qemu-img: ✓ trouve" || log_warn "qemu-img: ✗ non trouve"
                     [ "$UTM_INSTALLED" = true ] && log_info "UTM.app: ✓ installe" || log_warn "UTM.app: ✗ non installe"
                     [ -d "/Applications/Utilities/XQuartz.app" ] && log_info "XQuartz: ✓ installe" || log_warn "XQuartz: ✗ non installe"
-                    [ "$NETATALK_INSTALLED" = true ] && log_info "Netatalk: ✓ installe" || log_warn "Netatalk: ✗ non installe"
-                    [ "$GDB_INSTALLED" = true ] && log_info "GDB: ✓ installe" || log_warn "GDB: ✗ non installe"
                     read -p "Appuyez sur Entree pour continuer..." 
                     ;;
-                8) log_info "Au revoir!"; exit 0 ;;
+                Q|q) log_info "Au revoir!"; exit 0 ;;
                 *) echo "Option non valide" ;;
             esac
             read -p "Appuyez sur Entree pour continuer..." 
