@@ -5,8 +5,8 @@
 - Local path: `/home/runner/work/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86`
 
 ## Current Task Snapshot
-- Request: finalize and validate PR #3 (review fixes for PR #2 merge).
-- Status: code review passed (no comments), CodeQL skipped (trivial changes), PR ready for merge.
+- Request: add and use `.github/copilot-instructions.md`.
+- Status: file created with full project conventions, build system notes, platform table, and "what to avoid" rules.
 
 ## Project Snapshot
 - Purpose: custom QEMU retro development environment with build and VM-assist tooling.
