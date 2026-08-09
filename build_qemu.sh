@@ -17,6 +17,8 @@ QEMU_INSTALL_PREFIX="${QEMU_INSTALL_PREFIX:-${HOME}/.local/qemu-retro}"
 QEMU_TARBALL="qemu-${QEMU_VERSION}.tar.xz"
 QEMU_TARBALL_URL="https://download.qemu.org/${QEMU_TARBALL}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)}"
+# Patches directory — .patch files are applied in lexicographic order
+PATCHES_DIR="${PATCHES_DIR:-$(cd "$(dirname "$0")" && pwd)/patches}"
 
 # Target list — all retro-relevant system emulators
 QEMU_TARGETS=(
@@ -99,6 +101,59 @@ download_qemu() {
     rm -f "/tmp/${QEMU_TARBALL}"
 }
 
+apply_patches() {
+    [[ -d "${QEMU_SRC_DIR}" ]] || die "Source directory not found: ${QEMU_SRC_DIR}. Run '$(basename "$0") download' first."
+
+    if [[ ! -d "${PATCHES_DIR}" ]]; then
+        log "No patches directory found at ${PATCHES_DIR} — skipping patch step."
+        return 0
+    fi
+
+    # Collect .patch files in deterministic order: general → m68k → ppc → sparc → root
+    local subdirs=("general" "m68k" "ppc" "sparc")
+    local all_patches=()
+    for sub in "${subdirs[@]}"; do
+        local dir="${PATCHES_DIR}/${sub}"
+        [[ -d "${dir}" ]] || continue
+        while IFS= read -r -d '' p; do
+            all_patches+=("${p}")
+        done < <(find "${dir}" -maxdepth 1 -name "*.patch" -print0 | sort -z)
+    done
+    # Also pick up any .patch files placed directly in PATCHES_DIR root
+    while IFS= read -r -d '' p; do
+        all_patches+=("${p}")
+    done < <(find "${PATCHES_DIR}" -maxdepth 1 -name "*.patch" -print0 | sort -z)
+
+    if [[ ${#all_patches[@]} -eq 0 ]]; then
+        log "No .patch files found in ${PATCHES_DIR} — nothing to apply."
+        return 0
+    fi
+
+    log "Applying ${#all_patches[@]} patch(es) to ${QEMU_SRC_DIR} …"
+    local applied=0 skipped=0
+    for patch in "${all_patches[@]}"; do
+        local name
+        name="$(basename "${patch}")"
+        # Skip already-applied patches (idempotent re-runs)
+        if git -C "${QEMU_SRC_DIR}" apply --check --reverse "${patch}" &>/dev/null; then
+            log "  [already applied] ${name}"
+            (( skipped++ )) || true
+            continue
+        fi
+        if git -C "${QEMU_SRC_DIR}" apply --check "${patch}" &>/dev/null; then
+            git -C "${QEMU_SRC_DIR}" apply "${patch}" \
+                && log "  [applied] ${name}" \
+                || die "Failed to apply patch: ${patch}"
+            (( applied++ )) || true
+        else
+            warn "  [skipped — does not apply cleanly] ${name}"
+            warn "  Run: git -C '${QEMU_SRC_DIR}' apply --reject '${patch}'"
+            (( skipped++ )) || true
+        fi
+    done
+    log "Patches: ${applied} applied, ${skipped} skipped."
+}
+
 configure_qemu() {
     log "Configuring QEMU …"
     [[ -d "${QEMU_SRC_DIR}" ]] || die "Source directory not found: ${QEMU_SRC_DIR}. Run '$(basename "$0") download' first."
@@ -149,11 +204,12 @@ show_help() {
 Usage: $(basename "$0") [COMMAND]
 
 Commands:
-  download    Download and extract QEMU ${QEMU_VERSION} source
+  download    Download and extract QEMU ${QEMU_VERSION} source (no-op if submodule present)
+  patch       Apply upstream backport patches from ${PATCHES_DIR}
   configure   Run ./configure with retro-target flags
   build       Compile QEMU
   install     Install QEMU to ${QEMU_INSTALL_PREFIX}
-  all         Download → configure → build → install  (default)
+  all         download → patch → configure → build → install  (default)
   help        Show this help
 
 Environment variables:
@@ -161,6 +217,7 @@ Environment variables:
   QEMU_SRC_DIR          Path to source tree        (default: ./qemu-\${QEMU_VERSION})
   QEMU_BUILD_DIR        Path to build directory    (default: \${QEMU_SRC_DIR}/build)
   QEMU_INSTALL_PREFIX   Installation prefix        (default: \${HOME}/.local/qemu-retro)
+  PATCHES_DIR           Directory of .patch files  (default: ./patches)
   JOBS                  Parallel build jobs        (default: nproc)
 
 Enabled targets:
@@ -178,12 +235,14 @@ main() {
     local cmd="${1:-all}"
     case "${cmd}" in
         download)  check_deps; download_qemu ;;
+        patch)     apply_patches ;;
         configure) configure_qemu ;;
         build)     build_qemu ;;
         install)   install_qemu ;;
         all)
             check_deps
             download_qemu
+            apply_patches
             configure_qemu
             build_qemu
             install_qemu

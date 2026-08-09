@@ -21,6 +21,12 @@ Custom QEMU build and VM-assist launcher for retro programming.
 build_qemu.sh        Custom QEMU build script (configure → build → install)
 vm_assist.sh         Interactive VM-assist launcher with per-platform menus
 qemu-9.2.0/          QEMU 9.2.0 source tree (git submodule — run: git submodule update --init)
+patches/
+  general/           Fixes affecting all targets (networking, big-endian hosts)
+  m68k/              Fixes for Motorola 68k targets (Mac 68k, Amiga, Atari)
+  ppc/               Fixes for PowerPC targets (mac99 G3/G4, Old World / New World)
+  sparc/             Fixes for SPARC targets (sun4u/sun4m, Solaris guests)
+  README.md          Patch catalog with upstream commit references
 vm-configs/
   macos-68k.env      MacOS 68k configuration reference (System 7.x / Mac OS 8.x)
   macos-ppc.env      MacOS PPC configuration reference (Mac OS 7.5.2 – 9.2.2)
@@ -102,6 +108,33 @@ brew install ninja pkg-config glib pixman sdl2 gtk+3 libslirp
 sudo dnf install @development-tools ninja-build glib2-devel pixman-devel \
   SDL2-devel gtk3-devel slirp-devel bzip2-devel lzo-devel snappy-devel \
   libssh-devel usbredir-devel openssl-devel
+```
+
+---
+
+## 1.1 Upstream backport patches
+
+The `patches/` directory contains upstream backport patches from the QEMU
+`stable-9.2` series (v9.2.1 – v9.2.3), applied automatically by
+`build_qemu.sh` **before** configuring.  All patches are official QEMU
+cherry-picks; they fix regressions that affect the retro targets directly.
+
+| Platform | Patch | Upstream fix | Description |
+|---|---|---|---|
+| **PPC** (mac99) | `ppc/0001` | `6726d487` / v9.2.3 | **Critical** — VSX facility interrupt crash on G3/G4 (NetBSD/macppc) |
+| **PPC** (pseries) | `ppc/0002` | `64e16e38` / v9.2.3 | Fix default CPU for pre-9.0 compat machines |
+| **SPARC** (sun4u) | `sparc/0001` | `9a516504` / v9.2.2 | Fix GDB stub f32–f62 register aliasing (Solaris debugging) |
+| **SPARC** (sun4u) | `sparc/0002` | `5afb837e` / v9.2.2 | Fix FP convert instructions (fdtox / fqtox register encoding) |
+| **General** | `general/0001` | `4f5adbe6` / v9.2.1 | Fix NULL deref in virtio-net on eBPF RSS failure |
+| **General** | `general/0002` | `bcf9282f` / v9.2.1 | Allow vDPA on big-endian hosts (PPC/SPARC) |
+
+See [`patches/README.md`](patches/README.md) for the full catalog with commit
+SHAs and GitLab issue references.
+
+To apply patches manually without a full build:
+
+```bash
+bash build_qemu.sh patch
 ```
 
 ---

@@ -1,0 +1,66 @@
+From 9a51650419a6ce5f343495959cc9661c1027d899 Mon Sep 17 00:00:00 2001
+From: Mikael Szreder <git@miszr.win>
+Date: Fri, 14 Feb 2025 08:03:43 +0100
+Subject: [PATCH] target/sparc: Fix gdbstub incorrectly handling registers
+ f32-f62
+
+The gdbstub implementation for the Sparc architecture would
+incorrectly calculate the the floating point register offset.
+This resulted in, for example, registers f32 and f34 to point to
+the same value.
+
+The issue was caused by the confusion between even register numbers
+and even register indexes. For example, the register index of f32 is 64
+and f34 is 65.
+
+Cc: qemu-stable@nongnu.org
+Fixes: 30038fd81808 ("target-sparc: Change fpr representation to doubles.")
+Signed-off-by: Mikael Szreder <git@miszr.win>
+Reviewed-by: Richard Henderson <richard.henderson@linaro.org>
+Signed-off-by: Richard Henderson <richard.henderson@linaro.org>
+Message-ID: <20250214070343.11501-1-git@miszr.win>
+(cherry picked from commit 7a74e468089a58756b438d31a2a9a97f183780d7)
+Signed-off-by: Michael Tokarev <mjt@tls.msk.ru>
+---
+ target/sparc/gdbstub.c | 18 ++++++++++++++----
+ 1 file changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/target/sparc/gdbstub.c b/target/sparc/gdbstub.c
+index ec0036e9..134617fb 100644
+--- a/target/sparc/gdbstub.c
++++ b/target/sparc/gdbstub.c
+@@ -79,8 +79,13 @@ int sparc_cpu_gdb_read_register(CPUState *cs, GByteArray *mem_buf, int n)
+         }
+     }
+     if (n < 80) {
+-        /* f32-f62 (double width, even numbers only) */
+-        return gdb_get_reg64(mem_buf, env->fpr[(n - 32) / 2].ll);
++        /* f32-f62 (16 double width registers, even register numbers only)
++         * n == 64: f32 : env->fpr[16]
++         * n == 65: f34 : env->fpr[17]
++         * etc...
++         * n == 79: f62 : env->fpr[31]
++         */
++        return gdb_get_reg64(mem_buf, env->fpr[(n - 64) + 16].ll);
+     }
+     switch (n) {
+     case 80:
+@@ -173,8 +178,13 @@ int sparc_cpu_gdb_write_register(CPUState *cs, uint8_t *mem_buf, int n)
+         }
+         return 4;
+     } else if (n < 80) {
+-        /* f32-f62 (double width, even numbers only) */
+-        env->fpr[(n - 32) / 2].ll = tmp;
++        /* f32-f62 (16 double width registers, even register numbers only)
++         * n == 64: f32 : env->fpr[16]
++         * n == 65: f34 : env->fpr[17]
++         * etc...
++         * n == 79: f62 : env->fpr[31]
++         */
++        env->fpr[(n - 64) + 16].ll = tmp;
+     } else {
+         switch (n) {
+         case 80:
+-- 
+2.54.0
+
