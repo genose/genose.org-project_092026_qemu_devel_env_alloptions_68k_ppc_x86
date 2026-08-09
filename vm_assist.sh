@@ -86,8 +86,9 @@ ask_ram_size() {
         answer=$(ask "${prompt}" "${default}")
         if [[ "${answer}" =~ ^[0-9]+([Mm]|[Gg])?$ ]]; then
             local numeric_part="${answer%[MmGg]}"
+            local suffix="${answer:${#numeric_part}}"
             if (( numeric_part >= 1 )); then
-                echo "${answer}"
+                echo "${numeric_part}${suffix^^}"
                 return 0
             fi
             warn "Invalid RAM size '${answer}'. The value must be at least 1 MiB."
@@ -1183,7 +1184,7 @@ launch_custom() {
     local arch
     arch=$(ask "QEMU system emulator (e.g. x86_64, i386, m68k, ppc, ppc64)" "x86_64")
     arch="${arch#qemu-system-}"
-    [[ "${arch}" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || die "Invalid QEMU emulator suffix '${arch}'. Use values like x86_64, i386, m68k, ppc, or ppc64."
+    [[ "${arch}" =~ ^[A-Za-z0-9][A-Za-z0-9_-]+$ ]] || die "Invalid QEMU emulator suffix '${arch}'. Use values like x86_64, i386, m68k, ppc, or ppc64."
     local qemu
     qemu=$(qemu_bin "qemu-system-${arch}")
 
