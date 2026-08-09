@@ -293,6 +293,17 @@ ask_ppc_cpu() {
     ask "PowerPC CPU (601/604/7455)" "${default_cpu}"
 }
 
+# Ask for SMP topology (sockets × cores).  Returns a -smp flag string like
+# "2,sockets=2,cores=1" ready for use as:  -smp <result>
+ask_ppc_smp() {
+    local default_sockets="${1:-1}" default_cores="${2:-1}"
+    local sockets cores
+    sockets=$(ask "CPU sockets (1 = single, 2 = dual like G4 MDD / G5 Dual)" "${default_sockets}")
+    cores=$(ask "Cores per socket" "${default_cores}")
+    local total=$(( sockets * cores ))
+    printf '%d,sockets=%d,cores=%d' "${total}" "${sockets}" "${cores}"
+}
+
 prepare_macos_integration() {
     local share_dir="$1" afp_endpoint="$2" tls_endpoint="$3"
     local shared_dir clipboard_dir
@@ -395,14 +406,16 @@ launch_macos_68k() {
 }
 
 # ---------------------------------------------------------------------------
-# PLATFORM: MacOS PPC Old World (Mac OS 7.5.2 – 9.2.2, iMac G3 era)
+# PLATFORM: MacOS PPC (Mac OS 7.5.2 – 9.2.2, G3/G4)
 # Machine: mac99 (G3/G4) — requires OpenBIOS or proprietary ROM
+# SMP note: mac99 with cpu 7455 supports up to 2 sockets (G4 MDD dual-processor).
 # ---------------------------------------------------------------------------
 launch_macos_ppc() {
     heading "MacOS PPC (Mac OS 7.5.2 – 9.2.2)"
     log "Machine: QEMU mac99 (PowerPC G3/G4)"
     log "Note: You need a Mac ROM image (Old World: 'mac.rom') or Apple firmware."
     log "Place it in: ${VM_IMAGE_DIR}/macos-ppc/"
+    log "Dual-processor tip: choose 2 sockets to emulate a G4 MDD (7455×2)."
     log "Reference config: $(config_path "macos-ppc")"
 
     local qemu
@@ -412,6 +425,8 @@ launch_macos_ppc() {
     ram=$(ask "RAM in MiB" "${DEFAULT_RAM_MB}")
     local cpu
     cpu=$(ask_ppc_cpu "7455")
+    local smp_flags
+    smp_flags=$(ask_ppc_smp "1" "1")
     local disk
     disk=$(pick_image "macos-ppc")
     local cdrom
@@ -447,6 +462,7 @@ launch_macos_ppc() {
         -machine mac99,via=pmu
         -m "${ram}"
         -cpu "${cpu}"
+        -smp "${smp_flags}"
         "${dflags[@]}"
         -device VGA,vgamem_mb=16
         -device usb-kbd
@@ -473,6 +489,95 @@ launch_macos_ppc() {
     log "Running: ${cmd[*]}"
     mkdir -p "${VM_LOG_DIR}"
     "${cmd[@]}" 2>&1 | tee "${VM_LOG_DIR}/macos-ppc-$(date +%Y%m%d-%H%M%S).log"
+}
+
+# ---------------------------------------------------------------------------
+# PLATFORM: MacOS PPC G5 / Mac OS X (ppc64)
+# Machine: mac99 via qemu-system-ppc64 — emulates G5 single or dual-processor
+# CPU: 970 (G5), 970fx, 970mp (dual-core die, used in late G5 towers)
+# SMP: use 2 sockets to emulate Power Mac G5 Dual (2005) or G5 Dual Core
+# Note: Mac OS X 10.2.7+ supports the G5; use a Panther/Tiger/Leopard image.
+# ---------------------------------------------------------------------------
+launch_macos_ppc64() {
+    heading "MacOS PPC G5 (Mac OS X — ppc64)"
+    log "Machine: QEMU mac99 via qemu-system-ppc64 (PowerPC G5 / 970)"
+    log "Dual-processor tip: choose 2 sockets to emulate a Power Mac G5 Dual."
+    log "  970    — single G5 processor"
+    log "  970fx  — revised G5 (lower power)"
+    log "  970mp  — dual-core G5 die (2 cores per socket)"
+    log "Reference config: $(config_path "macos-ppc64")"
+
+    local qemu
+    qemu=$(qemu_bin "qemu-system-ppc64")
+
+    local ram
+    ram=$(ask "RAM in MiB" "512")
+    local cpu
+    cpu=$(ask "PowerPC 64-bit CPU (970/970fx/970mp)" "970")
+    local smp_flags
+    smp_flags=$(ask_ppc_smp "1" "1")
+    local disk
+    disk=$(pick_image "macos-ppc64")
+    local cdrom
+    cdrom=$(pick_cdrom "macos-ppc64")
+    local display
+    display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
+    local dual_display
+    dual_display=$(ask "Add a second PCI display adapter? (yes/no)" "no")
+    local shared_dir
+    shared_dir=$(ask "Host Mac share/export path" "${DEFAULT_MACOS_SHARE_DIR}")
+    local afp_endpoint
+    afp_endpoint=$(ask "Netatalk/AFP endpoint for the guest" "${DEFAULT_AFP_HOST}:${DEFAULT_AFP_PORT}")
+    local tls_proxy
+    tls_proxy=$(ask "TLS proxy endpoint for the guest" "${DEFAULT_TLS_PROXY_HOST}:${DEFAULT_TLS_PROXY_PORT}")
+    local port_forwards
+    port_forwards=$(ask_port_forwards "")
+    local gdb_forward
+    gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
+    local combined_forwards
+    combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
+
+    local prom_file
+    prom_file=$(ask "Path to ROM/BIOS file (leave blank for OpenBIOS)" "")
+
+    local -a dflags; display_flags dflags "${display}"
+    local -a netflags; append_user_network netflags "sungem" "${combined_forwards}"
+    local -a dbgflags; qemu_gdb_flags dbgflags
+
+    prepare_macos_integration "${shared_dir}" "${afp_endpoint}" "${tls_proxy}"
+
+    local cmd=(
+        "${qemu}"
+        -machine mac99,via=pmu
+        -m "${ram}"
+        -cpu "${cpu}"
+        -smp "${smp_flags}"
+        "${dflags[@]}"
+        -device VGA,vgamem_mb=16
+        -device usb-kbd
+        -device usb-mouse
+        "${netflags[@]}"
+        -rtc base=localtime
+        "${dbgflags[@]}"
+    )
+
+    if is_yes "${dual_display}"; then
+        cmd+=(-device secondary-vga,vgamem_mb=16)
+    fi
+
+    if [[ -n "${prom_file}" && -f "${prom_file}" ]]; then
+        cmd+=(-bios "${prom_file}")
+    fi
+    if [[ -n "${disk}" ]]; then
+        cmd+=(-hda "${disk}")
+    fi
+    if [[ -n "${cdrom}" ]]; then
+        cmd+=(-cdrom "${cdrom}" -boot d)
+    fi
+
+    log "Running: ${cmd[*]}"
+    mkdir -p "${VM_LOG_DIR}"
+    "${cmd[@]}" 2>&1 | tee "${VM_LOG_DIR}/macos-ppc64-$(date +%Y%m%d-%H%M%S).log"
 }
 
 # ---------------------------------------------------------------------------
@@ -1062,17 +1167,18 @@ BANNER
         printf '%s\n' \
             "  ─── Retro Platforms ─────────────────────────" \
             "  1) MacOS 68k   (System 7.x / Mac OS 8.x, Quadra 800)" \
-            "  2) MacOS PPC   (Mac OS 7.5.2 – 9.2.2, G3/G4)" \
-            "  3) Atari ST/STE/TT/Falcon  (68k)" \
-            "  4) Amiga       (68k, AROS or FS-UAE)" \
-            "  5) HaikuOS     (i386 / x86_64)" \
-            "  6) Solaris x86 (Solaris / illumos)" \
-            "  7) Solaris SPARC (sun4u)" \
-            "  8) Windows XP  (i386)" \
-            "  9) OpenStep    (i386)" \
+            "  2) MacOS PPC   (Mac OS 7.5.2 – 9.2.2, G3/G4, SMP)" \
+            "  3) MacOS PPC G5 (Mac OS X, ppc64 970/970fx/970mp, SMP)" \
+            "  4) Atari ST/STE/TT/Falcon  (68k)" \
+            "  5) Amiga       (68k, AROS or FS-UAE)" \
+            "  6) HaikuOS     (i386 / x86_64)" \
+            "  7) Solaris x86 (Solaris / illumos)" \
+            "  8) Solaris SPARC (sun4u)" \
+            "  9) Windows XP  (i386)" \
+            " 10) OpenStep    (i386)" \
             "  ─── Tools ───────────────────────────────────" \
-            " 10) Custom / Generic QEMU launch" \
-            " 11) Disk image management" \
+            " 11) Custom / Generic QEMU launch" \
+            " 12) Disk image management" \
             "  q) Quit"
         printf '\n'
 
@@ -1081,15 +1187,16 @@ BANNER
         case "${choice}" in
             1) launch_macos_68k ;;
             2) launch_macos_ppc ;;
-            3) launch_atari ;;
-            4) launch_amiga ;;
-            5) launch_haiku ;;
-            6) launch_solaris_x86 ;;
-            7) launch_solaris_sparc ;;
-            8) launch_windows_xp ;;
-            9) launch_openstep ;;
-            10) launch_custom ;;
-            11) manage_images ;;
+            3) launch_macos_ppc64 ;;
+            4) launch_atari ;;
+            5) launch_amiga ;;
+            6) launch_haiku ;;
+            7) launch_solaris_x86 ;;
+            8) launch_solaris_sparc ;;
+            9) launch_windows_xp ;;
+            10) launch_openstep ;;
+            11) launch_custom ;;
+            12) manage_images ;;
             q|Q|quit|exit) log "Goodbye!"; exit 0 ;;
             *) warn "Unknown option '${choice}'" ;;
         esac
@@ -1107,7 +1214,8 @@ Usage: $(basename "$0") [PLATFORM]
 
 Platforms (non-interactive):
   macos-68k    Launch MacOS 68k VM
-  macos-ppc    Launch MacOS PPC VM
+  macos-ppc    Launch MacOS PPC VM (G3/G4, SMP)
+  macos-ppc64  Launch MacOS PPC G5 VM (ppc64 970/970fx/970mp, SMP)
   atari        Launch Atari ST/STE/TT/Falcon VM
   amiga        Launch Amiga / AROS VM
   haiku        Launch HaikuOS VM
@@ -1134,6 +1242,7 @@ main() {
     case "${1:-menu}" in
         macos-68k)  launch_macos_68k ;;
         macos-ppc)  launch_macos_ppc ;;
+        macos-ppc64) launch_macos_ppc64 ;;
         atari)      launch_atari ;;
         amiga)      launch_amiga ;;
         haiku)      launch_haiku ;;
