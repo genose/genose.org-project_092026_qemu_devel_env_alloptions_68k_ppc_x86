@@ -120,7 +120,10 @@ OBJS_PPC = $(OBJS_COMMON) $(OBJS_CPU_PPC) $(OBJS_API) $(OBJS_LIB)
 SRCS_COMMON = \
 	src/common/boot.s \
 	src/common/vectors.s \
-	src/common/messages.s
+	src/common/messages.s \
+	src/common/nmi_handler.s \
+	src/common/trap15_handler.s \
+	src/common/qemu_detect.s
 
 SRCS_CPU_M68K = \
 	src/cpu/m68k/detect.s \
