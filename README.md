@@ -2,13 +2,16 @@
 
 Custom QEMU build and VM-assist launcher for retro programming.
 
-**Supported target architectures:** Motorola 68k · PowerPC (32/64-bit) · x86 / x86_64
+**Supported target architectures:** Motorola 68k · PowerPC (32/64-bit) · x86 / x86_64 · SPARC / SPARC64
 
 **Supported guest platforms:**
 - Apple MacOS 7.1 – 9.2.2 (68k and PowerPC, Old World & New World)
 - Atari ST / STE / TT / Falcon (68k)
 - Commodore Amiga / AROS (68k)
 - HaikuOS (i386 / x86_64)
+- Solaris family (x86 and SPARC)
+- Windows XP (i386)
+- OpenStep (i386)
 
 ---
 
@@ -23,6 +26,10 @@ vm-configs/
   atari.env          Atari ST/STE/TT/Falcon configuration reference
   amiga.env          Amiga / AROS configuration reference
   haiku.env          HaikuOS i386/x86_64 configuration reference
+  solaris-x86.env    Solaris x86 configuration reference
+  solaris-sparc.env  Solaris SPARC configuration reference
+  windows-xp.env     Windows XP i386 configuration reference
+  openstep.env       OpenStep x86 configuration reference
 ```
 
 ---
@@ -30,7 +37,7 @@ vm-configs/
 ## 1. Build QEMU
 
 `build_qemu.sh` downloads, configures, and builds QEMU with all retro-relevant
-targets enabled (`m68k`, `ppc`, `ppc64`, `i386`, `x86_64`).
+targets enabled (`m68k`, `ppc`, `ppc64`, `i386`, `x86_64`, `sparc`, `sparc64`).
 
 ```bash
 # Full build (download → configure → build → install)
@@ -96,6 +103,10 @@ bash vm_assist.sh macos-ppc
 bash vm_assist.sh atari
 bash vm_assist.sh amiga
 bash vm_assist.sh haiku
+bash vm_assist.sh solaris-x86
+bash vm_assist.sh solaris-sparc
+bash vm_assist.sh windows-xp
+bash vm_assist.sh openstep
 bash vm_assist.sh custom
 
 # Disk image management
@@ -111,6 +122,9 @@ bash vm_assist.sh images
 | `VM_SHARED_DIR` | `~/vm-shared` | Host directory shared with VMs (9P) |
 | `VM_LOG_DIR` | `~/vm-logs` | Session log directory |
 | `DEFAULT_DISPLAY` | `sdl` | Display backend (sdl/gtk/vnc/curses/none) |
+| `DEFAULT_MACOS_SHARE_DIR` | `/tmp/volatile_hd` | Host export path prepared for classic Mac guests |
+| `DEFAULT_GDB_BRIDGE_PORT` | `2345` | Default guest gdbserver bridge port |
+| `DEFAULT_QEMU_GDB_PORT` | `1234` | Default QEMU GDB stub port |
 
 ---
 
@@ -121,6 +135,8 @@ bash vm_assist.sh images
 - **QEMU machine:** `q800` (Quadra 800 — Motorola 68040)
 - **RAM:** up to 256 MiB
 - Requires a MacOS 68k hard disk image (or installation CD-ROM).
+- `vm_assist.sh` can prepare dual-display, clipboard exchange, `/tmp/volatile_hd`
+  host-share notes, Netatalk/AFP and TLS proxy endpoints, and guest GDB bridging.
 
 ```bash
 qemu-system-m68k -machine q800 -cpu m68040 -m 128 \
@@ -135,11 +151,16 @@ qemu-system-m68k -machine q800 -cpu m68040 -m 128 \
 
 - **QEMU machine:** `mac99,via=pmu` (PowerMac G3/G4)
 - Uses OpenBIOS by default; Old World ROMs require a physical ROM dump.
+- `vm-configs/macos-ppc.env` documents the default host integration endpoints:
+  AFP/Netatalk on `10.0.2.2:548`, TLS proxy on `10.0.2.2:8443`,
+  clipboard exchange via `/tmp/volatile_hd/clipboard`, and host-side setup notes
+  for both MacPorts and Homebrew.
 
 ```bash
 qemu-system-ppc -machine mac99,via=pmu -cpu G4 -m 256 \
   -display sdl -audiodev sdl,id=snd0 \
   -device VGA,vgamem_mb=16 \
+  -device secondary-vga,vgamem_mb=16 \
   -device usb-kbd -device usb-mouse \
   -nic user,model=sungem \
   -rtc base=localtime \
@@ -189,11 +210,93 @@ qemu-system-x86_64 -machine q35 -cpu host -m 1024 -smp 2 \
   -hda ~/vm-images/haiku-x86_64/haiku-hdd.qcow2
 ```
 
+### Solaris family
+
+- **x86 preset:** `bash vm_assist.sh solaris-x86`
+- **SPARC preset:** `bash vm_assist.sh solaris-sparc`
+- SPARC guests require a QEMU build that includes `qemu-system-sparc64`.
+- Supply your own installation media and target disk images under
+  `~/vm-images/solaris-x86/` or `~/vm-images/solaris-sparc/`.
+
+```bash
+qemu-system-i386 -machine pc -cpu pentium3 -m 1024 -smp 2 \
+  -display sdl -audiodev sdl,id=snd0 \
+  -device VGA,vgamem_mb=16 \
+  -device usb-kbd -device usb-mouse \
+  -nic user,model=e1000 \
+  -rtc base=localtime \
+  -hda ~/vm-images/solaris-x86/solaris-hdd.qcow2
+```
+
+```bash
+qemu-system-sparc64 -machine sun4u -cpu "TI UltraSparc IIi" -m 1024 \
+  -display sdl -audiodev sdl,id=snd0 \
+  -device VGA,vgamem_mb=16 \
+  -nic user,model=sunhme \
+  -rtc base=localtime \
+  -hda ~/vm-images/solaris-sparc/solaris-sparc-hdd.qcow2
+```
+
+### Windows XP (i386)
+
+- **Preset:** `bash vm_assist.sh windows-xp`
+- Uses a conservative `pentium3` + `rtl8139` profile for broad guest-driver support.
+- The launcher can optionally expose a host SMB share and guest-facing GDB bridge.
+- Supply your own install media and disk images under `~/vm-images/windows-xp/`.
+
+```bash
+qemu-system-i386 -machine pc -cpu pentium3 -m 1024 -smp 2 \
+  -display sdl -audiodev sdl,id=snd0 \
+  -device VGA,vgamem_mb=16 \
+  -device usb-ehci -device usb-kbd -device usb-mouse \
+  -nic user,model=rtl8139,smb=~/vm-shared \
+  -rtc base=localtime \
+  -hda ~/vm-images/windows-xp/windows-xp-hdd.qcow2
+```
+
+### OpenStep (i386)
+
+- **Preset:** `bash vm_assist.sh openstep`
+- Uses a conservative `pentium` + `ne2k_pci` profile for older x86 compatibility.
+- Supply your own install media and disk images under `~/vm-images/openstep/`.
+
+```bash
+qemu-system-i386 -machine pc -cpu pentium -m 256 \
+  -display sdl -audiodev sdl,id=snd0 \
+  -device VGA,vgamem_mb=8 \
+  -nic user,model=ne2k_pci \
+  -rtc base=localtime \
+  -hda ~/vm-images/openstep/openstep-hdd.qcow2
+```
+
 ---
 
-## 4. Disk image management
+## 4. Debugging, forwarding, and host integration
 
-`vm_assist.sh` includes a built-in image management menu (option 7 or
+`vm_assist.sh` now exposes runtime options across the relevant presets for:
+
+- guest GDB/gdbserver TCP bridging for in-guest deployment debugging
+- QEMU GDB stub exposure on a dedicated host port
+- TCP service forwards for guest services
+- optional SMB host exports for compatible x86 guests
+- optional 9P/VirtFS sharing for guests that support it
+- optional second display adapters in the presets that can use them
+
+For classic Mac guests:
+
+- host share default: `/tmp/volatile_hd`
+- clipboard exchange path: `/tmp/volatile_hd/clipboard`
+- default AFP/Netatalk endpoint: `10.0.2.2:548`
+- default TLS proxy endpoint: `10.0.2.2:8443`
+
+Classic Mac OS does **not** natively consume QEMU 9P sharing, so host-side
+Netatalk/AFP or similar network services remain the preferred file-exchange path.
+
+---
+
+## 5. Disk image management
+
+`vm_assist.sh` includes a built-in image management menu (option 11 or
 `bash vm_assist.sh images`), providing:
 
 - Create new blank qcow2 image
@@ -213,6 +316,19 @@ qemu-img convert -p -O qcow2 disk.img disk.qcow2
 # Resize (add 1 GiB)
 qemu-img resize disk.qcow2 +1G
 ```
+
+---
+
+## 6. Guest media / firmware constraints
+
+- **MacOS 68k / PPC:** bring your own legally obtained hard disk images,
+  install CDs, and any required ROM dumps; Old World ROMs are not redistributable.
+- **Solaris x86 / SPARC:** bring your own Solaris or illumos-family install media
+  and target disk images; SPARC installs require the SPARC system emulator target.
+- **Windows XP:** bring your own ISO/media and license; this repository does not
+  ship guest drivers, service packs, or product keys.
+- **OpenStep:** bring your own install media and disk image; best compatibility is
+  usually with conservative emulated devices and modest RAM.
 
 ---
 

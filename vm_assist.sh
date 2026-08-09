@@ -7,12 +7,17 @@
 #   • Atari ST / STE / TT / Falcon  (m68k)
 #   • Commodore Amiga  (m68k)
 #   • HaikuOS  (i386 / x86_64)
+#   • Solaris family  (x86 + SPARC)
+#   • Windows XP  (i386)
+#   • OpenStep  (i386)
 # =============================================================================
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
 # Configuration — override with environment variables
 # ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+VM_CONFIG_DIR="${SCRIPT_DIR}/vm-configs"
 QEMU_PREFIX="${QEMU_PREFIX:-${HOME}/.local/qemu-retro}"
 QEMU_BIN_DIR="${QEMU_BIN_DIR:-${QEMU_PREFIX}/bin}"
 VM_IMAGE_DIR="${VM_IMAGE_DIR:-${HOME}/vm-images}"
@@ -21,6 +26,13 @@ VM_LOG_DIR="${VM_LOG_DIR:-${HOME}/vm-logs}"
 DEFAULT_RAM_MB="${DEFAULT_RAM_MB:-256}"
 DEFAULT_DISPLAY="${DEFAULT_DISPLAY:-sdl}"
 VNC_PORT="${VNC_PORT:-5900}"
+DEFAULT_GDB_BRIDGE_PORT="${DEFAULT_GDB_BRIDGE_PORT:-2345}"
+DEFAULT_QEMU_GDB_PORT="${DEFAULT_QEMU_GDB_PORT:-1234}"
+DEFAULT_TLS_PROXY_HOST="${DEFAULT_TLS_PROXY_HOST:-10.0.2.2}"
+DEFAULT_TLS_PROXY_PORT="${DEFAULT_TLS_PROXY_PORT:-8443}"
+DEFAULT_AFP_HOST="${DEFAULT_AFP_HOST:-10.0.2.2}"
+DEFAULT_AFP_PORT="${DEFAULT_AFP_PORT:-548}"
+DEFAULT_MACOS_SHARE_DIR="${DEFAULT_MACOS_SHARE_DIR:-/tmp/volatile_hd}"
 
 # ---------------------------------------------------------------------------
 # Colour helpers
@@ -65,6 +77,40 @@ ask() {
     local prompt="$1" default="$2" answer
     read -rp "$(printf "${C_BOLD}${prompt}${C_RESET} [${default}]: ")" answer
     echo "${answer:-${default}}"
+}
+
+is_yes() {
+    case "${1,,}" in
+        y|yes|true|1|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+trim_spaces() {
+    local value="$1"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    echo "${value}"
+}
+
+merge_csv_values() {
+    local first
+    first=$(trim_spaces "${1:-}")
+    local second
+    second=$(trim_spaces "${2:-}")
+
+    if [[ -n "${first}" && -n "${second}" ]]; then
+        echo "${first},${second}"
+    elif [[ -n "${first}" ]]; then
+        echo "${first}"
+    else
+        echo "${second}"
+    fi
+}
+
+config_path() {
+    local name="$1"
+    echo "${VM_CONFIG_DIR}/${name}.env"
 }
 
 # ---------------------------------------------------------------------------
@@ -150,8 +196,96 @@ pick_cdrom() {
 # Utility: create a shared 9P virtfs directory
 # ---------------------------------------------------------------------------
 ensure_shared_dir() {
-    mkdir -p "${VM_SHARED_DIR}"
-    echo "${VM_SHARED_DIR}"
+    local path="${1:-${VM_SHARED_DIR}}"
+    mkdir -p "${path}"
+    echo "${path}"
+}
+
+append_user_network() {
+    local -n _net_array="$1"
+    local model="${2:-}"
+    local forwards="${3:-}"
+    local smb_dir="${4:-}"
+
+    local nic="user"
+    if [[ -n "${model}" ]]; then
+        nic+=",model=${model}"
+    fi
+    if [[ -n "${smb_dir}" ]]; then
+        nic+=",smb=${smb_dir}"
+    fi
+
+    if [[ -n "${forwards}" ]]; then
+        local IFS=','
+        local pair host guest
+        read -r -a pairs <<<"${forwards}"
+        for pair in "${pairs[@]}"; do
+            pair=$(trim_spaces "${pair}")
+            [[ -z "${pair}" ]] && continue
+            if [[ "${pair}" =~ ^([0-9]+):([0-9]+)$ ]]; then
+                host="${BASH_REMATCH[1]}"
+                guest="${BASH_REMATCH[2]}"
+                nic+=",hostfwd=tcp::${host}-:${guest}"
+            else
+                warn "Ignoring invalid TCP forward '${pair}' (expected hostPort:guestPort)."
+            fi
+        done
+    fi
+
+    _net_array=(-nic "${nic}")
+}
+
+ask_port_forwards() {
+    local default_value="${1:-}"
+    ask "TCP forwards host:guest (comma-separated, blank to skip)" "${default_value}"
+}
+
+ask_gdb_bridge_forward() {
+    local default_port="${1:-${DEFAULT_GDB_BRIDGE_PORT}}"
+    local enable
+    enable=$(ask "Expose a guest GDB/gdbserver bridge? (yes/no)" "no")
+    if ! is_yes "${enable}"; then
+        echo ""
+        return
+    fi
+
+    local host_port guest_port
+    host_port=$(ask "Host TCP port for the GDB bridge" "${default_port}")
+    guest_port=$(ask "Guest TCP port for gdbserver" "${default_port}")
+    echo "${host_port}:${guest_port}"
+}
+
+qemu_gdb_flags() {
+    local -n _dbg_array="$1"
+    local enable
+    enable=$(ask "Expose the QEMU GDB stub? (yes/no)" "no")
+    if ! is_yes "${enable}"; then
+        _dbg_array=()
+        return
+    fi
+
+    local gdb_port wait
+    gdb_port=$(ask "QEMU GDB stub TCP port" "${DEFAULT_QEMU_GDB_PORT}")
+    wait=$(ask "Pause CPUs at startup for debugger attach? (yes/no)" "no")
+
+    _dbg_array=(-gdb "tcp::${gdb_port}")
+    if is_yes "${wait}"; then
+        _dbg_array+=(-S)
+    fi
+}
+
+prepare_macos_integration() {
+    local share_dir="$1" afp_endpoint="$2" tls_endpoint="$3"
+    local shared_dir clipboard_dir
+    shared_dir=$(ensure_shared_dir "${share_dir}")
+    clipboard_dir="${shared_dir}/clipboard"
+    mkdir -p "${clipboard_dir}"
+
+    log "Prepared Mac host share at ${shared_dir}"
+    log "Clipboard exchange path: ${clipboard_dir}"
+    log "Netatalk/AFP endpoint for the guest: ${afp_endpoint}"
+    log "TLS proxy endpoint for the guest: ${tls_endpoint}"
+    log "Package-manager note: classic Mac guests typically consume host services prepared via MacPorts or Homebrew."
 }
 
 # ---------------------------------------------------------------------------
@@ -178,6 +312,7 @@ display_flags() {
 launch_macos_68k() {
     heading "MacOS 68k (System 7.x / Mac OS 8.x)"
     log "Machine: QEMU q800 (Motorola 68040, up to 256 MB RAM)"
+    log "Reference config: $(config_path "macos-68k")"
 
     local qemu
     qemu=$(qemu_bin "qemu-system-m68k")
@@ -190,8 +325,22 @@ launch_macos_68k() {
     cdrom=$(pick_cdrom "macos-68k")
     local display
     display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
+    local dual_display
+    dual_display=$(ask "Add a second Nubus display adapter? (yes/no)" "no")
+    local shared_dir
+    shared_dir=$(ask "Host Mac share/export path" "${DEFAULT_MACOS_SHARE_DIR}")
+    local afp_endpoint
+    afp_endpoint=$(ask "Netatalk/AFP endpoint for the guest" "${DEFAULT_AFP_HOST}:${DEFAULT_AFP_PORT}")
+    local tls_proxy
+    tls_proxy=$(ask "TLS proxy endpoint for the guest" "${DEFAULT_TLS_PROXY_HOST}:${DEFAULT_TLS_PROXY_PORT}")
+    local gdb_forward
+    gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
 
     local -a dflags; display_flags dflags "${display}"
+    local -a netflags; append_user_network netflags "dp83932" "${gdb_forward}"
+    local -a dbgflags; qemu_gdb_flags dbgflags
+
+    prepare_macos_integration "${shared_dir}" "${afp_endpoint}" "${tls_proxy}"
 
     local cmd=(
         "${qemu}"
@@ -200,9 +349,14 @@ launch_macos_68k() {
         -cpu m68040
         "${dflags[@]}"
         -device nubus-macfb
-        -nic user,model=dp83932
+        "${netflags[@]}"
         -rtc base=localtime
+        "${dbgflags[@]}"
     )
+
+    if is_yes "${dual_display}"; then
+        cmd+=(-device nubus-macfb)
+    fi
 
     if [[ -n "${disk}" ]]; then
         cmd+=(-hda "${disk}")
@@ -225,6 +379,7 @@ launch_macos_ppc() {
     log "Machine: QEMU mac99 (PowerPC G3/G4)"
     log "Note: You need a Mac ROM image (Old World: 'mac.rom') or Apple firmware."
     log "Place it in: ${VM_IMAGE_DIR}/macos-ppc/"
+    log "Reference config: $(config_path "macos-ppc")"
 
     local qemu
     qemu=$(qemu_bin "qemu-system-ppc")
@@ -237,12 +392,25 @@ launch_macos_ppc() {
     cdrom=$(pick_cdrom "macos-ppc")
     local display
     display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
+    local dual_display
+    dual_display=$(ask "Add a second PCI display adapter? (yes/no)" "no")
+    local shared_dir
+    shared_dir=$(ask "Host Mac share/export path" "${DEFAULT_MACOS_SHARE_DIR}")
+    local afp_endpoint
+    afp_endpoint=$(ask "Netatalk/AFP endpoint for the guest" "${DEFAULT_AFP_HOST}:${DEFAULT_AFP_PORT}")
+    local tls_proxy
+    tls_proxy=$(ask "TLS proxy endpoint for the guest" "${DEFAULT_TLS_PROXY_HOST}:${DEFAULT_TLS_PROXY_PORT}")
+    local gdb_forward
+    gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
 
-    local rom_dir="${VM_IMAGE_DIR}/macos-ppc"
     local prom_file
     prom_file=$(ask "Path to ROM/BIOS file (leave blank for OpenBIOS)" "")
 
     local -a dflags; display_flags dflags "${display}"
+    local -a netflags; append_user_network netflags "sungem" "${gdb_forward}"
+    local -a dbgflags; qemu_gdb_flags dbgflags
+
+    prepare_macos_integration "${shared_dir}" "${afp_endpoint}" "${tls_proxy}"
 
     local cmd=(
         "${qemu}"
@@ -253,9 +421,14 @@ launch_macos_ppc() {
         -device VGA,vgamem_mb=16
         -device usb-kbd
         -device usb-mouse
-        -nic user,model=sungem
+        "${netflags[@]}"
         -rtc base=localtime
+        "${dbgflags[@]}"
     )
+
+    if is_yes "${dual_display}"; then
+        cmd+=(-device secondary-vga,vgamem_mb=16)
+    fi
 
     if [[ -n "${prom_file}" && -f "${prom_file}" ]]; then
         cmd+=(-bios "${prom_file}")
@@ -382,6 +555,7 @@ launch_amiga() {
 launch_haiku() {
     heading "HaikuOS (x86 / x86_64)"
     log "Download Haiku nightlies or releases from https://www.haiku-os.org/get-haiku"
+    log "Reference config: $(config_path "haiku")"
 
     local arch
     arch=$(ask "Architecture (i386/x86_64)" "x86_64")
@@ -404,11 +578,19 @@ launch_haiku() {
     kvm=$(ask "Enable KVM hardware acceleration? (yes/no)" "yes")
     local cores
     cores=$(ask "CPU cores" "2")
-
     local shared_dir
-    shared_dir=$(ensure_shared_dir)
+    shared_dir=$(ask "Shared directory path (VirtFS/9P)" "${VM_SHARED_DIR}")
+    shared_dir=$(ensure_shared_dir "${shared_dir}")
+    local port_forwards
+    port_forwards=$(ask_port_forwards "")
+    local gdb_forward
+    gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
+    local combined_forwards
+    combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
 
     local -a dflags; display_flags dflags "${display}"
+    local -a netflags; append_user_network netflags "e1000" "${combined_forwards}"
+    local -a dbgflags; qemu_gdb_flags dbgflags
 
     local cmd=(
         "${qemu}"
@@ -420,9 +602,10 @@ launch_haiku() {
         -device usb-ehci
         -device usb-kbd
         -device usb-mouse
-        -nic user,model=e1000
+        "${netflags[@]}"
         -rtc base=localtime
         -virtfs local,path="${shared_dir}",mount_tag=shared,security_model=mapped-xattr
+        "${dbgflags[@]}"
     )
 
     if [[ "${kvm}" == "yes" ]] && [[ -e /dev/kvm ]]; then
@@ -441,6 +624,246 @@ launch_haiku() {
     log "Running: ${cmd[*]}"
     mkdir -p "${VM_LOG_DIR}"
     "${cmd[@]}" 2>&1 | tee "${VM_LOG_DIR}/haiku-${arch}-$(date +%Y%m%d-%H%M%S).log"
+}
+
+# ---------------------------------------------------------------------------
+# PLATFORM: Solaris x86 / x86_64
+# ---------------------------------------------------------------------------
+launch_solaris_x86() {
+    heading "Solaris x86"
+    log "Suitable for Solaris 8/9/10 x86 install media and related illumos-family experiments."
+    log "Reference config: $(config_path "solaris-x86")"
+
+    local qemu
+    qemu=$(qemu_bin "qemu-system-i386")
+
+    local ram
+    ram=$(ask "RAM in MiB" "1024")
+    local cores
+    cores=$(ask "CPU cores" "2")
+    local disk
+    disk=$(pick_image "solaris-x86")
+    local cdrom
+    cdrom=$(pick_cdrom "solaris-x86")
+    local display
+    display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
+    local smb_share
+    smb_share=$(ask "Optional host SMB share path for the guest" "")
+    if [[ -n "${smb_share}" ]]; then
+        smb_share=$(ensure_shared_dir "${smb_share}")
+    fi
+    local port_forwards
+    port_forwards=$(ask_port_forwards "")
+    local gdb_forward
+    gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
+    local combined_forwards
+    combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
+
+    local -a dflags; display_flags dflags "${display}"
+    local -a netflags; append_user_network netflags "e1000" "${combined_forwards}" "${smb_share}"
+    local -a dbgflags; qemu_gdb_flags dbgflags
+
+    local cmd=(
+        "${qemu}"
+        -machine pc
+        -cpu pentium3
+        -m "${ram}"
+        -smp "${cores}"
+        "${dflags[@]}"
+        -device VGA,vgamem_mb=16
+        -device usb-kbd
+        -device usb-mouse
+        "${netflags[@]}"
+        -rtc base=localtime
+        "${dbgflags[@]}"
+    )
+
+    if [[ -n "${disk}" ]]; then
+        cmd+=(-hda "${disk}")
+    fi
+    if [[ -n "${cdrom}" ]]; then
+        cmd+=(-cdrom "${cdrom}" -boot d)
+    fi
+
+    log "Running: ${cmd[*]}"
+    mkdir -p "${VM_LOG_DIR}"
+    "${cmd[@]}" 2>&1 | tee "${VM_LOG_DIR}/solaris-x86-$(date +%Y%m%d-%H%M%S).log"
+}
+
+# ---------------------------------------------------------------------------
+# PLATFORM: Solaris SPARC
+# ---------------------------------------------------------------------------
+launch_solaris_sparc() {
+    heading "Solaris SPARC"
+    log "Suitable for sun4u-era Solaris/SPARC media; requires qemu-system-sparc64."
+    log "Reference config: $(config_path "solaris-sparc")"
+
+    local qemu
+    qemu=$(qemu_bin "qemu-system-sparc64")
+
+    local ram
+    ram=$(ask "RAM in MiB" "1024")
+    local disk
+    disk=$(pick_image "solaris-sparc")
+    local cdrom
+    cdrom=$(pick_cdrom "solaris-sparc")
+    local display
+    display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
+    local port_forwards
+    port_forwards=$(ask_port_forwards "")
+    local gdb_forward
+    gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
+    local combined_forwards
+    combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
+
+    local -a dflags; display_flags dflags "${display}"
+    local -a netflags; append_user_network netflags "sunhme" "${combined_forwards}"
+    local -a dbgflags; qemu_gdb_flags dbgflags
+
+    local cmd=(
+        "${qemu}"
+        -machine sun4u
+        -cpu "TI UltraSparc IIi"
+        -m "${ram}"
+        "${dflags[@]}"
+        -device VGA,vgamem_mb=16
+        "${netflags[@]}"
+        -rtc base=localtime
+        "${dbgflags[@]}"
+    )
+
+    if [[ -n "${disk}" ]]; then
+        cmd+=(-hda "${disk}")
+    fi
+    if [[ -n "${cdrom}" ]]; then
+        cmd+=(-cdrom "${cdrom}" -boot d)
+    fi
+
+    log "Running: ${cmd[*]}"
+    mkdir -p "${VM_LOG_DIR}"
+    "${cmd[@]}" 2>&1 | tee "${VM_LOG_DIR}/solaris-sparc-$(date +%Y%m%d-%H%M%S).log"
+}
+
+# ---------------------------------------------------------------------------
+# PLATFORM: Windows XP
+# ---------------------------------------------------------------------------
+launch_windows_xp() {
+    heading "Windows XP"
+    log "Reference config: $(config_path "windows-xp")"
+
+    local qemu
+    qemu=$(qemu_bin "qemu-system-i386")
+
+    local ram
+    ram=$(ask "RAM in MiB" "1024")
+    local cores
+    cores=$(ask "CPU cores" "2")
+    local disk
+    disk=$(pick_image "windows-xp")
+    local cdrom
+    cdrom=$(pick_cdrom "windows-xp")
+    local display
+    display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
+    local smb_share
+    smb_share=$(ask "Optional host SMB share path for the guest" "${VM_SHARED_DIR}")
+    if [[ -n "${smb_share}" ]]; then
+        smb_share=$(ensure_shared_dir "${smb_share}")
+    fi
+    local port_forwards
+    port_forwards=$(ask_port_forwards "")
+    local gdb_forward
+    gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
+    local combined_forwards
+    combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
+
+    local -a dflags; display_flags dflags "${display}"
+    local -a netflags; append_user_network netflags "rtl8139" "${combined_forwards}" "${smb_share}"
+    local -a dbgflags; qemu_gdb_flags dbgflags
+
+    local cmd=(
+        "${qemu}"
+        -machine pc
+        -cpu pentium3
+        -m "${ram}"
+        -smp "${cores}"
+        "${dflags[@]}"
+        -device VGA,vgamem_mb=16
+        -device usb-ehci
+        -device usb-kbd
+        -device usb-mouse
+        "${netflags[@]}"
+        -rtc base=localtime
+        "${dbgflags[@]}"
+    )
+
+    if [[ -n "${disk}" ]]; then
+        cmd+=(-hda "${disk}")
+    fi
+    if [[ -n "${cdrom}" ]]; then
+        cmd+=(-cdrom "${cdrom}" -boot d)
+    fi
+
+    log "Running: ${cmd[*]}"
+    mkdir -p "${VM_LOG_DIR}"
+    "${cmd[@]}" 2>&1 | tee "${VM_LOG_DIR}/windows-xp-$(date +%Y%m%d-%H%M%S).log"
+}
+
+# ---------------------------------------------------------------------------
+# PLATFORM: OpenStep x86
+# ---------------------------------------------------------------------------
+launch_openstep() {
+    heading "OpenStep x86"
+    log "Reference config: $(config_path "openstep")"
+
+    local qemu
+    qemu=$(qemu_bin "qemu-system-i386")
+
+    local ram
+    ram=$(ask "RAM in MiB" "256")
+    local disk
+    disk=$(pick_image "openstep")
+    local cdrom
+    cdrom=$(pick_cdrom "openstep")
+    local display
+    display=$(ask "Display (sdl/gtk/vnc/curses)" "${DEFAULT_DISPLAY}")
+    local smb_share
+    smb_share=$(ask "Optional host SMB share path for the guest" "")
+    if [[ -n "${smb_share}" ]]; then
+        smb_share=$(ensure_shared_dir "${smb_share}")
+    fi
+    local port_forwards
+    port_forwards=$(ask_port_forwards "")
+    local gdb_forward
+    gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
+    local combined_forwards
+    combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
+
+    local -a dflags; display_flags dflags "${display}"
+    local -a netflags; append_user_network netflags "ne2k_pci" "${combined_forwards}" "${smb_share}"
+    local -a dbgflags; qemu_gdb_flags dbgflags
+
+    local cmd=(
+        "${qemu}"
+        -machine pc
+        -cpu pentium
+        -m "${ram}"
+        "${dflags[@]}"
+        -device VGA,vgamem_mb=8
+        "${netflags[@]}"
+        -rtc base=localtime
+        "${dbgflags[@]}"
+    )
+
+    if [[ -n "${disk}" ]]; then
+        cmd+=(-hda "${disk}")
+    fi
+    if [[ -n "${cdrom}" ]]; then
+        cmd+=(-cdrom "${cdrom}" -boot d)
+    fi
+
+    log "Running: ${cmd[*]}"
+    mkdir -p "${VM_LOG_DIR}"
+    "${cmd[@]}" 2>&1 | tee "${VM_LOG_DIR}/openstep-$(date +%Y%m%d-%H%M%S).log"
 }
 
 # ---------------------------------------------------------------------------
@@ -466,10 +889,38 @@ launch_custom() {
     cdrom=$(pick_cdrom "custom-${arch}")
     local display
     display=$(ask "Display (sdl/gtk/vnc/curses/none)" "${DEFAULT_DISPLAY}")
+    local user_network
+    user_network=$(ask "Enable user-mode networking? (yes/no)" "yes")
+    local network_model
+    network_model=$(ask "Network model (leave blank for user networking default)" "e1000")
+    local share_mode
+    share_mode=$(ask "Shared folder mode (none/virtfs/smb)" "none")
+    local shared_dir=""
+    if [[ "${share_mode}" == "virtfs" || "${share_mode}" == "smb" ]]; then
+        shared_dir=$(ask "Shared directory path" "${VM_SHARED_DIR}")
+        shared_dir=$(ensure_shared_dir "${shared_dir}")
+    fi
+    local port_forwards
+    port_forwards=$(ask_port_forwards "")
+    local gdb_forward
+    gdb_forward=$(ask_gdb_bridge_forward "${DEFAULT_GDB_BRIDGE_PORT}")
+    local combined_forwards
+    combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
+    local second_display
+    second_display=$(ask "Second display device (blank to skip, e.g. secondary-vga or VGA)" "")
     local extra
     extra=$(ask "Extra QEMU flags (space-separated simple flags without values containing spaces)" "")
 
     local -a dflags; display_flags dflags "${display}"
+    local -a dbgflags; qemu_gdb_flags dbgflags
+    local -a netflags=()
+    if is_yes "${user_network}"; then
+        if [[ "${share_mode}" == "smb" ]]; then
+            append_user_network netflags "${network_model}" "${combined_forwards}" "${shared_dir}"
+        else
+            append_user_network netflags "${network_model}" "${combined_forwards}"
+        fi
+    fi
     # shellcheck disable=SC2206
     local -a extra_arr=()
     if [[ -n "${extra}" ]]; then
@@ -480,8 +931,16 @@ launch_custom() {
     local cmd=("${qemu}" -m "${ram}" "${dflags[@]}")
     [[ -n "${machine}" ]] && cmd+=(-machine "${machine}")
     [[ -n "${cpu}" ]]     && cmd+=(-cpu "${cpu}")
+    [[ ${#netflags[@]} -gt 0 ]] && cmd+=("${netflags[@]}")
     [[ -n "${disk}" ]]    && cmd+=(-hda "${disk}")
     [[ -n "${cdrom}" ]]   && cmd+=(-cdrom "${cdrom}" -boot d)
+    if [[ "${share_mode}" == "virtfs" && -n "${shared_dir}" ]]; then
+        cmd+=(-virtfs "local,path=${shared_dir},mount_tag=shared,security_model=mapped-xattr")
+    fi
+    if [[ -n "${second_display}" ]]; then
+        cmd+=(-device "${second_display}")
+    fi
+    [[ ${#dbgflags[@]} -gt 0 ]] && cmd+=("${dbgflags[@]}")
     [[ ${#extra_arr[@]} -gt 0 ]] && cmd+=("${extra_arr[@]}")
 
     log "Running: ${cmd[*]}"
@@ -563,9 +1022,13 @@ BANNER
             "  3) Atari ST/STE/TT/Falcon  (68k)" \
             "  4) Amiga       (68k, AROS or FS-UAE)" \
             "  5) HaikuOS     (i386 / x86_64)" \
+            "  6) Solaris x86 (Solaris / illumos)" \
+            "  7) Solaris SPARC (sun4u)" \
+            "  8) Windows XP  (i386)" \
+            "  9) OpenStep    (i386)" \
             "  ─── Tools ───────────────────────────────────" \
-            "  6) Custom / Generic QEMU launch" \
-            "  7) Disk image management" \
+            " 10) Custom / Generic QEMU launch" \
+            " 11) Disk image management" \
             "  q) Quit"
         printf '\n'
 
@@ -577,8 +1040,12 @@ BANNER
             3) launch_atari ;;
             4) launch_amiga ;;
             5) launch_haiku ;;
-            6) launch_custom ;;
-            7) manage_images ;;
+            6) launch_solaris_x86 ;;
+            7) launch_solaris_sparc ;;
+            8) launch_windows_xp ;;
+            9) launch_openstep ;;
+            10) launch_custom ;;
+            11) manage_images ;;
             q|Q|quit|exit) log "Goodbye!"; exit 0 ;;
             *) warn "Unknown option '${choice}'" ;;
         esac
@@ -600,6 +1067,10 @@ Platforms (non-interactive):
   atari        Launch Atari ST/STE/TT/Falcon VM
   amiga        Launch Amiga / AROS VM
   haiku        Launch HaikuOS VM
+  solaris-x86  Launch Solaris x86 VM
+  solaris-sparc Launch Solaris SPARC VM
+  windows-xp   Launch Windows XP VM
+  openstep     Launch OpenStep x86 VM
   custom       Launch custom QEMU instance
   images       Open disk image management
   (no args)    Interactive menu
@@ -622,6 +1093,10 @@ main() {
         atari)      launch_atari ;;
         amiga)      launch_amiga ;;
         haiku)      launch_haiku ;;
+        solaris-x86) launch_solaris_x86 ;;
+        solaris-sparc) launch_solaris_sparc ;;
+        windows-xp) launch_windows_xp ;;
+        openstep)   launch_openstep ;;
         custom)     launch_custom ;;
         images)     manage_images ;;
         menu)       main_menu ;;
