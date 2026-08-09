@@ -18,8 +18,9 @@ Custom QEMU build and VM-assist launcher for retro programming.
 ## Repository layout
 
 ```
-build_qemu.sh        Custom QEMU build script (download → configure → build → install)
+build_qemu.sh        Custom QEMU build script (configure → build → install)
 vm_assist.sh         Interactive VM-assist launcher with per-platform menus
+qemu-9.2.0/          QEMU 9.2.0 source tree (git submodule — run: git submodule update --init)
 vm-configs/
   macos-68k.env      MacOS 68k configuration reference (System 7.x / Mac OS 8.x)
   macos-ppc.env      MacOS PPC configuration reference (Mac OS 7.5.2 – 9.2.2)
@@ -36,19 +37,36 @@ vm-configs/
 
 ## 1. Build QEMU
 
-`build_qemu.sh` downloads, configures, and builds QEMU with all retro-relevant
-targets enabled (`m68k`, `ppc`, `ppc64`, `i386`, `x86_64`, `sparc`, `sparc64`).
+`build_qemu.sh` configures and builds QEMU with all retro-relevant targets
+enabled (`m68k`, `ppc`, `ppc64`, `i386`, `x86_64`, `sparc`, `sparc64`).
+
+The QEMU 9.2.0 sources are included in this repository as a **git submodule**
+(`qemu-9.2.0/`).  When cloning, initialise the submodule first:
 
 ```bash
-# Full build (download → configure → build → install)
+# Clone with submodule in one step
+git clone --recurse-submodules https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86.git
+
+# — or — initialise after a plain clone
+git submodule update --init
+```
+
+Once the submodule is present, `build_qemu.sh` uses it automatically
+(no separate download step needed):
+
+```bash
+# Full build (configure → build → install — sources already present)
 bash build_qemu.sh
 
 # Individual steps
-bash build_qemu.sh download
+bash build_qemu.sh download    # no-op if qemu-9.2.0/ already exists
 bash build_qemu.sh configure
 bash build_qemu.sh build
 bash build_qemu.sh install
 ```
+
+> **Without a submodule checkout** the `download` step falls back to fetching
+> the official `qemu-9.2.0.tar.xz` tarball from <https://download.qemu.org/>.
 
 ### Key environment variables
 

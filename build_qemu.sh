@@ -77,7 +77,19 @@ check_deps() {
 
 download_qemu() {
     if [[ -d "${QEMU_SRC_DIR}" ]]; then
-        log "Source directory already exists: ${QEMU_SRC_DIR}"
+        # If it is a git submodule working tree, make sure it is initialised
+        if [[ -f "${QEMU_SRC_DIR}/.git" || -d "${QEMU_SRC_DIR}/.git" ]]; then
+            log "Source directory already exists (submodule): ${QEMU_SRC_DIR}"
+            # Initialise submodule in case it was cloned without --recurse-submodules
+            local repo_root
+            repo_root="$(git -C "${QEMU_SRC_DIR}" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
+            if [[ -n "${repo_root}" ]]; then
+                log "Initialising git submodule …"
+                git -C "${repo_root}" submodule update --init -- "${QEMU_SRC_DIR}"
+            fi
+        else
+            log "Source directory already exists: ${QEMU_SRC_DIR}"
+        fi
         return 0
     fi
     log "Downloading QEMU ${QEMU_VERSION} from ${QEMU_TARBALL_URL} …"
