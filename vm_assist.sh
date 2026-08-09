@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2054  # QEMU CLI arguments commonly embed comma-separated suboptions
 # =============================================================================
 # vm_assist.sh — Interactive VM-assist launcher for retro QEMU environments
 #
