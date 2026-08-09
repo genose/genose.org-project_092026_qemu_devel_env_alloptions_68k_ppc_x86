@@ -52,6 +52,8 @@ ROM_DIR="/tmp/volatile_hd/MacROMan/TestImages"
 DEFAULT_GDB_PORT=1234
 DEFAULT_SSH_PORT=2222
 DEFAULT_NETATALK_PORT=548
+DEFAULT_SPICE_PORT=5900
+DEFAULT_VNC_PORT=5901
 
 # Patches directory
 PATCHES_DIR="${PATCHES_DIR:-${SCRIPT_DIR}/patches}"
@@ -627,17 +629,55 @@ start_qemu_vm() {
     local ssh_port="${ssh_port:-$DEFAULT_SSH_PORT}"
     local enable_netatalk="${enable_netatalk:-n}"
     local netatalk_share_name="${netatalk_share_name:-VM_${vm_name}}"
+    local file_sharing_method="${file_sharing_method:-9p}"
+    local enable_clipboard="${enable_clipboard:-n}"
+    local enable_dnd="${enable_dnd:-n}"
 
     local qemu_args=()
+    local qemu_mode="${qemu_mode:-softmmu}"
 
     # Use custom QEMU if available
     local qemu_ppc_bin=$(qemu_bin "qemu-system-ppc")
     local qemu_x86_bin=$(qemu_bin "qemu-system-x86_64")
     local qemu_arm_bin=$(qemu_bin "qemu-system-aarch64")
     local qemu_sparc_bin=$(qemu_bin "qemu-system-sparc64")
+    
+    # For system mode, use qemu-<arch> instead of qemu-system-<arch>
+    if [ "${qemu_mode}" = "system" ]; then
+        case "${arch}" in
+            "x86_64"|"i386"|"i86")
+                qemu_ppc_bin=""  # Reset PPC binary for system mode
+                qemu_arm_bin=""
+                qemu_sparc_bin=""
+                if [ -n "$(qemu_bin "qemu-x86_64")" ]; then
+                    qemu_x86_bin=$(qemu_bin "qemu-x86_64")
+                else
+                    qemu_x86_bin="qemu-x86_64"
+                fi
+                ;;
+            "arm"|"arm64")
+                qemu_ppc_bin=""
+                qemu_x86_bin=""
+                qemu_sparc_bin=""
+                if [ -n "$(qemu_bin "qemu-arm")" ]; then
+                    qemu_arm_bin=$(qemu_bin "qemu-arm")
+                else
+                    qemu_arm_bin="qemu-arm"
+                fi
+                ;;
+            *)
+                log_warn "System mode not supported for architecture: ${arch}. Using SoftMMU."
+                qemu_mode="softmmu"
+                ;;
+        esac
+    fi
 
     case "${arch}" in
         "G4"|"604ev"|"604"|"601"|"68040"|"apollocore"|"68k"|"ppc")
+            if [ "${qemu_mode}" = "system" ]; then
+                log_warn "System mode not available for PPC. Using SoftMMU."
+                qemu_mode="softmmu"
+            fi
             if [ -n "${qemu_ppc_bin}" ]; then
                 qemu_args+=("${qemu_ppc_bin}")
             else
@@ -645,6 +685,15 @@ start_qemu_vm() {
             fi
             ;;
         "x86_64"|"i386"|"i86")
+            if [ "${qemu_mode}" = "system" ]; then
+                # For x86_64 in system mode, use qemu-x86_64 (Linux user-mode)
+                if [ -n "${qemu_x86_bin}" ]; then
+                    # Replace qemu-system-x86_64 with qemu-x86_64 for system mode
+                    qemu_x86_bin=$(echo "${qemu_x86_bin}" | sed 's/qemu-system-x86_64/qemu-x86_64/g')
+                else
+                    qemu_x86_bin="qemu-x86_64"
+                fi
+            fi
             if [ -n "${qemu_x86_bin}" ]; then
                 qemu_args+=("${qemu_x86_bin}")
             else
@@ -652,6 +701,14 @@ start_qemu_vm() {
             fi
             ;;
         "arm"|"arm64")
+            if [ "${qemu_mode}" = "system" ]; then
+                # For ARM in system mode
+                if [ -n "${qemu_arm_bin}" ]; then
+                    qemu_arm_bin=$(echo "${qemu_arm_bin}" | sed 's/qemu-system-aarch64/qemu-aarch64/g')
+                else
+                    qemu_arm_bin="qemu-aarch64"
+                fi
+            fi
             if [ -n "${qemu_arm_bin}" ]; then
                 qemu_args+=("${qemu_arm_bin}")
             else
@@ -712,6 +769,14 @@ start_qemu_vm() {
     fi
 
     # Display
+    # Force SPICE if clipboard or DnD is enabled
+    if [ "${enable_clipboard}" = "y" ] || [ "${enable_dnd}" = "y" ]; then
+        if [ "${display}" != "spice" ]; then
+            log_info "Forcing SPICE display mode for clipboard/DnD support"
+            display="spice"
+        fi
+    fi
+    
     case "${display}" in
         "cocoa") qemu_args+=("-display" "cocoa") ;;
         "sdl") qemu_args+=("-display" "sdl") ;;
@@ -743,8 +808,43 @@ start_qemu_vm() {
 
     # File sharing
     if [ -d "${share_dir}" ]; then
-        qemu_args+=("-fsdev" "local,security_model=mapped,id=fsdev0,path=${share_dir}")
-        qemu_args+=("-device" "virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare")
+        if [ "${file_sharing_method}" = "virtiofs" ]; then
+            # virtio-fs for better performance
+            local virtiofs_socket="/tmp/vm_${vm_name}_virtiofs.sock"
+            qemu_args+=("-chardev" "socket,id=char0,path=${virtiofs_socket}")
+            qemu_args+=("-device" "vhost-user-fs-pci,queue-size=1024,chardev=char0,tag=shared_fs")
+            qemu_args+=("-object" "memory-backend-file,id=mem,size=${ram}M,mem-path=/dev/shm,share=on")
+            log "Using virtio-fs with socket: ${virtiofs_socket}"
+            log "Start daemon: vhost-user-fs --socket-path=${virtiofs_socket} --shared-dir=${share_dir} --cache=always"
+        else
+            # Standard virtio-9p
+            qemu_args+=("-fsdev" "local,security_model=mapped,id=fsdev0,path=${share_dir}")
+            qemu_args+=("-device" "virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare")
+        fi
+    fi
+
+    # Clipboard sharing (Copy/Paste)
+    if [ "${enable_clipboard}" = "y" ]; then
+        if [ "${display}" = "spice" ]; then
+            # SPICE provides clipboard sharing
+            qemu_args+=("-chardev" "spicevmc,id=spicechannel1,name=vdagent")
+            qemu_args+=("-device" "virtserialport,chardev=spicechannel1,name=com.redhat.spice.1")
+            log "Clipboard sharing enabled via SPICE"
+        else
+            log_warn "Clipboard sharing requires SPICE display mode. Using SPICE for clipboard."
+        fi
+    fi
+
+    # Drag & Drop
+    if [ "${enable_dnd}" = "y" ]; then
+        if [ "${display}" = "spice" ]; then
+            # SPICE DnD
+            qemu_args+=("-chardev" "spicevmc,id=spicechannel2,name=usbredir")
+            qemu_args+=("-device" "usb-redir,chardev=spicechannel2,id=usbredirdev0,bus=usb-bus.0")
+            log "Drag & Drop enabled via SPICE"
+        else
+            log_warn "Drag & Drop requires SPICE display mode. Using SPICE for DnD."
+        fi
     fi
 
     # Architecture-specific settings
@@ -955,6 +1055,19 @@ create_vm() {
     case "${vm_type_choice}" in
         1)
             heading "Creating QEMU VM: ${vm_name}"
+            
+            # QEMU mode: SoftMMU or System
+            echo "QEMU Mode:"
+            echo "  [1] SoftMMU (full system emulation)"
+            echo "  [2] System (Linux user-mode emulation)"
+            read -rp "QEMU Mode [1]: " qemu_mode_choice
+            qemu_mode_choice=${qemu_mode_choice:-1}
+            local qemu_mode=""
+            case ${qemu_mode_choice} in
+                1) qemu_mode="softmmu" ;;
+                2) qemu_mode="system" ;;
+                *) qemu_mode="softmmu" ;;
+            esac
 
             echo "Architecture:"
             echo "  [1] G4 (PowerPC)"
@@ -1053,6 +1166,43 @@ create_vm() {
             read -rp "Share directory [${SHARE_DIR}]: " share_dir_input
             share_dir=${share_dir_input:-${SHARE_DIR}}
 
+            # File sharing method
+            echo "File sharing method:"
+            echo "  [1] virtio-9p-pci (standard)"
+            echo "  [2] virtio-fs (better performance)"
+            read -rp "Method [1]: " fs_choice
+            fs_choice=${fs_choice:-1}
+            local file_sharing_method=""
+            case ${fs_choice} in
+                1) file_sharing_method="9p" ;;
+                2) file_sharing_method="virtiofs" ;;
+                *) file_sharing_method="9p" ;;
+            esac
+
+            # Clipboard sharing
+            echo "Enable clipboard sharing (Copy/Paste)?"
+            echo "  [1] Yes"
+            echo "  [2] No"
+            read -rp "Option [2]: " clipboard_choice
+            clipboard_choice=${clipboard_choice:-2}
+            local enable_clipboard=""
+            case ${clipboard_choice} in
+                1) enable_clipboard="y" ;;
+                *) enable_clipboard="n" ;;
+            esac
+
+            # Drag & Drop
+            echo "Enable Drag & Drop file sharing?"
+            echo "  [1] Yes"
+            echo "  [2] No"
+            read -rp "Option [2]: " dnd_choice
+            dnd_choice=${dnd_choice:-2}
+            local enable_dnd=""
+            case ${dnd_choice} in
+                1) enable_dnd="y" ;;
+                *) enable_dnd="n" ;;
+            esac
+
             echo "ROM file (optional for old Mac OS):"
             echo "  [1] Select a ROM"
             echo "  [2] None"
@@ -1112,6 +1262,8 @@ create_vm() {
             cat > "${vm_dir}/config" << CONFIG
 # VM Configuration: ${vm_name}
 # Date: $(date)
+# QEMU Mode
+qemu_mode=${qemu_mode}
 # Architecture
 arch=${arch}
 machine=${machine}
@@ -1131,6 +1283,10 @@ multi_screen_method=${multi_screen_method}
 via=${via}
 share_dir=${share_dir}
 rom_file=${rom_file:-}
+# File sharing and features
+file_sharing_method=${file_sharing_method}
+enable_clipboard=${enable_clipboard}
+enable_dnd=${enable_dnd}
 # Debug/Network
 enable_gdb=${enable_gdb}
 gdb_port=${gdb_port:-}
@@ -1372,10 +1528,11 @@ edit_vm() {
         echo "  [3] Storage (disk/iso)"
         echo "  [4] Display (display/num_screens/multi_screen_method)"
         echo "  [5] Network (network_mode)"
-        echo "  [6] Sharing (share_dir)"
+        echo "  [6] Sharing (share_dir/file_sharing_method)"
         echo "  [7] ROM file (for old Mac OS)"
         echo "  [8] Debug/Network (GDB/SSH/Netatalk)"
-        echo "  [9] Show current config"
+        echo "  [9] Features (clipboard/DnD/qemu_mode)"
+        echo "  [C] Show current config"
         echo "  [S] Save and exit"
         echo "  [Q] Exit without saving"
         echo ""
@@ -1442,7 +1599,9 @@ edit_vm() {
 
             6)
                 read -rp "Share directory [${share_dir:-/tmp/volatile_hd}]: " share_dir
+                read -rp "File sharing method (9p/virtiofs) [${file_sharing_method:-9p}]: " file_sharing_method
                 share_dir=${share_dir:-/tmp/volatile_hd}
+                file_sharing_method=${file_sharing_method:-9p}
                 ;;
 
             7)
@@ -1451,6 +1610,16 @@ edit_vm() {
 
             8)
                 read -rp "Enable GDB debugging [${enable_gdb:-n}]: " enable_gdb
+                ;;
+
+            9)
+                read -rp "Enable clipboard sharing (y/n) [${enable_clipboard:-n}]: " enable_clipboard
+                read -rp "Enable Drag & Drop (y/n) [${enable_dnd:-n}]: " enable_dnd
+                read -rp "QEMU Mode (softmmu/system) [${qemu_mode:-softmmu}]: " qemu_mode
+                enable_clipboard=${enable_clipboard:-n}
+                enable_dnd=${enable_dnd:-n}
+                qemu_mode=${qemu_mode:-softmmu}
+                ;;
                 enable_gdb=${enable_gdb:-n}
                 if [ "${enable_gdb}" = "y" ]; then
                     read -rp "  GDB port [${DEFAULT_GDB_PORT}]: " gdb_port
@@ -1478,23 +1647,28 @@ edit_vm() {
                 fi
                 ;;
 
-            9)
+            C|c)
                 echo "Current configuration:"
+                echo "  QEMU Mode: ${qemu_mode:-softmmu}"
                 echo "  arch=${arch} machine=${machine} cpu_type=${cpu_type} via=${via}"
                 echo "  ram=${ram} cpu=${cpu}"
                 echo "  disk=${disk} iso=${iso}"
                 echo "  display=${display} num_screens=${num_screens} method=${multi_screen_method}"
                 echo "  network_mode=${network_mode} share_dir=${share_dir}"
+                echo "  file_sharing_method=${file_sharing_method:-9p}"
                 echo "  rom_file=${rom_file:-none}"
                 echo "  GDB: ${enable_gdb:-no} port=${gdb_port:-none}"
                 echo "  SSH: ${enable_ssh:-no} port=${ssh_port:-none}"
                 echo "  Netatalk: ${enable_netatalk:-no} share=${netatalk_share_name:-none}"
+                echo "  Clipboard: ${enable_clipboard:-no} DnD: ${enable_dnd:-no}"
                 ;;
 
             S|s)
                 cat > "${vm_config}" << CONFIG
 # VM Configuration: ${vm_name}
 # Date: $(date)
+# QEMU Mode
+qemu_mode=${qemu_mode:-softmmu}
 # Architecture
 arch=${arch:-G4}
 machine=${machine:-mac99}
@@ -1515,6 +1689,9 @@ multi_screen_method=${multi_screen_method:-auto}
 share_dir=${share_dir:-/tmp/volatile_hd}
 via=${via:-cuda}
 rom_file=${rom_file:-}
+file_sharing_method=${file_sharing_method:-9p}
+enable_clipboard=${enable_clipboard:-n}
+enable_dnd=${enable_dnd:-n}
 # Debug/Network
 enable_gdb=${enable_gdb:-n}
 gdb_port=${gdb_port:-}
