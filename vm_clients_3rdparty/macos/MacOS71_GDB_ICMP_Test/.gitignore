@@ -1,0 +1,50 @@
+# MacOS 7.1 GDB & ICMP Test Application - .gitignore
+
+# Build outputs
+build/
+*.o
+*.a
+*.lib
+*.dylib
+*.so
+
+# Executables
+*.exe
+*.app
+*.prc
+
+# Mac OS specific
+*.bin
+*.img
+*.qcow2
+*.raw
+
+# IDE files
+*.xcodeproj
+*.pbxproj
+*.xcworkspace
+*.xcscheme
+.idea/
+.vs/
+*.swp
+*.swo
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+*.txt
+
+# Temporary files
+*.tmp
+*.bak
+*~
+
+# Cross-compilation tools
+m68k-*/
+powerpc-*/
+
+# Linker scripts (keep these in repo)
+!macos71.ld
