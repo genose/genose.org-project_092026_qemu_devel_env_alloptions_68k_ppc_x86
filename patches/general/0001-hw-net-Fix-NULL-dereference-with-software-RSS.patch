@@ -1,0 +1,91 @@
+From 4f5adbe6974414aea3ba7c13adf156e824d2f45c Mon Sep 17 00:00:00 2001
+From: Akihiko Odaki <akihiko.odaki@daynix.com>
+Date: Thu, 16 Jan 2025 16:30:43 +0900
+Subject: [PATCH] hw/net: Fix NULL dereference with software RSS
+
+When an eBPF program cannot be attached, virtio_net_load_ebpf() returns
+false, and virtio_net_device_realize() enters the code path to handle
+errors because of this, but it causes NULL dereference because no error
+is generated.
+
+Change virtio_net_load_ebpf() to return false only when a fatal error
+occurred.
+
+Fixes: b5900dff14e5 ("hw/net: report errors from failing to use eBPF RSS FDs")
+Signed-off-by: Akihiko Odaki <akihiko.odaki@daynix.com>
+Message-Id: <20250116-software-v1-1-9e5161b534d8@daynix.com>
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Signed-off-by: Michael S. Tsirkin <mst@redhat.com>
+(cherry picked from commit bc82af6b0dcb0933e72640851fdd2594f822b23e)
+Signed-off-by: Michael Tokarev <mjt@tls.msk.ru>
+---
+ hw/net/virtio-net.c | 43 +++++++++++++++++--------------------------
+ 1 file changed, 17 insertions(+), 26 deletions(-)
+
+diff --git a/hw/net/virtio-net.c b/hw/net/virtio-net.c
+index 6e8c51a2..f8c6ccbe 100644
+--- a/hw/net/virtio-net.c
++++ b/hw/net/virtio-net.c
+@@ -1352,18 +1352,25 @@ exit:
+ 
+ static bool virtio_net_load_ebpf(VirtIONet *n, Error **errp)
+ {
+-    bool ret = false;
++    if (!virtio_net_attach_ebpf_to_backend(n->nic, -1)) {
++        return true;
++    }
+ 
+-    if (virtio_net_attach_ebpf_to_backend(n->nic, -1)) {
+-        trace_virtio_net_rss_load(n, n->nr_ebpf_rss_fds, n->ebpf_rss_fds);
+-        if (n->ebpf_rss_fds) {
+-            ret = virtio_net_load_ebpf_fds(n, errp);
+-        } else {
+-            ret = ebpf_rss_load(&n->ebpf_rss, errp);
+-        }
++    trace_virtio_net_rss_load(n, n->nr_ebpf_rss_fds, n->ebpf_rss_fds);
++
++    /*
++     * If user explicitly gave QEMU RSS FDs to use, then
++     * failing to use them must be considered a fatal
++     * error. If no RSS FDs were provided, QEMU is trying
++     * eBPF on a "best effort" basis only, so report a
++     * warning and allow fallback to software RSS.
++     */
++    if (n->ebpf_rss_fds) {
++        return virtio_net_load_ebpf_fds(n, errp);
+     }
+ 
+-    return ret;
++    ebpf_rss_load(&n->ebpf_rss, &error_warn);
++    return true;
+ }
+ 
+ static void virtio_net_unload_ebpf(VirtIONet *n)
+@@ -3801,23 +3808,7 @@ static void virtio_net_device_realize(DeviceState *dev, Error **errp)
+     net_rx_pkt_init(&n->rx_pkt);
+ 
+     if (virtio_has_feature(n->host_features, VIRTIO_NET_F_RSS)) {
+-        Error *err = NULL;
+-        if (!virtio_net_load_ebpf(n, &err)) {
+-            /*
+-             * If user explicitly gave QEMU RSS FDs to use, then
+-             * failing to use them must be considered a fatal
+-             * error. If no RSS FDs were provided, QEMU is trying
+-             * eBPF on a "best effort" basis only, so report a
+-             * warning and allow fallback to software RSS.
+-             */
+-            if (n->ebpf_rss_fds) {
+-                error_propagate(errp, err);
+-            } else {
+-                warn_report("unable to load eBPF RSS: %s",
+-                            error_get_pretty(err));
+-                error_free(err);
+-            }
+-        }
++        virtio_net_load_ebpf(n, errp);
+     }
+ }
+ 
+-- 
+2.54.0
+

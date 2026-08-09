@@ -1,0 +1,57 @@
+From bcf9282f53f27da6b45d4f14c6e6f2daaadf7f23 Mon Sep 17 00:00:00 2001
+From: Konstantin Shkolnyy <kshk@linux.ibm.com>
+Date: Fri, 21 Feb 2025 13:07:33 -0600
+Subject: [PATCH] vdpa: Allow vDPA to work on big-endian machine
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Add .set_vnet_le() function that always returns success, assuming that
+vDPA h/w always implements LE data format. Otherwise, QEMU disables vDPA and
+outputs the message:
+"backend does not support LE vnet headers; falling back on userspace virtio"
+
+Reviewed-by: Michael S. Tsirkin <mst@redhat.com>
+Acked-by: Eugenio Pérez <eperezma@redhat.com>
+Signed-off-by: Konstantin Shkolnyy <kshk@linux.ibm.com>
+Signed-off-by: Jason Wang <jasowang@redhat.com>
+(cherry picked from commit b027f55a994af885a7a498a40373a2dcc2d8b15e)
+Signed-off-by: Michael Tokarev <mjt@tls.msk.ru>
+---
+ net/vhost-vdpa.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/net/vhost-vdpa.c b/net/vhost-vdpa.c
+index 7195d340..5a962255 100644
+--- a/net/vhost-vdpa.c
++++ b/net/vhost-vdpa.c
+@@ -262,6 +262,18 @@ static bool vhost_vdpa_has_ufo(NetClientState *nc)
+ 
+ }
+ 
++/*
++ * FIXME: vhost_vdpa doesn't have an API to "set h/w endianness". But it's
++ * reasonable to assume that h/w is LE by default, because LE is what
++ * virtio 1.0 and later ask for. So, this function just says "yes, the h/w is
++ * LE". Otherwise, on a BE machine, higher-level code would mistakely think
++ * the h/w is BE and can't support VDPA for a virtio 1.0 client.
++ */
++static int vhost_vdpa_set_vnet_le(NetClientState *nc, bool enable)
++{
++    return 0;
++}
++
+ static bool vhost_vdpa_check_peer_type(NetClientState *nc, ObjectClass *oc,
+                                        Error **errp)
+ {
+@@ -429,6 +441,7 @@ static NetClientInfo net_vhost_vdpa_info = {
+         .cleanup = vhost_vdpa_cleanup,
+         .has_vnet_hdr = vhost_vdpa_has_vnet_hdr,
+         .has_ufo = vhost_vdpa_has_ufo,
++        .set_vnet_le = vhost_vdpa_set_vnet_le,
+         .check_peer_type = vhost_vdpa_check_peer_type,
+         .set_steering_ebpf = vhost_vdpa_set_steering_ebpf,
+ };
+-- 
+2.54.0
+
