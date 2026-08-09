@@ -89,6 +89,7 @@ download_qemu() {
 
 configure_qemu() {
     log "Configuring QEMU …"
+    [[ -d "${QEMU_SRC_DIR}" ]] || die "Source directory not found: ${QEMU_SRC_DIR}. Run '$(basename "$0") download' first."
     mkdir -p "${QEMU_BUILD_DIR}"
     cd "${QEMU_BUILD_DIR}"
 
