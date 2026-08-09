@@ -591,6 +591,103 @@ delete_vm() {
 }
 
 # ---------------------------------------------------------------------------
+# Validate VM configuration
+# ---------------------------------------------------------------------------
+validate_vm_config() {
+    local vm_name="$1"
+    local vm_dir="${VM_DIR}/${vm_name}"
+    local vm_config="${vm_dir}/config"
+    
+    if [ ! -d "${vm_dir}" ]; then
+        die "VM not found: ${vm_name}"
+    fi
+    
+    if [ ! -f "${vm_config}" ]; then
+        die "Config not found: ${vm_config}"
+    fi
+    
+    source "${vm_config}" 2>/dev/null || true
+    
+    # Check required fields
+    local errors=0
+    
+    # Check architecture
+    if [ -z "${arch}" ]; then
+        warn "Configuration error: 'arch' is not set"
+        errors=$((errors + 1))
+    fi
+    
+    # Check RAM
+    if [ -z "${ram}" ]; then
+        warn "Configuration error: 'ram' is not set"
+        errors=$((errors + 1))
+    elif ! [[ "${ram}" =~ ^[0-9]+$ ]]; then
+        warn "Configuration error: 'ram' must be a number (${ram})"
+        errors=$((errors + 1))
+    fi
+    
+    # Check disk if set
+    if [ -n "${disk}" ] && [ ! -f "${disk}" ]; then
+        warn "Configuration error: Disk file not found: ${disk}"
+        errors=$((errors + 1))
+    fi
+    
+    # Check ISO if set
+    if [ -n "${iso}" ] && [ ! -f "${iso}" ]; then
+        warn "Configuration error: ISO file not found: ${iso}"
+        errors=$((errors + 1))
+    fi
+    
+    # Check share directory
+    if [ -n "${share_dir}" ] && [ ! -d "${share_dir}" ]; then
+        warn "Configuration warning: Share directory not found: ${share_dir}"
+    fi
+    
+    # Check display mode
+    if [ -n "${display}" ] && [ "${display}" != "cocoa" ] && [ "${display}" != "sdl" ] && \
+       [ "${display}" != "gtk" ] && [ "${display}" != "vnc" ] && \
+       [ "${display}" != "spice" ] && [ "${display}" != "none" ]; then
+        warn "Configuration warning: Unknown display mode: ${display}"
+    fi
+    
+    # Architecture-specific checks
+    case "${arch}" in
+        "G4"|"604ev"|"604"|"601"|"68040"|"apollocore"|"68k"|"ppc")
+            # PPC is valid
+            ;;
+        "x86_64"|"i386"|"i86")
+            # x86 is valid
+            ;;
+        "arm"|"arm64")
+            # ARM is valid
+            ;;
+        "sparc"|"sparc64")
+            # SPARC is valid
+            ;;
+        "")
+            ;;
+        *)
+            warn "Configuration warning: Unknown architecture: ${arch}"
+            ;;
+    esac
+    
+    # Check if SPICE features are enabled but display is not SPICE
+    if [ "${enable_clipboard}" = "y" ] || [ "${enable_dnd}" = "y" ]; then
+        if [ "${display}" != "spice" ]; then
+            log "Note: Clipboard/DnD require SPICE display. Auto-enabling SPICE."
+        fi
+    fi
+    
+    if [ ${errors} -gt 0 ]; then
+        die "Configuration has ${errors} error(s). Please fix before starting."
+    else
+        log "Configuration validated successfully"
+    fi
+    
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # Start QEMU VM
 # ---------------------------------------------------------------------------
 start_qemu_vm() {
@@ -605,6 +702,9 @@ start_qemu_vm() {
     if [ ! -f "${vm_config}" ]; then
         die "Config not found: ${vm_config}"
     fi
+
+    # Validate configuration before starting
+    validate_vm_config "${vm_name}"
 
     source "${vm_config}" 2>/dev/null || true
 
@@ -1533,9 +1633,11 @@ edit_vm() {
         echo "  [8] Debug/Network (GDB/SSH/Netatalk)"
         echo "  [9] Features (clipboard/DnD/qemu_mode)"
         echo "  [C] Show current config"
+        echo "  [V] Validate configuration"
         echo "  [S] Save and exit"
         echo "  [Q] Exit without saving"
         echo ""
+        echo "  (Use option numbers or letters)"
 
         read -rp "Select option [9]: " choice
         choice=${choice:-9}
@@ -1661,6 +1763,12 @@ edit_vm() {
                 echo "  SSH: ${enable_ssh:-no} port=${ssh_port:-none}"
                 echo "  Netatalk: ${enable_netatalk:-no} share=${netatalk_share_name:-none}"
                 echo "  Clipboard: ${enable_clipboard:-no} DnD: ${enable_dnd:-no}"
+                ;;
+            
+            V|v)
+                echo "Validating configuration..."
+                validate_vm_config "${vm_name}"
+                echo ""
                 ;;
 
             S|s)
