@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
 # build_qemu.sh — Custom QEMU build script
-# Targets: m68k, ppc, ppc64, i386, x86_64
+# Targets: m68k, ppc, ppc64, i386, x86_64, sparc, sparc64
 # Retro platforms: MacOS 7.1-9.2.2 (PPC/68k), Atari ST (68k),
-#                  Amiga (68k), HaikuOS (x86/x86_64)
+#                  Amiga (68k), HaikuOS (x86/x86_64), Solaris family (x86/SPARC)
 # =============================================================================
 set -euo pipefail
 
@@ -25,6 +25,8 @@ QEMU_TARGETS=(
     ppc64-softmmu      # PowerPC 64-bit
     i386-softmmu       # x86 32-bit (HaikuOS, DOS, early Windows)
     x86_64-softmmu     # x86 64-bit (HaikuOS, modern Linux)
+    sparc-softmmu      # SPARC 32-bit (legacy Solaris where applicable)
+    sparc64-softmmu    # SPARC 64-bit (Solaris / sun4u)
     # User-mode emulation (Linux host only)
     m68k-linux-user
     ppc-linux-user
