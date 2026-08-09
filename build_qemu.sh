@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2054  # QEMU flags legitimately contain commas (e.g. audio driver lists)
 # =============================================================================
 # build_qemu.sh — Custom QEMU build script
 # Targets: retro defaults (m68k, ppc, ppc64, i386, x86_64, sparc, sparc64)
@@ -123,8 +124,8 @@ check_deps() {
     if [[ ${#missing[@]} -gt 0 ]]; then
         warn "Missing build dependencies: ${missing[*]}"
         warn "On Debian/Ubuntu:  sudo apt-get install build-essential git ninja-build pkg-config python3-pip libglib2.0-dev libpixman-1-dev libsdl2-dev libgtk-3-dev libvte-2.91-dev libslirp-dev libbz2-dev liblzo2-dev libsnappy-dev libssh-dev libusbredirhost-dev libcacard-dev libepoxy-dev libvirglrenderer-dev libncurses-dev libspice-server-dev libspice-protocol-dev"
-        warn "On macOS (Homebrew): brew install ninja pkg-config glib pixman sdl2 gtk+3 libslirp spice-protocol spice"
-        warn "On Fedora/RHEL:    sudo dnf install @development-tools ninja-build glib2-devel pixman-devel SDL2-devel gtk3-devel slirp-devel bzip2-devel lzo-devel snappy-devel libssh-devel usbredir-devel openssl-devel spice-protocol spice-server"
+        warn "On macOS (Homebrew): brew install ninja pkg-config glib pixman sdl2 gtk+3 libslirp spice-protocol spice-gtk"
+        warn "On Fedora/RHEL:    sudo dnf install @development-tools ninja-build glib2-devel pixman-devel SDL2-devel gtk3-devel slirp-devel bzip2-devel lzo-devel snappy-devel libssh-devel usbredir-devel openssl-devel spice-protocol spice-server-devel"
         die "Install the missing dependencies before continuing."
     fi
 }
@@ -193,9 +194,10 @@ apply_patches() {
             continue
         fi
         if git -C "${QEMU_SRC_DIR}" apply --check "${patch}" &>/dev/null; then
-            git -C "${QEMU_SRC_DIR}" apply "${patch}" \
-                && log "  [applied] ${name}" \
-                || die "Failed to apply patch: ${patch}"
+            if ! git -C "${QEMU_SRC_DIR}" apply "${patch}"; then
+                die "Failed to apply patch: ${patch}"
+            fi
+            log "  [applied] ${name}"
             (( applied++ )) || true
         else
             warn "  [skipped — does not apply cleanly] ${name}"
