@@ -142,6 +142,8 @@ SRCS_API = \
 SRCS_LIB = \
 	src/lib/string.s \
 	src/lib/memory.s \
+	src/lib/console.s \
+	src/lib/io.s \
 	src/lib/debug.c \
 	src/lib/printf.c
 
@@ -275,6 +277,14 @@ $(BUILD_DIR)/src/lib/string.o: src/lib/string.s
 	$(AS) $(ASFLAGS) -o $@ $<
 
 $(BUILD_DIR)/src/lib/memory.o: src/lib/memory.s
+	@mkdir -p $(dir $@)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD_DIR)/src/lib/console.o: src/lib/console.s
+	@mkdir -p $(dir $@)
+	$(AS) $(ASFLAGS) -o $@ $<
+
+$(BUILD_DIR)/src/lib/io.o: src/lib/io.s
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) -o $@ $<
 

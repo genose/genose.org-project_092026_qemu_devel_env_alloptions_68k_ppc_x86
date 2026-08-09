@@ -356,6 +356,103 @@ bash vm_assist.sh <preset>   # Launch with preset
 
 ---
 
+## 🥾 CUSTOM BOOTLOADER STATUS
+
+### Bootloader Universel FATBIN (68k/PPC)
+**Location:** `custom-bootloader/`
+**Status:** Implementation in progress, documentation complete
+
+#### ✅ Bootloader Completed (80%)
+- **Architecture FATBIN** - Universal binary containing both 68k and PPC code
+- **CPU Detection** - Automatic detection of 68k (68000-68060) and PPC (601-970)
+- **API Fixed Addresses** - Developer API at 0x2000-0x21FF (BootInfo, AppVectors, APITable)
+- **Exception Vectors** - Full 68k vector table with MacsBug-style handlers
+- **Backtrace Support** - Type 7 stack frames for 68040+, full register dump
+- **Messages Standardisés** - "Loading ...", "(CPU_NAME) running ...", "Boot OS ...", "Failure (code)"
+- **GDB Debug Points** - Breakpoint at 0x1000, status at 0x1004
+- **Magic Number** - 0xDEADBEEF for API validation
+- **Documentation** - 7 comprehensive docs (ARCHITECTURE.md, API_REFERENCE.md, BACKTRACE.md, HELPERS.md, BOOT_PROCESS.md, BOOTLOADER_SPEC.md, BOOTLOADER-UNIVERSAL-CONTEXT.md)
+
+#### 📁 Bootloader File Structure
+```
+custom-bootloader/
+├── Makefile                          # Build system (with linker scripts)
+├── include/
+│   ├── config.h                     # System constants & CPU definitions
+│   ├── api.h                        # API data structures
+│   └── helpers.h                    # Helper function declarations
+├── src/
+│   ├── common/
+│   │   ├── boot.s                   # Main entry point & vector table
+│   │   ├── vectors.s                # Exception vector handlers
+│   │   └── messages.s               # Standardized messages
+│   ├── cpu/m68k/
+│   │   ├── detect.s                 # 68k CPU detection (movec/cpusha)
+│   │   ├── display.s                # 68k display functions
+│   │   ├── backtrace.s              # 68k backtrace implementation
+│   │   └── helpers.s                # 68k helper functions
+│   ├── cpu/ppc/
+│   │   ├── detect.s                 # PPC CPU detection (PVR)
+│   │   ├── display.s                # PPC display functions
+│   │   ├── backtrace.s              # PPC backtrace implementation
+│   │   └── helpers.s                # PPC helper functions
+│   ├── api/
+│   │   ├── api_entry.s             # API initialization
+│   │   ├── api_68k.s                # 68k API implementation
+│   │   └── api_ppc.s                # PPC API implementation
+│   └── lib/
+│       ├── string.s                 # String utility functions
+│       ├── memory.s                 # Memory utility functions
+│       ├── console.s                # Console I/O (NEW - serial output)
+│       ├── io.s                      # Disk I/O & symbol lookup (NEW)
+│       ├── debug.c                  # Debug helper functions
+│       └── printf.c                 # printf implementation
+├── bootloader.ld                    # FATBIN linker script (NEW)
+├── bootloader_68k.ld               # 68k-only linker script (NEW)
+└── bootloader_ppc.ld                # PPC-only linker script (NEW)
+```
+
+#### ⚠️ Bootloader Missing/Partial (20%)
+| Feature | Status | File | Notes |
+|---------|--------|------|-------|
+| **Linker Scripts** | ✅ NEW | bootloader*.ld | Created 3 linker scripts |
+| **Console I/O** | ✅ NEW | src/lib/console.s | Serial output for 68k & PPC |
+| **Disk I/O** | ✅ NEW | src/lib/io.s | Stub implementations |
+| **Symbol Lookup** | ✅ NEW | src/lib/io.s | Basic symbol table |
+| **Cross-Compilers** | ❌ | N/A | Need m68k-elf-* and powerpc-elf-* |
+| **Build Test** | ❌ | Makefile | Needs cross-compilers |
+| **QEMU Test** | ❌ | N/A | Needs successful build |
+| **FATBIN Format** | ⚠️ | Makefile | Needs final linking |
+
+#### 🔧 Bootloader Build Instructions
+```bash
+# 1. Install cross-compilers
+./setup-cross-compilers.sh [--homebrew|--macports|--manual]
+
+# 2. Build with Makefile
+make clean
+make all            # Build FATBIN (both 68k + PPC)
+make bootloader_m68k  # Build 68k-only version
+make bootloader_ppc   # Build PPC-only version
+
+# 3. Test in QEMU
+make qemu-m68k      # Test 68k bootloader
+make qemu-ppc       # Test PPC bootloader
+make qemu-fatbin    # Test FATBIN bootloader
+
+# 4. Debug with GDB
+make gdb            # Start QEMU with GDB stub
+```
+
+#### 🐞 Bootloader Known Issues
+1. **Cross-compilers not installed** - Need m68k-elf-gcc, powerpc-elf-gcc
+2. **Linker scripts need testing** - May need adjustments for FATBIN format
+3. **Console output not tested** - Serial addresses may need verification
+4. **Disk I/O is stubs** - Need real IDE/SCSI implementation
+5. **Symbol lookup is basic** - Needs integration with debug info
+
+---
+
 ## 🎮 GG & TY!
 
 **Merci pour cette collaboration passionnante sur le projet VM Assistant!**
@@ -368,8 +465,14 @@ bash vm_assist.sh <preset>   # Launch with preset
 - ✅ Validation améliorée
 - ✅ **PR #2 créée et prête pour merge**
 - ✅ **Fusion des contextes COPILOT et MISTRAL**
+- ✅ **Bootloader universel FATBIN 68k/PPC implémenté à 80%**
 
-**Prochaine étape:** Tester la PR et merger vers main!
+**Prochaine étape:** 
+1. Installer les cross-compilateurs (setup-cross-compilers.sh)
+2. Tester la compilation du bootloader (make)
+3. Tester dans QEMU
+4. Finaliser le FATBIN
+5. Tester la PR et merger vers main!
 
 ---
 
