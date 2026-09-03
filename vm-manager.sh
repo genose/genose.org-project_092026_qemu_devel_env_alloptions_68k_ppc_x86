@@ -3565,36 +3565,70 @@ configure_xquartz() {
     heading "Configuring XQuartz"
     
     if [[ ! -d "/Applications/Utilities/XQuartz.app" ]]; then
-        warn "XQuartz not installed"
-        log "Download from: https://www.xquartz.org"
-        return 1
+        die "XQuartz not installed. Download from: https://www.xquartz.org"
     fi
     
-    [[ ! -f "$HOME/.Xauthority" ]] && touch "$HOME/.Xauthority" && chmod 600 "$HOME/.Xauthority"
-    export DISPLAY=":0"
-    
-    xhost +local: &>/dev/null || xhost +local:
-    log "XQuartz configured for local connections"
-    
-    if pgrep -x "Xquartz" &>/dev/null; then
-        log "XQuartz is running"
+    # Ensure .Xauthority file exists with correct permissions
+    if [[ ! -f "$HOME/.Xauthority" ]]; then
+        touch "$HOME/.Xauthority" && chmod 600 "$HOME/.Xauthority"
+        log "Created .Xauthority file with secure permissions"
     else
-        warn "XQuartz is not running"
-        log "Start with: open -a XQuartz"
+        log ".Xauthority file exists"
+        chmod 600 "$HOME/.Xauthority"
+        log "Ensured .Xauthority has secure permissions"
     fi
+    
+    export DISPLAY=":0"
+    log "Set DISPLAY=:0"
+    
+    # Configure xhost for local connections
+    if xhost +local: &>/dev/null; then
+        log "✓ xhost configured for local connections"
+    else
+        warn "✗ Failed to configure xhost for local connections"
+    fi
+    
+    # Check if XQuartz is running
+    if pgrep -x "Xquartz" &>/dev/null; then
+        log "✓ XQuartz is running"
+    else
+        warn "✗ XQuartz is not running"
+        log "Start XQuartz with: open -a XQuartz"
+    fi
+    
+    log "XQuartz configuration complete"
     return 0
 }
 
 # Configure RAM disk for sharing
 configure_ramdisk() {
     heading "Configuring RAMDISK"
-    ensure_dir "$SHARE_DIR"
-    sudo chmod 1777 "$SHARE_DIR" 2>/dev/null || true
-    sudo chown root:wheel "$SHARE_DIR" 2>/dev/null || true
+    
+    # Ensure directory exists
+    if [[ ! -d "$SHARE_DIR" ]]; then
+        ensure_dir "$SHARE_DIR"
+        log "Created directory: $SHARE_DIR"
+    else
+        log "Directory exists: $SHARE_DIR"
+    fi
+    
+    # Set permissions
+    if sudo chmod 1777 "$SHARE_DIR" 2>/dev/null; then
+        log "Permissions set to 1777 on: $SHARE_DIR"
+    else
+        warn "Failed to set permissions on: $SHARE_DIR (may require sudo)"
+    fi
+    
+    # Set ownership
+    if sudo chown root:wheel "$SHARE_DIR" 2>/dev/null; then
+        log "Ownership set to root:wheel on: $SHARE_DIR"
+    else
+        warn "Failed to set ownership on: $SHARE_DIR (may require sudo)"
+    fi
     
     local disk_usage=$(df -h "$SHARE_DIR" 2>/dev/null | tail -1 | awk '{print $4}')
     [[ -n "$disk_usage" ]] && log "Available space: $disk_usage"
-    log "RAMDISK configured: $SHARE_DIR"
+    log "RAMDISK configuration complete: $SHARE_DIR"
     return 0
 }
 
@@ -3608,31 +3642,47 @@ test_samba_connection() {
     heading "Testing Samba Connection: smb://$host/$share"
     
     if ! command -v smbutil &>/dev/null; then
-        warn "smbutil not found. Install Samba client."
-        return 1
+        die "smbutil not found. Install Samba client tools."
+    fi
+    
+    # If username not provided and we're in interactive mode, ask for it
+    if [[ -z "$username" && -z "$password" ]] && is_interactive; then
+        username=$(ask "Samba username" "$(whoami)")
+        password=$(ask "Samba password (leave empty if none)" "")
     fi
     
     # Test connection
     if smbutil statshares -a "$username" -p "$password" "//$host" 2>/dev/null | grep -q "$share"; then
         log "✓ Samba connection successful"
+        log "✓ Share '$share' is accessible on $host"
         
-        # Test mounting
-        local mount_point="/tmp/vm_test_samba_$$"
-        mkdir -p "$mount_point"
-        if mount_smbfs -N -d 777 "//${username}@${host}/${share}" "$mount_point" 2>/dev/null; then
-            log "✓ Samba mount successful"
-            ls -la "$mount_point" | head -5
-            umount "$mount_point" 2>/dev/null || true
-            rmdir "$mount_point" 2>/dev/null || true
-            return 0
+        # Test mounting (if possible)
+        if command -v mount_smbfs &>/dev/null; then
+            local mount_point="/tmp/vm_test_samba_$$"
+            mkdir -p "$mount_point"
+            if [[ -n "$username" ]]; then
+                if mount_smbfs -N -d 777 "//${username}@${host}/${share}" "$mount_point" 2>/dev/null; then
+                    log "✓ Samba mount successful"
+                    log "Contents preview:"
+                    ls -la "$mount_point" | head -5
+                    umount "$mount_point" 2>/dev/null || true
+                    rmdir "$mount_point" 2>/dev/null || true
+                    return 0
+                else
+                    warn "⚠️  Samba connection works but mount failed"
+                    rmdir "$mount_point" 2>/dev/null || true
+                    return 0
+                fi
+            else
+                warn "⚠️  Samba connection works but no username provided for mounting"
+                return 0
+            fi
         else
-            warn "✗ Samba mount failed (but connection OK)"
-            rmdir "$mount_point" 2>/dev/null || true
-            return 1
+            log "⚠️  mount_smbfs not available, but Samba connection works"
+            return 0
         fi
     else
-        warn "✗ Samba connection failed"
-        return 1
+        die "✗ Samba connection failed to $host. Check that smbd is running and the share exists."
     fi
 }
 
@@ -3641,27 +3691,40 @@ test_netatalk_connection() {
     local host="$1"
     local share="$2"
     
-    heading "Testing Netatalk Connection: afp://$host/$share"
+    heading "Testing Netatalk (AFP) Connection: afp://$host/$share"
     
-    # Test with mount_afp
+    # Method 1: Try with mount_afp
     if command -v mount_afp &>/dev/null; then
         local mount_point="/tmp/vm_test_afp_$$"
         mkdir -p "$mount_point"
         if mount_afp "afp://$host/$share" "$mount_point" 2>/dev/null; then
             log "✓ Netatalk connection successful"
+            log "Mounted at: $mount_point"
+            log "Contents preview:"
             ls -la "$mount_point" | head -5
             umount "$mount_point" 2>/dev/null || true
             rmdir "$mount_point" 2>/dev/null || true
             return 0
         else
-            warn "✗ Netatalk mount failed"
+            warn "✗ Netatalk mount failed with mount_afp"
             rmdir "$mount_point" 2>/dev/null || true
-            return 1
         fi
     else
-        warn "mount_afp not found. Try: open afp://$host/$share"
-        return 1
+        warn "mount_afp not found"
     fi
+    
+    # Method 2: Try with open command (macOS)
+    if command -v open &>/dev/null; then
+        log "Trying to open AFP share with default handler..."
+        if open "afp://$host/$share" 2>/dev/null; then
+            log "✓ Successfully opened AFP share: afp://$host/$share"
+            return 0
+        else
+            warn "✗ Failed to open AFP share"
+        fi
+    fi
+    
+    die "Netatalk connection test failed. Try: open afp://$host/$share manually."
 }
 
 # Test individual SSH connection
@@ -3672,16 +3735,17 @@ test_ssh_connection() {
     heading "Testing SSH Connection: $host:$port"
     
     if ! command -v ssh &>/dev/null; then
-        warn "SSH client not found"
-        return 1
+        die "SSH client not found. Install OpenSSH client."
     fi
+    
+    log "Attempting SSH connection to $host on port $port..."
     
     if ssh -p "$port" -o ConnectTimeout=5 -o StrictHostKeyChecking=no "$host" echo "SSH_TEST_OK" 2>/dev/null | grep -q "SSH_TEST_OK"; then
         log "✓ SSH connection successful"
+        log "✓ SSH server is responding on $host:$port"
         return 0
     else
-        warn "✗ SSH connection failed"
-        return 1
+        die "✗ SSH connection failed to $host:$port. Check that SSH server is running and accessible."
     fi
 }
 
