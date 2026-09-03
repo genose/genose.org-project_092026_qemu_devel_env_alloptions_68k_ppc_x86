@@ -2735,9 +2735,85 @@ test_ssh_connection() {
 }
 
 # ---------------------------------------------------------------------------
-# Connection Testing Functions (from test_connection.sh)
+# Backup and Restore Functions (from vm-assistant.sh)
 # ---------------------------------------------------------------------------
 
+# Create backup of all configurations
+backup_configurations() {
+    heading "Backup Configurations"
+    
+    local backup_dir="${SCRIPT_DIR}/backups"
+    local backup_file="${backup_dir}/vm-assistant-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+    
+    ensure_dir "${backup_dir}"
+    
+    log "Creating backup of ${CONFIG_DIR} to ${backup_file}"
+    
+    if tar -czf "${backup_file}" "${CONFIG_DIR}" 2>/dev/null; then
+        log "✅ Backup created: ${backup_file}"
+        return 0
+    else
+        warn "❌ Failed to create backup"
+        return 1
+    fi
+}
+
+# List available backups
+list_backups() {
+    heading "Available Backups"
+    
+    local backup_dir="${SCRIPT_DIR}/backups"
+    local backups=()
+    
+    if [[ -d "${backup_dir}" ]]; then
+        while IFS= read -r -d '' backup_file; do
+            [[ "$backup_file" == *.tar.gz ]] && backups+=("$backup_file")
+        done < <(find "${backup_dir}" -maxdepth 1 -type f -name "vm-assistant-backup-*.tar.gz" -print0 2>/dev/null)
+        
+        if [[ ${#backups[@]} -gt 0 ]]; then
+            local i=1
+            for backup in "${backups[@]}"; do
+                echo "  [$i] $(basename "$backup")"
+                ((i++)) || true
+            done
+        else
+            log "No backups found"
+        fi
+    else
+        log "No backup directory found"
+    fi
+}
+
+# Restore from backup
+restore_configuration() {
+    local backup_file="$1"
+    
+    if [[ ! -f "$backup_file" ]]; then
+        warn "Backup not found: $backup_file"
+        return 1
+    fi
+    
+    heading "Restore Configuration from $backup_file"
+    
+    # Remove current config
+    if [[ -d "${CONFIG_DIR}" ]]; then
+        log "Removing current configuration..."
+        rm -rf "${CONFIG_DIR}"
+    fi
+    
+    # Restore from backup
+    log "Restoring configuration..."
+    if tar -xzf "$backup_file" -C "$HOME" 2>/dev/null; then
+        log "✅ Configuration restored from: $backup_file"
+        return 0
+    else
+        warn "❌ Failed to restore configuration"
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Connection Testing Functions
 # Test all sharing services (Samba, Netatalk, local)
 test_sharing_services() {
     heading "Sharing Services Test"
@@ -3627,35 +3703,40 @@ show_main_menu() {
         echo "  [20] List ROM files"
         echo "  [21] List disk images"
         echo ""
+        echo "💾 Backup & Restore:"
+        echo "  [22] Create configuration backup"
+        echo "  [23] List available backups"
+        echo "  [24] Restore from backup"
+        echo ""
         echo "🚀 Quick Launch (Platform Presets):"
-        echo "  [22] MacOS 68k (System 7-8.1)"
-        echo "  [23] MacOS PPC (7.5.2-9.2.2, G3/G4)"
-        echo "  [24] MacOS PPC64 (Mac OS X, G5)"
-        echo "  [25] HaikuOS"
-        echo "  [26] Linux (generic)"
-        echo "  [27] Atari ST/TT/Falcon (68k)"
-        echo "  [28] Commodore Amiga (68k/AROS)"
-        echo "  [29] Solaris x86"
-        echo "  [30] Solaris SPARC"
-        echo "  [31] Windows XP"
-        echo "  [32] OpenStep x86"
-        echo "  [33] Custom QEMU (any architecture)"
+        echo "  [25] MacOS 68k (System 7-8.1)"
+        echo "  [26] MacOS PPC (7.5.2-9.2.2, G3/G4)"
+        echo "  [27] MacOS PPC64 (Mac OS X, G5)"
+        echo "  [28] HaikuOS"
+        echo "  [29] Linux (generic)"
+        echo "  [30] Atari ST/TT/Falcon (68k)"
+        echo "  [31] Commodore Amiga (68k/AROS)"
+        echo "  [32] Solaris x86"
+        echo "  [33] Solaris SPARC"
+        echo "  [34] Windows XP"
+        echo "  [35] OpenStep x86"
+        echo "  [36] Custom QEMU (any architecture)"
         echo ""
         echo "📖 Information:"
-        echo "  [34] Show QEMU version"
-        echo "  [35] Show available architectures"
-        echo "  [36] Show VM configurations"
+        echo "  [37] Show QEMU version"
+        echo "  [38] Show available architectures"
+        echo "  [39] Show VM configurations"
         echo ""
         echo "🔍 Diagnostics:"
-        echo "  [37] Test sharing services (Samba/Netatalk)"
-        echo "  [38] Configure Netatalk (AFP) file sharing"
-        echo "  [39] Configure Samba file sharing"
-        echo "  [40] Verify all dependencies"
-        echo "  [41] Configure XQuartz for X11 display"
-        echo "  [42] Configure RAMDISK for sharing"
-        echo "  [43] Test Samba connection"
-        echo "  [44] Test Netatalk connection"
-        echo "  [45] Test SSH connection"
+        echo "  [40] Test sharing services (Samba/Netatalk)"
+        echo "  [41] Configure Netatalk (AFP) file sharing"
+        echo "  [42] Configure Samba file sharing"
+        echo "  [43] Verify all dependencies"
+        echo "  [44] Configure XQuartz for X11 display"
+        echo "  [45] Configure RAMDISK for sharing"
+        echo "  [46] Test Samba connection"
+        echo "  [47] Test Netatalk connection"
+        echo "  [48] Test SSH connection"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -3685,30 +3766,33 @@ show_main_menu() {
             19) edit_vm_menu ;;
             20) list_roms ;;
             21) list_disks ;;
-            22) launch_macos_68k ;;
-            23) launch_macos_ppc ;;
-            24) launch_macos_ppc64 ;;
-            25) launch_haiku ;;
-            26) launch_linux ;;
-            27) launch_atari ;;
-            28) launch_amiga ;;
-            29) launch_solaris_x86 ;;
-            30) launch_solaris_sparc ;;
-            31) launch_windows_xp ;;
-            32) launch_openstep ;;
-            33) launch_custom ;;
-            34) show_qemu_version ;;
-            35) show_architectures ;;
-            36) show_vm_configs ;;
-            37) test_sharing_services ;;
-            38) configure_netatalk ;;
-            39) configure_samba ;;
-            40) verify_dependencies ;;
-            41) configure_xquartz ;;
-            42) configure_ramdisk ;;
-            43) test_samba_connection localhost VM_Shares ;;
-            44) test_netatalk_connection localhost VM_Shares ;;
-            45) test_ssh_connection localhost 22 ;;
+            22) backup_configurations ;;
+            23) list_backups ;;
+            24) backup_restore_menu ;;
+            25) launch_macos_68k ;;
+            26) launch_macos_ppc ;;
+            27) launch_macos_ppc64 ;;
+            28) launch_haiku ;;
+            29) launch_linux ;;
+            30) launch_atari ;;
+            31) launch_amiga ;;
+            32) launch_solaris_x86 ;;
+            33) launch_solaris_sparc ;;
+            34) launch_windows_xp ;;
+            35) launch_openstep ;;
+            36) launch_custom ;;
+            37) show_qemu_version ;;
+            38) show_architectures ;;
+            39) show_vm_configs ;;
+            40) test_sharing_services ;;
+            41) configure_netatalk ;;
+            42) configure_samba ;;
+            43) verify_dependencies ;;
+            44) configure_xquartz ;;
+            45) configure_ramdisk ;;
+            46) test_samba_connection localhost VM_Shares ;;
+            47) test_netatalk_connection localhost VM_Shares ;;
+            48) test_ssh_connection localhost 22 ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -4002,6 +4086,9 @@ Information:
   test-samba        Test Samba connection with mounting
   test-netatalk    Test Netatalk connection with mounting
   test-ssh         Test SSH connection
+  backup-config     Create backup of configurations
+  list-backups      List available backups
+  restore-config    Restore from backup
   menu             Interactive menu (default)
   help             Show this help
 
@@ -4117,6 +4204,10 @@ main() {
         test-samba|test-samba-connection) test_samba_connection ;;
         test-netatalk|test-netatalk-connection) test_netatalk_connection ;;
         test-ssh|test-ssh-connection) test_ssh_connection ;;
+        backup-config|backup) backup_configurations ;;
+        list-backups) list_backups ;;
+        restore-config|restore) 
+            [[ -n "${2:-}" ]] && restore_configuration "$2" || backup_restore_menu ;;
         
         # Disk/ISO management
         disk-create|create-disk) create_disk_image ;;
