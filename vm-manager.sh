@@ -151,9 +151,9 @@ detect_display_backend() {
     
     local preferred_backends=()
     case "$(uname -s)" in
-        Darwin)   preferred_backends=("cocoa" "dbus" "none" "curses") ;;
-        Linux)    preferred_backends=("gtk" "sdl" "vnc" "curses" "none") ;;
-        *)        preferred_backends=("sdl" "gtk" "vnc" "curses" "none") ;;
+        Darwin)   preferred_backends=("cocoa" "dbus" "spice" "vnc" "none" "curses") ;;
+        Linux)    preferred_backends=("gtk" "sdl" "spice" "vnc" "curses" "none") ;;
+        *)        preferred_backends=("sdl" "gtk" "spice" "vnc" "curses" "none") ;;
     esac
     
     for backend in "${preferred_backends[@]}"; do
@@ -536,6 +536,7 @@ display_flags() {
         gtk)    _df_array=(-display gtk    -audiodev pa,id=snd0)   ;;
         cocoa)  _df_array=(-display cocoa  -audiodev coreaudio,id=snd0) ;;
         vnc)    _df_array=(-display vnc=:0 -audiodev none,id=snd0) ;;
+        spice)  _df_array=(-spice port=${DEFAULT_SPICE_PORT},disable-ticketing -audiodev spice,id=snd0) ;;
         curses) _df_array=(-display curses -audiodev none,id=snd0) ;;
         none)   _df_array=(-display none   -audiodev none,id=snd0) ;;
         *)      _df_array=(-display "${display}" -audiodev none,id=snd0) ;;
