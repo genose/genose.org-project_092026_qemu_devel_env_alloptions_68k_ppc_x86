@@ -2642,6 +2642,98 @@ configure_ramdisk() {
     return 0
 }
 
+# Test individual Samba connection with mounting
+test_samba_connection() {
+    local host="$1"
+    local share="$2"
+    local username="$3"
+    local password="$4"
+    
+    heading "Testing Samba Connection: smb://$host/$share"
+    
+    if ! command -v smbutil &>/dev/null; then
+        warn "smbutil not found. Install Samba client."
+        return 1
+    fi
+    
+    # Test connection
+    if smbutil statshares -a "$username" -p "$password" "//$host" 2>/dev/null | grep -q "$share"; then
+        log "✓ Samba connection successful"
+        
+        # Test mounting
+        local mount_point="/tmp/vm_test_samba_$$"
+        mkdir -p "$mount_point"
+        if mount_smbfs -N -d 777 "//${username}@${host}/${share}" "$mount_point" 2>/dev/null; then
+            log "✓ Samba mount successful"
+            ls -la "$mount_point" | head -5
+            umount "$mount_point" 2>/dev/null || true
+            rmdir "$mount_point" 2>/dev/null || true
+            return 0
+        else
+            warn "✗ Samba mount failed (but connection OK)"
+            rmdir "$mount_point" 2>/dev/null || true
+            return 1
+        fi
+    else
+        warn "✗ Samba connection failed"
+        return 1
+    fi
+}
+
+# Test individual Netatalk connection with mounting
+test_netatalk_connection() {
+    local host="$1"
+    local share="$2"
+    
+    heading "Testing Netatalk Connection: afp://$host/$share"
+    
+    if ! command -v afp &>/dev/null; then
+        warn "AFP client not found. Try: open afp://$host/$share"
+        return 1
+    fi
+    
+    # Test with mount_afp
+    if command -v mount_afp &>/dev/null; then
+        local mount_point="/tmp/vm_test_afp_$$"
+        mkdir -p "$mount_point"
+        if mount_afp "afp://$host/$share" "$mount_point" 2>/dev/null; then
+            log "✓ Netatalk connection successful"
+            ls -la "$mount_point" | head -5
+            umount "$mount_point" 2>/dev/null || true
+            rmdir "$mount_point" 2>/dev/null || true
+            return 0
+        else
+            warn "✗ Netatalk mount failed"
+            rmdir "$mount_point" 2>/dev/null || true
+            return 1
+        fi
+    else
+        log "Try: open afp://$host/$share"
+        return 0
+    fi
+}
+
+# Test individual SSH connection
+test_ssh_connection() {
+    local host="$1"
+    local port="$2"
+    
+    heading "Testing SSH Connection: $host:$port"
+    
+    if ! command -v ssh &>/dev/null; then
+        warn "SSH client not found"
+        return 1
+    fi
+    
+    if ssh -p "$port" -o ConnectTimeout=5 -o StrictHostKeyChecking=no "$host" echo "SSH_TEST_OK" 2>/dev/null | grep -q "SSH_TEST_OK"; then
+        log "✓ SSH connection successful"
+        return 0
+    else
+        warn "✗ SSH connection failed"
+        return 1
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Connection Testing Functions (from test_connection.sh)
 # ---------------------------------------------------------------------------
@@ -3561,6 +3653,9 @@ show_main_menu() {
         echo "  [40] Verify all dependencies"
         echo "  [41] Configure XQuartz for X11 display"
         echo "  [42] Configure RAMDISK for sharing"
+        echo "  [43] Test Samba connection"
+        echo "  [44] Test Netatalk connection"
+        echo "  [45] Test SSH connection"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -3611,6 +3706,9 @@ show_main_menu() {
             40) verify_dependencies ;;
             41) configure_xquartz ;;
             42) configure_ramdisk ;;
+            43) test_samba_connection localhost VM_Shares ;;
+            44) test_netatalk_connection localhost VM_Shares ;;
+            45) test_ssh_connection localhost 22 ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -3901,6 +3999,9 @@ Information:
   configure-samba   Configure Samba file sharing
   configure-xquartz Configure XQuartz for X11 display
   configure-ramdisk Configure RAMDISK for sharing
+  test-samba        Test Samba connection with mounting
+  test-netatalk    Test Netatalk connection with mounting
+  test-ssh         Test SSH connection
   menu             Interactive menu (default)
   help             Show this help
 
@@ -4013,6 +4114,9 @@ main() {
         configure-samba|setup-samba) configure_samba ;;
         configure-xquartz|setup-xquartz) configure_xquartz ;;
         configure-ramdisk|setup-ramdisk) configure_ramdisk ;;
+        test-samba|test-samba-connection) test_samba_connection ;;
+        test-netatalk|test-netatalk-connection) test_netatalk_connection ;;
+        test-ssh|test-ssh-connection) test_ssh_connection ;;
         
         # Disk/ISO management
         disk-create|create-disk) create_disk_image ;;
