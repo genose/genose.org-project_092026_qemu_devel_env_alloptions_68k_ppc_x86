@@ -168,6 +168,36 @@ detect_display_backend() {
     warn "No display backend detected, defaulting to: ${DEFAULT_DISPLAY}"
 }
 
+# Get available display backends for a specific QEMU binary
+get_display_backends() {
+    local qemu_test="${1:-qemu-system-x86_64}"
+    local qemu_bin_path
+    qemu_bin_path=$(qemu_bin "${qemu_test}" 2>/dev/null) || return 1
+    
+    "${qemu_bin_path}" -display help 2>&1 | grep -E "^\w+" | tr ',' '\n' | tr -d ' ' | sort -u
+}
+
+# Validate display backend for a specific QEMU binary
+validate_display_backend() {
+    local display="$1"
+    local qemu_test="${2:-qemu-system-x86_64}"
+    local qemu_bin_path
+    
+    qemu_bin_path=$(qemu_bin "${qemu_test}" 2>/dev/null) || return 1
+    
+    # Always allow these backends
+    case "${display}" in
+        none|curses) return 0 ;;
+    esac
+    
+    # Check if the backend is supported
+    if "${qemu_bin_path}" -display help 2>&1 | grep -q "${display}"; then
+        return 0
+    fi
+    
+    return 1
+}
+
 # Ensure directory exists
 ensure_dir() {
     [[ -d "$1" ]] || mkdir -p "$1"
@@ -486,9 +516,25 @@ qemu_gdb_flags() {
 display_flags() {
     local -n _df_array="$1"
     local display="${2:-${DEFAULT_DISPLAY}}"
+    
+    # If display is empty or not set, try to detect it
+    if [[ -z "${display}" || "${display}" == "" ]]; then
+        detect_display_backend "${3:-qemu-system-x86_64}"
+        display="${DEFAULT_DISPLAY}"
+    fi
+    
+    # Validate the display backend for the target QEMU
+    local qemu_target="${3:-qemu-system-x86_64}"
+    if ! validate_display_backend "${display}" "${qemu_target}"; then
+        warn "Display backend '${display}' is not supported by ${qemu_target}. Falling back to detected default."
+        detect_display_backend "${qemu_target}"
+        display="${DEFAULT_DISPLAY}"
+    fi
+    
     case "${display}" in
         sdl)    _df_array=(-display sdl    -audiodev sdl,id=snd0)  ;;
         gtk)    _df_array=(-display gtk    -audiodev pa,id=snd0)   ;;
+        cocoa)  _df_array=(-display cocoa  -audiodev coreaudio,id=snd0) ;;
         vnc)    _df_array=(-display vnc=:0 -audiodev none,id=snd0) ;;
         curses) _df_array=(-display curses -audiodev none,id=snd0) ;;
         none)   _df_array=(-display none   -audiodev none,id=snd0) ;;
@@ -1093,7 +1139,7 @@ launch_macos_68k() {
         firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
     fi
 
-    local -a dflags; display_flags dflags "${display}"
+    local -a dflags; display_flags dflags "${display}" "${qemu}" "qemu-system-m68k"
     local -a netflags; append_user_network netflags "dp83932" "${combined_forwards}"
     local -a dbgflags; qemu_gdb_flags dbgflags
 
@@ -1169,7 +1215,7 @@ launch_macos_ppc() {
         firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
     fi
 
-    local -a dflags; display_flags dflags "${display}"
+    local -a dflags; display_flags dflags "${display}" "${qemu}" "qemu-system-ppc64"
     local -a netflags; append_user_network netflags "sungem" "${combined_forwards}"
     local -a dbgflags; qemu_gdb_flags dbgflags
 
@@ -1239,7 +1285,7 @@ launch_macos_ppc64() {
         firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
     fi
 
-    local -a dflags; display_flags dflags "${display}"
+    local -a dflags; display_flags dflags "${display}" "${qemu}"
     local -a netflags; append_user_network netflags "sungem" "${combined_forwards}"
     local -a dbgflags; qemu_gdb_flags dbgflags
 
@@ -1316,7 +1362,7 @@ launch_haiku() {
         firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
     fi
 
-    local -a dflags; display_flags dflags "${display}"
+    local -a dflags; display_flags dflags "${display}" "${qemu}" "qemu-system-${arch}"
     local -a netflags; append_user_network netflags "e1000" "${combined_forwards}"
     local -a dbgflags; qemu_gdb_flags dbgflags
 
@@ -1398,7 +1444,7 @@ launch_linux() {
         firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
     fi
 
-    local -a dflags; display_flags dflags "${display}"
+    local -a dflags; display_flags dflags "${display}" "${qemu}" "qemu-system-${arch}"
     local -a netflags
     local nic_model="e1000"
     case "${arch}" in
@@ -1488,7 +1534,7 @@ launch_atari() {
         firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
     fi
 
-    local -a dflags; display_flags dflags "${display}"
+    local -a dflags; display_flags dflags "${display}" "${qemu}" "qemu-system-m68k"
 
     local cmd=(
         "${qemu}"
@@ -1554,7 +1600,7 @@ launch_amiga() {
         firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
     fi
 
-    local -a dflags; display_flags dflags "${display}"
+    local -a dflags; display_flags dflags "${display}" "${qemu}"
 
     local cmd=(
         "${qemu}"
@@ -1617,7 +1663,7 @@ launch_solaris_x86() {
         firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
     fi
 
-    local -a dflags; display_flags dflags "${display}"
+    local -a dflags; display_flags dflags "${display}" "${qemu}"
     local -a netflags; append_user_network netflags "e1000" "${combined_forwards}" "${smb_share}"
     local -a dbgflags; qemu_gdb_flags dbgflags
 
@@ -1684,7 +1730,7 @@ launch_solaris_sparc() {
         firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
     fi
 
-    local -a dflags; display_flags dflags "${display}"
+    local -a dflags; display_flags dflags "${display}" "${qemu}"
     local -a netflags; append_user_network netflags "sunhme" "${combined_forwards}"
     local -a dbgflags; qemu_gdb_flags dbgflags
 
@@ -1753,7 +1799,7 @@ launch_windows_xp() {
         firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
     fi
 
-    local -a dflags; display_flags dflags "${display}"
+    local -a dflags; display_flags dflags "${display}" "${qemu}"
     local -a netflags; append_user_network netflags "rtl8139" "${combined_forwards}" "${smb_share}"
     local -a dbgflags; qemu_gdb_flags dbgflags
 
@@ -1825,7 +1871,7 @@ launch_openstep() {
         firmware_mode=$(ask "Firmware attach mode (auto/bios/pflash)" "auto")
     fi
 
-    local -a dflags; display_flags dflags "${display}"
+    local -a dflags; display_flags dflags "${display}" "${qemu}"
     local -a netflags; append_user_network netflags "ne2k_pci" "${combined_forwards}" "${smb_share}"
     local -a dbgflags; qemu_gdb_flags dbgflags
 
@@ -1908,7 +1954,7 @@ launch_custom() {
     local extra
     extra=$(ask "Extra QEMU flags (space-separated simple flags without values containing spaces)" "")
 
-    local -a dflags; display_flags dflags "${display}"
+    local -a dflags; display_flags dflags "${display}" "${qemu}"
     local -a dbgflags; qemu_gdb_flags dbgflags
     local -a netflags=()
     if is_yes "${user_network}"; then
@@ -2972,8 +3018,18 @@ main() {
     
     # Detect display backend
     local test_qemu="qemu-system-x86_64"
-    command -v "${test_qemu}" &>/dev/null || test_qemu="qemu-system-ppc"
+    if ! qemu_bin "${test_qemu}" &>/dev/null; then
+        test_qemu="qemu-system-ppc"
+        if ! qemu_bin "${test_qemu}" &>/dev/null; then
+            test_qemu="qemu-system-ppc64"
+        fi
+    fi
     detect_display_backend "${test_qemu}"
+    
+    # Detect QEMU capabilities (silent for now, can be run manually)
+    if [[ "${1:-}" != "menu" && "${1:-}" != "help" && "${1:-}" != "--help" && "${1:-}" != "-h" ]]; then
+        detect_qemu_capabilities >/dev/null 2>&1 || true
+    fi
     
     local cmd="${1:-menu}"
     
