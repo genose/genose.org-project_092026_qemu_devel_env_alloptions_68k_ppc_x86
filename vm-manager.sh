@@ -34,10 +34,11 @@ QEMU_BIN_DIR="${QEMU_BIN_DIR:-${QEMU_PREFIX}/bin}"
 QEMU_SRC_DIR="${QEMU_SRC_DIR:-${SCRIPT_DIR}/qemu-9.2.0}"
 QEMU_BUILD_DIR="${QEMU_BUILD_DIR:-${QEMU_SRC_DIR}/build}"
 
-# VM storage - Unified vm_assistant directory structure
-# Note: VMs are now stored as ${CONFIG_DIR}/${VM_NAME}_${PLATFORM}/ (bundled directories)
-VM_DIR="${CONFIG_DIR}"  # Compatibility: now same as CONFIG_DIR
-DISK_DIR="${CONFIG_DIR}"  # Disks are now stored with their VMs
+# VM storage - Enhanced bundled directory structure
+# VMs are stored as: ${CONFIG_DIR}/vms/${VM_NAME}_${PLATFORM}/ 
+# Each VM directory contains subdirectories: conf/, qcow2/, sh/, rom/
+VM_DIR="${CONFIG_DIR}/vms"
+DISK_DIR="${VM_DIR}"  # Disks are now bundled within VM directories
 ISO_DIR="${CONFIG_DIR}/isos"
 SHARE_DIR="${CONFIG_DIR}/shares"
 ROM_DIR="${CONFIG_DIR}/roms"
@@ -275,83 +276,144 @@ ask_ram_size() {
 # Pick a disk image from platform directory
 pick_image() {
     local platform="$1"
-    local dir="${VM_IMAGE_DIR}/${platform}"
-    mkdir -p "${dir}"
-
-    local images=()
-    while IFS= read -r -d $'\0' f; do
-        images+=("$f")
-    done < <(find "${dir}" -maxdepth 1 \( -name '*.img' -o -name '*.qcow2' -o -name '*.iso' -o -name '*.dsk' -o -name '*.hda' \) -print0 2>/dev/null | sort -z)
-
-    if [[ ${#images[@]} -eq 0 ]]; then
-        warn "No disk images found in ${dir}"
-        local create
-        create=$(ask "Create a new blank 2 GiB image? (yes/no)" "yes")
-        if is_yes "${create}"; then
-            local imgname
-            imgname=$(ask "Image filename" "${platform}-disk.qcow2")
-            local size
-            size=$(ask "Image size (e.g. 512M, 2G)" "2G")
-            "$(qemu_bin qemu-img 2>/dev/null || echo qemu-img)" create -f qcow2 "${dir}/${imgname}" "${size}"
-            echo "${dir}/${imgname}"
-        else
-            echo ""
+    local start_dir=""
+    
+    # Enhanced UX: Ask user which directory to start with
+    read -rp "Enter directory to scan for disk images [${VM_IMAGE_DIR}/${platform}]: " start_dir
+    start_dir="${start_dir:-${VM_IMAGE_DIR}/${platform}}"
+    
+    # Validate directory exists and user wants to proceed
+    if [[ ! -d "${start_dir}" ]]; then
+        warn "Directory does not exist: ${start_dir}"
+        read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
+        navigate_choice="${navigate_choice:-y}"
+        if [[ "${navigate_choice}" =~ ^[yY] ]]; then
+            pick_image "${platform}"
         fi
-        return
+        return 1
     fi
+    
+    read -rp "Scan directory ${start_dir} for disk images? (y/n) [y]: " confirm_scan
+    confirm_scan="${confirm_scan:-y}"
+    
+    if [[ "${confirm_scan}" =~ ^[yY] ]]; then
+        mkdir -p "${start_dir}"
 
-    printf '\n%s Available disk images:\n' "${C_BOLD}"
-    local i=0
-    for img in "${images[@]}"; do
-        printf '  %d) %s\n' "$((++i))" "$(basename "${img}")"
-    done
-    printf '%s\n' "${C_RESET}"
+        local images=()
+        while IFS= read -r -d $'\0' f; do
+            images+=("$f")
+        done < <(find "${start_dir}" -maxdepth 1 \( -name '*.img' -o -name '*.qcow2' -o -name '*.iso' -o -name '*.dsk' -o -name '*.hda' \) -print0 2>/dev/null | sort -z)
 
-    local choice
-    choice=$(ask "Select image number" "1")
-    if [[ ! "${choice}" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#images[@]} )); then
-        warn "Invalid image selection '${choice}'"
-        echo ""
+        if [[ ${#images[@]} -eq 0 ]]; then
+            warn "No disk images found in ${start_dir}"
+            local create
+            create=$(ask "Create a new blank 2 GiB image? (yes/no)" "yes")
+            if is_yes "${create}"; then
+                local imgname
+                imgname=$(ask "Image filename" "${platform}-disk.qcow2")
+                local size
+                size=$(ask "Image size (e.g. 512M, 2G)" "2G")
+                "$(qemu_bin qemu-img 2>/dev/null || echo qemu-img)" create -f qcow2 "${start_dir}/${imgname}" "${size}"
+                echo "${start_dir}/${imgname}"
+            else
+                echo ""
+            fi
+            return
+        fi
+
+        printf '\n%s Available disk images:\n' "${C_BOLD}"
+        local i=0
+        for img in "${images[@]}"; do
+            printf '  %d) %s\n' "$((++i))" "$(basename "${img}")"
+        done
+        printf '%s\n' "${C_RESET}"
+
+        local choice
+        choice=$(ask "Select image number" "1")
+        if [[ ! "${choice}" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#images[@]} )); then
+            warn "Invalid image selection '${choice}'"
+            echo ""
+        else
+            echo "${images[$((choice - 1))]}"
+        fi
+        
+        # Allow navigation to other directories
+        read -rp "Scan another directory? (y/n) [n]: " scan_another
+        scan_another="${scan_another:-n}"
+        if [[ "${scan_another}" =~ ^[yY] ]]; then
+            pick_image "${platform}"
+        fi
     else
-        echo "${images[$((choice - 1))]}"
+        log "Disk scan cancelled."
     fi
 }
 
 # Pick a CDROM/ISO image
 pick_cdrom() {
     local platform="$1"
-    local dir="${VM_IMAGE_DIR}/${platform}"
-
-    local isos=()
-    while IFS= read -r -d $'\0' f; do
-        isos+=("$f")
-    done < <(find "${dir}" -maxdepth 2 \( -name '*.iso' -o -name '*.img' \) -print0 2>/dev/null | sort -z)
-
-    if [[ ${#isos[@]} -eq 0 ]]; then
-        warn "No ISO/CD images found in ${dir}"
-        local manual_path
-        manual_path=$(ask "Enter full path to ISO (or leave blank to skip)" "")
-        echo "${manual_path}"
-        return
+    local start_dir=""
+    
+    # Enhanced UX: Ask user which directory to start with
+    read -rp "Enter directory to scan for ISO images [${VM_IMAGE_DIR}/${platform}]: " start_dir
+    start_dir="${start_dir:-${VM_IMAGE_DIR}/${platform}}"
+    
+    # Validate directory exists and user wants to proceed
+    if [[ ! -d "${start_dir}" ]]; then
+        warn "Directory does not exist: ${start_dir}"
+        read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
+        navigate_choice="${navigate_choice:-y}"
+        if [[ "${navigate_choice}" =~ ^[yY] ]]; then
+            pick_cdrom "${platform}"
+        fi
+        return 1
     fi
+    
+    read -rp "Scan directory ${start_dir} for ISO images? (y/n) [y]: " confirm_scan
+    confirm_scan="${confirm_scan:-y}"
+    
+    if [[ "${confirm_scan}" =~ ^[yY] ]]; then
+        mkdir -p "${start_dir}"
 
-    printf '\n%s Available CD/ISO images:\n' "${C_BOLD}"
-    printf '  0) None / skip\n'
-    local i=0
-    for iso in "${isos[@]}"; do
-        printf '  %d) %s\n' "$((++i))" "$(basename "${iso}")"
-    done
-    printf '%s\n' "${C_RESET}"
+        local isos=()
+        while IFS= read -r -d $'\0' f; do
+            isos+=("$f")
+        done < <(find "${start_dir}" -maxdepth 2 \( -name '*.iso' -o -name '*.ISO' -o -name '*.img' -o -name '*.IMG' -o -name '*.dmg' -o -name '*.DMG' \) -print0 2>/dev/null | sort -z)
 
-    local choice
-    choice=$(ask "Select ISO number" "0")
-    if [[ "${choice}" == "0" || -z "${choice}" ]]; then
-        echo ""
-    elif [[ ! "${choice}" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#isos[@]} )); then
-        warn "Invalid ISO selection '${choice}'"
-        echo ""
+        if [[ ${#isos[@]} -eq 0 ]]; then
+            warn "No ISO/CD images found in ${start_dir}"
+            local manual_path
+            manual_path=$(ask "Enter full path to ISO (or leave blank to skip)" "")
+            echo "${manual_path}"
+            return
+        fi
+
+        printf '\n%s Available CD/ISO images:\n' "${C_BOLD}"
+        printf '  0) None / skip\n'
+        local i=0
+        for iso in "${isos[@]}"; do
+            printf '  %d) %s\n' "$((++i))" "$(basename "${iso}")"
+        done
+        printf '%s\n' "${C_RESET}"
+
+        local choice
+        choice=$(ask "Select ISO number" "0")
+        if [[ "${choice}" == "0" || -z "${choice}" ]]; then
+            echo ""
+        elif [[ ! "${choice}" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#isos[@]} )); then
+            warn "Invalid ISO selection '${choice}'"
+            echo ""
+        else
+            echo "${isos[$((choice - 1))]}"
+        fi
+        
+        # Allow navigation to other directories
+        read -rp "Scan another directory? (y/n) [n]: " scan_another
+        scan_another="${scan_another:-n}"
+        if [[ "${scan_another}" =~ ^[yY] ]]; then
+            pick_cdrom "${platform}"
+        fi
     else
-        echo "${isos[$((choice - 1))]}"
+        log "ISO scan cancelled."
     fi
 }
 
@@ -992,10 +1054,17 @@ edit_vm_option_c() {
 create_vm_config() {
     local vm_name="$1"
     local platform="$2"
-    # New bundled directory structure: ~/vm_assistant/(VM_NAME_PLATFORM)/
-    local config_dir="${CONFIG_DIR}/${vm_name}_${platform}"
+    # Enhanced bundled directory structure: ~/vm_assistant/vms/VM_NAME_PLATFORM/
+    local vm_base_dir="${VM_DIR}/${vm_name}_${platform}"
+    local config_dir="${vm_base_dir}/conf"
+    local disk_dir="${vm_base_dir}/qcow2"
+    local scripts_dir="${vm_base_dir}/sh"
+    local roms_dir="${vm_base_dir}/rom"
     
     ensure_dir "${config_dir}"
+    ensure_dir "${disk_dir}"
+    ensure_dir "${scripts_dir}"
+    ensure_dir "${roms_dir}"
     
     local config_file="${config_dir}/${vm_name}.conf"
     
@@ -1012,7 +1081,7 @@ QEMU_BIN=qemu-system-${platform}
 MACHINE=pc
 CPU=host
 RAM_MB=2048
-HDD_IMAGE=${config_dir}/${vm_name}.qcow2
+HDD_IMAGE=${disk_dir}/${vm_name}.qcow2
 DISPLAY_BACKEND=${DEFAULT_DISPLAY}
 NETWORK_MODEL=e1000
 
@@ -1032,26 +1101,24 @@ EOF
 }
 
 # Create a disk image
-# Parameters: vm_name [platform] [disk_size] [disk_format]
-# If platform is provided, creates disk in bundled VM directory
-# Otherwise creates in DISK_DIR (legacy)
+# Parameters: vm_name platform [disk_size] [disk_format]
+# Creates disk in VM's qcow2 subdirectory: ~/vm_assistant/vms/VM_NAME_PLATFORM/qcow2/
 create_disk() {
     local vm_name="$1"
     local platform="$2"
     local disk_size="${3:-40G}"
     local disk_format="${4:-qcow2}"
-    local disk_path=""
     
-    if [[ -n "${platform}" ]]; then
-        # New bundled structure: CONFIG_DIR/VM_NAME_PLATFORM/
-        local vm_dir="${CONFIG_DIR}/${vm_name}_${platform}"
-        ensure_dir "${vm_dir}"
-        disk_path="${vm_dir}/${vm_name}.qcow2"
-    else
-        # Legacy structure for backward compatibility
-        disk_path="${DISK_DIR}/${vm_name}.qcow2"
-        ensure_dir "${DISK_DIR}"
+    if [[ -z "${platform}" ]]; then
+        die "Platform is required for create_disk"
     fi
+    
+    # Enhanced structure: VM_DIR/VM_NAME_PLATFORM/qcow2/
+    local vm_dir="${VM_DIR}/${vm_name}_${platform}"
+    local disk_dir="${vm_dir}/qcow2"
+    local disk_path="${disk_dir}/${vm_name}.qcow2"
+    
+    ensure_dir "${disk_dir}"
     
     local qemu_img
     qemu_img=$(qemu_bin "qemu-img")
@@ -1122,17 +1189,21 @@ list_isos() {
 select_iso() {
     local choice start_dir=""
     
-    # Ask user which directory to start with
+    # Enhanced UX: Ask user which directory to start with
+    log "Select ISO file for VM"
+    log "------------------------"
     read -rp "Enter directory to scan for ISOs [${ISO_DIR}]: " start_dir
     start_dir="${start_dir:-${ISO_DIR}}"
     
     # Validate directory exists
     if [[ ! -d "${start_dir}" ]]; then
         warn "Directory does not exist: ${start_dir}"
-        read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
+        read -rp "Do you want to browse to another directory? (y/n) [y]: " navigate_choice
         navigate_choice="${navigate_choice:-y}"
         if [[ "${navigate_choice}" =~ ^[yY] ]]; then
             select_iso
+        else
+            return 1
         fi
         return 1
     fi
@@ -1144,45 +1215,303 @@ select_iso() {
     local iso_files=()
     while IFS= read -r -d '' iso_file; do
         iso_files+=("$iso_file")
-        log "  ${i}) $(basename "${iso_file}") [${iso_file}]"
+        local file_size=$(file_size_bytes "${iso_file}")
+        local human_size
+        if (( file_size >= 1073741824 )); then
+            human_size="$((file_size / 1073741824))G"
+        elif (( file_size >= 1048576 )); then
+            human_size="$((file_size / 1048576))M"
+        else
+            human_size="${file_size}B"
+        fi
+        log "  [${i}] $(basename "${iso_file}") (${human_size})"
         ((i++)) || true
     done < <(find "${start_dir}" -maxdepth 1 -type f \( -name "*.iso" -o -name "*.ISO" -o -name "*.dmg" -o -name "*.DMG" \) -print0 2>/dev/null | sort -z)
     
-    [[ $i -eq 0 ]] && warn "No ISOs found in ${start_dir}"
+    if [[ $i -eq 0 ]]; then
+        warn "No ISOs found in ${start_dir}"
+        read -rp "Try another directory? (y/n) [y]: " try_another
+        try_another="${try_another:-y}"
+        if [[ "${try_another}" =~ ^[yY] ]]; then
+            select_iso
+            return $?
+        else
+            return 1
+        fi
+    fi
     
-    read -rp "Select ISO number (or enter path): " choice
+    log ""
+    read -rp "Select ISO [0-$(($i-1))] or enter full path: " choice
     
     if [[ "${choice}" =~ ^[0-9]+$ ]]; then
         # Select by number
         if [[ $choice -lt $i && $choice -ge 0 ]]; then
+            log "Selected: $(basename "${iso_files[$choice]}")"
             echo "${iso_files[$choice]}"
             return 0
         else
-            die "Invalid ISO selection"
+            warn "Invalid ISO selection. Please choose a number between 0 and $(($i-1))."
+            read -rp "Try again? (y/n) [y]: " retry_choice
+            retry_choice="${retry_choice:-y}"
+            if [[ "${retry_choice}" =~ ^[yY] ]]; then
+                select_iso
+                return $?
+            else
+                return 1
+            fi
         fi
     elif [[ -f "${choice}" ]]; then
         # Direct path
+        log "Selected: $(basename "${choice}")"
         echo "${choice}"
         return 0
     else
-        die "ISO not found: ${choice}"
+        warn "ISO not found: ${choice}"
+        read -rp "Try again? (y/n) [y]: " retry_choice
+        retry_choice="${retry_choice:-y}"
+        if [[ "${retry_choice}" =~ ^[yY] ]]; then
+            select_iso
+            return $?
+        else
+            return 1
+        fi
     fi
 }
 
-# List VMs
-list_vms() {
-    heading "Available VMs"
+# Select a disk image interactively
+select_disk() {
+    local choice start_dir=""
     
-    [[ -d "${CONFIG_DIR}" ]] || { warn "No VMs found. VM directory: ${CONFIG_DIR}"; return 1; }
+    # Enhanced UX: Ask user which directory to start with
+    log "Select Disk Image for VM"
+    log "--------------------------"
+    read -rp "Enter directory to scan for disk images [${DISK_DIR}]: " start_dir
+    start_dir="${start_dir:-${DISK_DIR}}"
+    
+    # Validate directory exists
+    if [[ ! -d "${start_dir}" ]]; then
+        warn "Directory does not exist: ${start_dir}"
+        read -rp "Do you want to browse to another directory? (y/n) [y]: " navigate_choice
+        navigate_choice="${navigate_choice:-y}"
+        if [[ "${navigate_choice}" =~ ^[yY] ]]; then
+            select_disk
+        else
+            return 1
+        fi
+        return 1
+    fi
+    
+    heading "Available Disk Images in ${start_dir}"
+    
+    # List disk images in the selected directory
+    local i=0
+    local disk_files=()
+    while IFS= read -r -d '' disk_file; do
+        disk_files+=("$disk_file")
+        local file_size=$(file_size_bytes "${disk_file}")
+        local human_size
+        if (( file_size >= 1073741824 )); then
+            human_size="$((file_size / 1073741824))G"
+        elif (( file_size >= 1048576 )); then
+            human_size="$((file_size / 1048576))M"
+        else
+            human_size="${file_size}B"
+        fi
+        log "  [${i}] $(basename "${disk_file}") (${human_size})"
+        ((i++)) || true
+    done < <(find "${start_dir}" -maxdepth 1 -type f \( -name "*.qcow2" -o -name "*.QCOW2" -o -name "*.img" -o -name "*.IMG" -o -name "*.raw" -o -name "*.RAW" -o -name "*.hda" -o -name "*.HDA" -o -name "*.dsk" -o -name "*.DSK" \) -print0 2>/dev/null | sort -z)
+    
+    if [[ $i -eq 0 ]]; then
+        warn "No disk images found in ${start_dir}"
+        read -rp "Try another directory? (y/n) [y]: " try_another
+        try_another="${try_another:-y}"
+        if [[ "${try_another}" =~ ^[yY] ]]; then
+            select_disk
+            return $?
+        else
+            return 1
+        fi
+    fi
+    
+    log ""
+    read -rp "Select disk image [0-$(($i-1))] or enter full path: " choice
+    
+    if [[ "${choice}" =~ ^[0-9]+$ ]]; then
+        # Select by number
+        if [[ $choice -lt $i && $choice -ge 0 ]]; then
+            log "Selected: $(basename "${disk_files[$choice]}")"
+            echo "${disk_files[$choice]}"
+            return 0
+        else
+            warn "Invalid disk selection. Please choose a number between 0 and $(($i-1))."
+            read -rp "Try again? (y/n) [y]: " retry_choice
+            retry_choice="${retry_choice:-y}"
+            if [[ "${retry_choice}" =~ ^[yY] ]]; then
+                select_disk
+                return $?
+            else
+                return 1
+            fi
+        fi
+    elif [[ -f "${choice}" ]]; then
+        # Direct path
+        log "Selected: $(basename "${choice}")"
+        echo "${choice}"
+        return 0
+    else
+        warn "Disk image not found: ${choice}"
+        read -rp "Try again? (y/n) [y]: " retry_choice
+        retry_choice="${retry_choice:-y}"
+        if [[ "${retry_choice}" =~ ^[yY] ]]; then
+            select_disk
+            return $?
+        else
+            return 1
+        fi
+    fi
+}
+
+# Select a ROM file interactively
+select_rom() {
+    local choice start_dir=""
+    
+    # Enhanced UX: Ask user which directory to start with
+    log "Select ROM File for VM"
+    log "----------------------"
+    read -rp "Enter directory to scan for ROM files [${ROM_DIR}]: " start_dir
+    start_dir="${start_dir:-${ROM_DIR}}"
+    
+    # Validate directory exists
+    if [[ ! -d "${start_dir}" ]]; then
+        warn "Directory does not exist: ${start_dir}"
+        read -rp "Do you want to browse to another directory? (y/n) [y]: " navigate_choice
+        navigate_choice="${navigate_choice:-y}"
+        if [[ "${navigate_choice}" =~ ^[yY] ]]; then
+            select_rom
+        else
+            return 1
+        fi
+        return 1
+    fi
+    
+    heading "Available ROM Files in ${start_dir}"
+    
+    # List ROM files in the selected directory
+    local i=0
+    local rom_files=()
+    while IFS= read -r -d '' rom_file; do
+        rom_files+=("$rom_file")
+        local file_size=$(file_size_bytes "${rom_file}")
+        local human_size
+        if (( file_size >= 1073741824 )); then
+            human_size="$((file_size / 1073741824))G"
+        elif (( file_size >= 1048576 )); then
+            human_size="$((file_size / 1048576))M"
+        else
+            human_size="${file_size}B"
+        fi
+        log "  [${i}] $(basename "${rom_file}") (${human_size})"
+        ((i++)) || true
+    done < <(find "${start_dir}" -maxdepth 1 -type f \( -name "*.rom" -o -name "*.ROM" -o -name "*.bin" -o -name "*.BIN" \) -print0 2>/dev/null | sort -z)
+    
+    if [[ $i -eq 0 ]]; then
+        warn "No ROM files found in ${start_dir}"
+        read -rp "Try another directory? (y/n) [y]: " try_another
+        try_another="${try_another:-y}"
+        if [[ "${try_another}" =~ ^[yY] ]]; then
+            select_rom
+            return $?
+        else
+            return 1
+        fi
+    fi
+    
+    log ""
+    read -rp "Select ROM file [0-$(($i-1))] or enter full path: " choice
+    
+    if [[ "${choice}" =~ ^[0-9]+$ ]]; then
+        # Select by number
+        if [[ $choice -lt $i && $choice -ge 0 ]]; then
+            log "Selected: $(basename "${rom_files[$choice]}")"
+            echo "${rom_files[$choice]}"
+            return 0
+        else
+            warn "Invalid ROM selection. Please choose a number between 0 and $(($i-1))."
+            read -rp "Try again? (y/n) [y]: " retry_choice
+            retry_choice="${retry_choice:-y}"
+            if [[ "${retry_choice}" =~ ^[yY] ]]; then
+                select_rom
+                return $?
+            else
+                return 1
+            fi
+        fi
+    elif [[ -f "${choice}" ]]; then
+        # Direct path
+        log "Selected: $(basename "${choice}")"
+        echo "${choice}"
+        return 0
+    else
+        warn "ROM file not found: ${choice}"
+        read -rp "Try again? (y/n) [y]: " retry_choice
+        retry_choice="${retry_choice:-y}"
+        if [[ "${retry_choice}" =~ ^[yY] ]]; then
+            select_rom
+            return $?
+        else
+            return 1
+        fi
+    fi
+}
+
+# List VMs with enhanced UX
+list_vms() {
+    heading "Available Virtual Machines"
+    
+    [[ -d "${VM_DIR}" ]] || { 
+        warn "No VMs found. VM directory: ${VM_DIR}"
+        log "To create a VM: ${SCRIPT_NAME} create"
+        return 1; 
+    }
     
     local i=0
-    # Search for .conf files in all subdirectories of CONFIG_DIR
-    while IFS= read -r -d '' vm_conf; do
-        log "  ${i}) $(basename "${vm_conf}" .conf) [$(dirname "${vm_conf}")]"
-        ((i++)) || true
-    done < <(find "${CONFIG_DIR}" -name "*.conf" -print0 2>/dev/null | sort -z)
+    local vm_info=()  # Store VM info for later use
     
-    [[ $i -eq 0 ]] && warn "No VM configurations found in ${CONFIG_DIR}/"
+    # Search for .conf files in VM directories (vms/VM_NAME_PLATFORM/conf/)
+    while IFS= read -r -d '' vm_conf; do
+        local vm_dir=$(dirname "$(dirname "${vm_conf}")")  # Get VM base directory
+        local vm_name=$(basename "${vm_dir}" | sed 's/_.*//')  # Extract VM name (remove _PLATFORM)
+        local platform=$(basename "${vm_dir}" | sed 's/^[^_]*_//')  # Extract platform
+        
+        # Check if disk exists
+        local disk_path="${vm_dir}/qcow2/${vm_name}.qcow2"
+        local disk_status="✓"
+        [[ -f "${disk_path}" ]] || disk_status="✗"
+        
+        # Check if config exists
+        local config_status="✓"
+        [[ -f "${vm_conf}" ]] || config_status="✗"
+        
+        # Store VM info
+        vm_info+=("${vm_dir}" "${vm_name}" "${platform}" "${disk_status}" "${config_status}")
+        
+        # Display VM info
+        log "  [${i}] ${vm_name} (${platform}) [Disk: ${disk_status} | Config: ${config_status}]"
+        ((i++)) || true
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
+    
+    if [[ $i -eq 0 ]]; then
+        warn "No VM configurations found in ${VM_DIR}/"
+        log ""
+        log "To create a new VM:"
+        log "  ${SCRIPT_NAME} create"
+        log ""
+        log "Supported platforms: ppc, ppc64, x86_64, m68k, sparc, sparc64, i386, arm, arm64"
+        return 1
+    else
+        log ""
+        log "Total: ${i} VM(s) found"
+    fi
 }
 
 # Launch a VM
@@ -1190,13 +1519,13 @@ launch_vm() {
     local vm_name="$1"
     local config_file=""
     
-    # Search for config file in the new directory structure
+    # Search for config file in the new directory structure (vms/VM_NAME_PLATFORM/conf/)
     while IFS= read -r -d '' file; do
         if [[ "$(basename "$file" .conf)" == "${vm_name}" ]]; then
             config_file="$file"
             break
         fi
-    done < <(find "${CONFIG_DIR}" -name "${vm_name}.conf" -print0 2>/dev/null)
+    done < <(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print0 2>/dev/null)
     
     [[ -f "${config_file}" ]] || die "VM config not found: ${vm_name}.conf"
     
@@ -1277,13 +1606,13 @@ delete_vm() {
     local vm_name="$1"
     local config_file=""
     
-    # Search for config file in the new directory structure
+    # Search for config file in the new directory structure (vms/VM_NAME_PLATFORM/conf/)
     while IFS= read -r -d '' file; do
         if [[ "$(basename "$file" .conf)" == "${vm_name}" ]]; then
             config_file="$file"
             break
         fi
-    done < <(find "${CONFIG_DIR}" -name "${vm_name}.conf" -print0 2>/dev/null)
+    done < <(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print0 2>/dev/null)
     
     [[ -f "${config_file}" ]] || die "VM not found: ${vm_name}"
     
@@ -1292,42 +1621,110 @@ delete_vm() {
     
     log "Deleting VM: ${vm_name}"
     
-    # Get the VM directory (parent of config file)
-    local vm_dir=$(dirname "${config_file}")
+    # Get the VM base directory (parent of parent of config file: vms/VM_NAME_PLATFORM/)
+    local vm_base_dir=$(dirname "$(dirname "${config_file}")")
     
-    # Remove the entire VM directory (includes config and disk)
-    if [[ -d "${vm_dir}" ]]; then
-        log "Removing VM directory: ${vm_dir}"
-        rm -rf "${vm_dir}"
+    # Remove the entire VM directory (includes conf/, qcow2/, sh/, rom/)
+    if [[ -d "${vm_base_dir}" ]]; then
+        log "Removing VM directory: ${vm_base_dir}"
+        rm -rf "${vm_base_dir}"
         log "VM directory deleted successfully."
     else
-        log "VM directory not found: ${vm_dir}"
+        log "VM directory not found: ${vm_base_dir}"
     fi
     
     log "VM deleted successfully."
 }
 
-# Create a new VM
+# Create a new VM with enhanced UX
 create_vm() {
     local vm_name vm_type disk_size iso_path
     
-    vm_name=$(ask "VM name" "")
+    heading "Create New Virtual Machine"
+    log "This will create a new VM with bundled directory structure:"
+    log "  ~/vm_assistant/vms/VM_NAME_PLATFORM/"
+    log "    ├── conf/          # Configuration files"
+    log "    ├── qcow2/        # Disk images"
+    log "    ├── sh/           # Scripts"
+    log "    └── rom/          # ROM files"
+    log ""
+    
+    vm_name=$(ask "VM name (no spaces, e.g., macos9, haiku)" "")
     [[ -z "${vm_name}" ]] && die "VM name cannot be empty"
+    
+    # Validate VM name doesn't contain invalid characters
+    if [[ "${vm_name}" =~ [^a-zA-Z0-9_-] ]]; then
+        warn "VM name should only contain alphanumeric characters, underscores, and hyphens"
+        read -rp "Continue with this name anyway? (y/n) [n]: " confirm_name
+        confirm_name="${confirm_name:-n}"
+        if [[ "${confirm_name}" != "y" ]]; then
+            create_vm
+            return
+        fi
+    fi
+    
+    # Check if VM already exists
+    local existing_vm_dir="${VM_DIR}/${vm_name}"
+    if [[ -d "${existing_vm_dir}" ]]; then
+        warn "A VM directory already exists: ${existing_vm_dir}"
+        read -rp "Overwrite existing VM? (y/n) [n]: " overwrite_choice
+        overwrite_choice="${overwrite_choice:-n}"
+        if [[ "${overwrite_choice}" =~ ^[yY] ]]; then
+            log "Removing existing VM..."
+            rm -rf "${existing_vm_dir}"
+        else
+            read -rp "Choose a different name? (y/n) [y]: " retry_choice
+            retry_choice="${retry_choice:-y}"
+            if [[ "${retry_choice}" =~ ^[yY] ]]; then
+                create_vm
+                return
+            else
+                return 1
+            fi
+        fi
+    fi
     
     vm_type=$(ask "VM type (ppc/ppc64/x86_64/m68k/sparc)" "ppc")
     
-    disk_size=$(ask "Disk size (e.g., 40G)" "40G")
+    # Validate platform
+    case "${vm_type}" in
+        ppc|ppc64|x86_64|m68k|sparc|sparc64|i386|arm|arm64)
+            # Valid platform
+            ;;
+        *)
+            warn "Invalid platform. Please choose from: ppc, ppc64, x86_64, m68k, sparc, sparc64, i386, arm, arm64"
+            read -rp "Try again? (y/n) [y]: " retry_platform
+            retry_platform="${retry_platform:-y}"
+            if [[ "${retry_platform}" =~ ^[yY] ]]; then
+                create_vm
+                return
+            else
+                return 1
+            fi
+            ;;
+    esac
     
-    log "Creating VM: ${vm_name} (${vm_type})"
+    disk_size=$(ask "Disk size (e.g., 40G, 20G, 100G)" "40G")
+    
+    log ""
+    log "Creating VM: ${vm_name} (Platform: ${vm_type}, Disk: ${disk_size})"
+    log "Destination: ${VM_DIR}/${vm_name}_${vm_type}/"
     
     # Create config
+    log "  → Creating configuration..."
     create_vm_config "${vm_name}" "${vm_type}"
     
     # Create disk in VM-specific directory
+    log "  → Creating disk image..."
     create_disk "${vm_name}" "${vm_type}" "${disk_size}" "qcow2"
     
-    log "VM created successfully."
+    log ""
+    log "✅ VM created successfully!"
+    log "   Configuration: ${VM_DIR}/${vm_name}_${vm_type}/conf/${vm_name}.conf"
+    log "   Disk Image:    ${VM_DIR}/${vm_name}_${vm_type}/qcow2/${vm_name}.qcow2"
+    log ""
     log "To launch: ${SCRIPT_NAME} launch ${vm_name}"
+    log "To configure: ${SCRIPT_NAME} edit ${vm_name}"
 }
 
 # ---------------------------------------------------------------------------
@@ -3060,19 +3457,19 @@ test_sharing_services() {
 # Export VM to UTM format
 export_utm() {
     local vm_name="$1"
-    local vm_dir=""
+    local vm_base_dir=""
     local config_file=""
     
-    # Search for VM directory in the new structure
-    while IFS= read -r -d '' dir; do
-        if [[ -f "${dir}/${vm_name}.conf" ]]; then
-            vm_dir="$dir"
-            config_file="${dir}/${vm_name}.conf"
+    # Search for VM config in the new structure (vms/VM_NAME_PLATFORM/conf/)
+    while IFS= read -r -d '' file; do
+        if [[ "$(basename "$file" .conf)" == "${vm_name}" ]]; then
+            config_file="$file"
+            vm_base_dir=$(dirname "$(dirname "${config_file}")")  # Get VM base directory
             break
         fi
-    done < <(find "${CONFIG_DIR}" -type d -print0 2>/dev/null)
+    done < <(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print0 2>/dev/null)
 
-    [[ -d "${vm_dir}" ]] || die "VM directory not found: ${vm_name}"
+    [[ -d "${vm_base_dir}" ]] || die "VM directory not found: ${vm_name}"
     [[ -f "${config_file}" ]] || die "VM config not found: ${vm_name}.conf"
 
     source "${config_file}"
@@ -3100,7 +3497,7 @@ export_utm() {
     esac
 
     # Create UTM config JSON
-    local utm_config_file="${vm_dir}/utm-config.json"
+    local utm_config_file="${conf_dir}/config.json"
     
     log "Exporting UTM configuration to: ${utm_config_file}"
     
@@ -3195,11 +3592,17 @@ create_utm_vm() {
         *) utm_architecture="ppc" ;;
     esac
 
-    # Create VM directory with platform
+    # Create VM directory with platform and subdirectories
     vm_platform="${utm_architecture}"
-    vm_dir="${CONFIG_DIR}/${vm_name}_${vm_platform}"
-    mkdir -p "${vm_dir}"
-    log "Creating UTM VM in: ${vm_dir}"
+    vm_base_dir="${VM_DIR}/${vm_name}_${vm_platform}"
+    vm_dir="${vm_base_dir}"
+    local conf_dir="${vm_base_dir}/conf"
+    local qcow2_dir="${vm_base_dir}/qcow2"
+    local sh_dir="${vm_base_dir}/sh"
+    local rom_dir="${vm_base_dir}/rom"
+    
+    mkdir -p "${conf_dir}" "${qcow2_dir}" "${sh_dir}" "${rom_dir}"
+    log "Creating UTM VM in: ${vm_base_dir}"
 
     # Display mode
     read -rp "Display Mode [1=GUI/2=Terminal]: " utm_display_choice
@@ -3242,7 +3645,7 @@ create_utm_vm() {
     fi
 
     # Create UTM configuration file
-    local utm_config_file="${vm_dir}/config.json"
+    local utm_config_file="${conf_dir}/config.json"
     cat > "${utm_config_file}" << EOF
 {
   "name": "${vm_name}",
@@ -3268,7 +3671,7 @@ create_utm_vm() {
 EOF
 
     # Save VM metadata
-    cat > "${vm_dir}/metadata.env" << EOF
+    cat > "${conf_dir}/metadata.env" << EOF
 UTM_VM=true
 UTM_ARCH=${utm_architecture}
 UTM_OS_TYPE=${utm_os_type}
@@ -3280,7 +3683,7 @@ UTM_MEMORY=${utm_memory}
 UTM_CORES=${utm_cores}
 EOF
 
-    log "UTM VM configuration created at: ${vm_dir}"
+    log "UTM VM configuration created at: ${vm_base_dir}"
     log "To use in UTM.app:"
     log "1. Copy the directory to: ${HOME}/Library/Containers/com.utmapp.UTM/Data/Documents/"
     log "2. Import the VM in UTM.app"
@@ -3295,13 +3698,13 @@ insert_iso() {
     local vm_name="$1"
     local config_file=""
     
-    # Search for config file in the new directory structure
+    # Search for config file in the new directory structure (vms/VM_NAME_PLATFORM/conf/)
     while IFS= read -r -d '' file; do
         if [[ "$(basename "$file" .conf)" == "${vm_name}" ]]; then
             config_file="$file"
             break
         fi
-    done < <(find "${CONFIG_DIR}" -name "${vm_name}.conf" -print0 2>/dev/null)
+    done < <(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print0 2>/dev/null)
     
     [[ -f "${config_file}" ]] || die "VM config not found: ${vm_name}.conf"
     
@@ -3331,13 +3734,13 @@ eject_iso() {
     local vm_name="$1"
     local config_file=""
     
-    # Search for config file in the new directory structure
+    # Search for config file in the new directory structure (vms/VM_NAME_PLATFORM/conf/)
     while IFS= read -r -d '' file; do
         if [[ "$(basename "$file" .conf)" == "${vm_name}" ]]; then
             config_file="$file"
             break
         fi
-    done < <(find "${CONFIG_DIR}" -name "${vm_name}.conf" -print0 2>/dev/null)
+    done < <(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print0 2>/dev/null)
     
     [[ -f "${config_file}" ]] || die "VM config not found: ${vm_name}.conf"
     
@@ -3724,13 +4127,13 @@ edit_vm() {
     local vm_name="$1"
     local config_file=""
     
-    # Search for config file in the new directory structure
+    # Search for config file in the new directory structure (vms/VM_NAME_PLATFORM/conf/)
     while IFS= read -r -d '' file; do
         if [[ "$(basename "$file" .conf)" == "${vm_name}" ]]; then
             config_file="$file"
             break
         fi
-    done < <(find "${CONFIG_DIR}" -name "${vm_name}.conf" -print0 2>/dev/null)
+    done < <(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print0 2>/dev/null)
     
     [[ -f "${config_file}" ]] || die "VM config not found: ${vm_name}.conf"
     
@@ -4084,11 +4487,11 @@ launch_vm_menu() {
     [[ $? -ne 0 ]] && return 1
     read -rp "Select VM number to launch: " vm_num
     
-    # Get all VM config files
+    # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
     while IFS= read -r -d '' vm_conf; do
         vm_confs+=("$vm_conf")
-    done < <(find "${CONFIG_DIR}" -name "*.conf" -print0 2>/dev/null | sort -z)
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
     
     local i=0
     for vm_conf in "${vm_confs[@]}"; do
@@ -4109,11 +4512,11 @@ delete_vm_menu() {
     [[ $? -ne 0 ]] && return 1
     read -rp "Select VM number to delete: " vm_num
     
-    # Get all VM config files
+    # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
     while IFS= read -r -d '' vm_conf; do
         vm_confs+=("$vm_conf")
-    done < <(find "${CONFIG_DIR}" -name "*.conf" -print0 2>/dev/null | sort -z)
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
     
     local i=0
     for vm_conf in "${vm_confs[@]}"; do
@@ -4135,11 +4538,11 @@ insert_iso_menu() {
     list_vms || return 1
     read -rp "Select VM number to insert ISO into: " vm_num
     
-    # Get all VM config files
+    # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
     while IFS= read -r -d '' vm_conf; do
         vm_confs+=("$vm_conf")
-    done < <(find "${CONFIG_DIR}" -name "*.conf" -print0 2>/dev/null | sort -z)
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
     
     local i=0
     for vm_conf in "${vm_confs[@]}"; do
@@ -4160,11 +4563,11 @@ eject_iso_menu() {
     list_vms || return 1
     read -rp "Select VM number to eject ISO from: " vm_num
     
-    # Get all VM config files
+    # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
     while IFS= read -r -d '' vm_conf; do
         vm_confs+=("$vm_conf")
-    done < <(find "${CONFIG_DIR}" -name "*.conf" -print0 2>/dev/null | sort -z)
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
     
     local i=0
     for vm_conf in "${vm_confs[@]}"; do
@@ -4185,11 +4588,11 @@ export_utm_menu() {
     list_vms || return 1
     read -rp "Select VM number to export to UTM format: " vm_num
     
-    # Get all VM config files
+    # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
     while IFS= read -r -d '' vm_conf; do
         vm_confs+=("$vm_conf")
-    done < <(find "${CONFIG_DIR}" -name "*.conf" -print0 2>/dev/null | sort -z)
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
     
     local i=0
     for vm_conf in "${vm_confs[@]}"; do
@@ -4210,11 +4613,11 @@ stop_vm_menu() {
     list_vms || return 1
     read -rp "Select VM number to stop: " vm_num
     
-    # Get all VM config files
+    # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
     while IFS= read -r -d '' vm_conf; do
         vm_confs+=("$vm_conf")
-    done < <(find "${CONFIG_DIR}" -name "*.conf" -print0 2>/dev/null | sort -z)
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
     
     local i=0
     for vm_conf in "${vm_confs[@]}"; do
@@ -4235,11 +4638,11 @@ edit_vm_menu() {
     list_vms || return 1
     read -rp "Select VM number to edit: " vm_num
     
-    # Get all VM config files
+    # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
     while IFS= read -r -d '' vm_conf; do
         vm_confs+=("$vm_conf")
-    done < <(find "${CONFIG_DIR}" -name "*.conf" -print0 2>/dev/null | sort -z)
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
     
     local i=0
     for vm_conf in "${vm_confs[@]}"; do
