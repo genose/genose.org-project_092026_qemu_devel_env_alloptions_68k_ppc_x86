@@ -461,6 +461,13 @@ ensure_dir() {
 # Ask user for input with default
 ask() {
     local prompt="$1" default="$2" answer
+    
+    # Non-interactive mode: return default immediately
+    if ! is_interactive; then
+        echo "${default}"
+        return
+    fi
+    
     read -rp "$(printf '%b%s%b [%s]: ' "${C_BOLD}" "${prompt}" "${C_RESET}" "${default}")" answer
     echo "${answer:-${default}}"
 }
@@ -544,27 +551,52 @@ pick_image() {
     local platform="$1"
     local start_dir=""
     
-    # Enhanced UX: Ask user which directory to start with
-    read -rp "Enter directory to scan for disk images [${VM_IMAGE_DIR}/${platform}]: " start_dir
-    start_dir="${start_dir:-${VM_IMAGE_DIR}/${platform}}"
-    
-    # Validate directory exists and user wants to proceed
-    if [[ ! -d "${start_dir}" ]]; then
-        warn "Directory does not exist: ${start_dir}"
-        read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
-        navigate_choice="${navigate_choice:-y}"
-        if [[ "${navigate_choice}" =~ ^[yY] ]]; then
-            pick_image "${platform}"
+    # Non-interactive mode: use default directory and auto-scan
+    if ! is_interactive; then
+        start_dir="${VM_IMAGE_DIR}/${platform}"
+        mkdir -p "${start_dir}" 2>/dev/null || true
+        
+        # Auto-select first disk image
+        local images=()
+        while IFS= read -r -d $'\0' f; do
+            images+=("$f")
+        done < <(find "${start_dir}" -maxdepth 1 \( -name '*.img' -o -name '*.qcow2' -o -name '*.iso' -o -name '*.dsk' -o -name '*.hda' \) -print0 2>/dev/null | sort -z)
+        
+        if [[ ${#images[@]} -eq 0 ]]; then
+            warn "No disk images found in ${start_dir}"
+            echo ""
+            return
         fi
-        return 1
-    fi
-    
-    read -rp "Scan directory ${start_dir} for disk images? (y/n) [y]: " confirm_scan
-    confirm_scan="${confirm_scan:-y}"
-    
-    if [[ "${confirm_scan}" =~ ^[yY] ]]; then
-        mkdir -p "${start_dir}"
-
+        
+        # Return first image found
+        log "Auto-selected: $(basename "${images[0]}")"
+        echo "${images[0]}"
+        return
+    else
+        # Enhanced UX: Ask user which directory to start with
+        read -rp "Enter directory to scan for disk images [${VM_IMAGE_DIR}/${platform}]: " start_dir
+        start_dir="${start_dir:-${VM_IMAGE_DIR}/${platform}}"
+        
+        # Validate directory exists and user wants to proceed
+        if [[ ! -d "${start_dir}" ]]; then
+            warn "Directory does not exist: ${start_dir}"
+            read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
+            navigate_choice="${navigate_choice:-y}"
+            if [[ "${navigate_choice}" =~ ^[yY] ]]; then
+                pick_image "${platform}"
+            fi
+            return 1
+        fi
+        
+        read -rp "Scan directory ${start_dir} for disk images? (y/n) [y]: " confirm_scan
+        confirm_scan="${confirm_scan:-y}"
+        
+        if [[ "${confirm_scan}" != "y" ]]; then
+            return 0
+        fi
+        
+        mkdir -p "${start_dir}" 2>/dev/null || true
+        
         local images=()
         while IFS= read -r -d $'\0' f; do
             images+=("$f")
@@ -603,14 +635,12 @@ pick_image() {
             echo "${images[$((choice - 1))]}"
         fi
         
-        # Allow navigation to other directories
+        # Allow navigation to other directories (only in interactive mode)
         read -rp "Scan another directory? (y/n) [n]: " scan_another
         scan_another="${scan_another:-n}"
         if [[ "${scan_another}" =~ ^[yY] ]]; then
             pick_image "${platform}"
         fi
-    else
-        log "Disk scan cancelled."
     fi
 }
 
@@ -619,27 +649,53 @@ pick_cdrom() {
     local platform="$1"
     local start_dir=""
     
-    # Enhanced UX: Ask user which directory to start with
-    read -rp "Enter directory to scan for ISO images [${VM_IMAGE_DIR}/${platform}]: " start_dir
-    start_dir="${start_dir:-${VM_IMAGE_DIR}/${platform}}"
-    
-    # Validate directory exists and user wants to proceed
-    if [[ ! -d "${start_dir}" ]]; then
-        warn "Directory does not exist: ${start_dir}"
-        read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
-        navigate_choice="${navigate_choice:-y}"
-        if [[ "${navigate_choice}" =~ ^[yY] ]]; then
-            pick_cdrom "${platform}"
+    # Non-interactive mode: use default directory and auto-scan
+    if ! is_interactive; then
+        start_dir="${VM_IMAGE_DIR}/${platform}"
+        mkdir -p "${start_dir}" 2>/dev/null || true
+        
+        # Auto-select first ISO image
+        local isos=()
+        while IFS= read -r -d $'\0' f; do
+            isos+=("$f")
+        done < <(find "${start_dir}" -maxdepth 2 \( -name '*.iso' -o -name '*.ISO' -o -name '*.img' -o -name '*.IMG' -o -name '*.dmg' -o -name '*.DMG' \) -print0 2>/dev/null | sort -z)
+        
+        if [[ ${#isos[@]} -eq 0 ]]; then
+            warn "No ISO/CD images found in ${start_dir}"
+            echo ""
+            return
         fi
-        return 1
-    fi
-    
-    read -rp "Scan directory ${start_dir} for ISO images? (y/n) [y]: " confirm_scan
-    confirm_scan="${confirm_scan:-y}"
-    
-    if [[ "${confirm_scan}" =~ ^[yY] ]]; then
-        mkdir -p "${start_dir}"
-
+        
+        # Return first ISO found
+        log "Auto-selected: $(basename "${isos[0]}")"
+        echo "${isos[0]}"
+        return
+    else
+        # Enhanced UX: Ask user which directory to start with
+        read -rp "Enter directory to scan for ISO images [${VM_IMAGE_DIR}/${platform}]: " start_dir
+        start_dir="${start_dir:-${VM_IMAGE_DIR}/${platform}}"
+        
+        # Validate directory exists and user wants to proceed
+        if [[ ! -d "${start_dir}" ]]; then
+            warn "Directory does not exist: ${start_dir}"
+            read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
+            navigate_choice="${navigate_choice:-y}"
+            if [[ "${navigate_choice}" =~ ^[yY] ]]; then
+                pick_cdrom "${platform}"
+            fi
+            return 1
+        fi
+        
+        read -rp "Scan directory ${start_dir} for ISO images? (y/n) [y]: " confirm_scan
+        confirm_scan="${confirm_scan:-y}"
+        
+        if [[ "${confirm_scan}" != "y" ]]; then
+            log "ISO scan cancelled."
+            return 0
+        fi
+        
+        mkdir -p "${start_dir}" 2>/dev/null || true
+        
         local isos=()
         while IFS= read -r -d $'\0' f; do
             isos+=("$f")
@@ -672,14 +728,12 @@ pick_cdrom() {
             echo "${isos[$((choice - 1))]}"
         fi
         
-        # Allow navigation to other directories
+        # Allow navigation to other directories (only in interactive mode)
         read -rp "Scan another directory? (y/n) [n]: " scan_another
         scan_another="${scan_another:-n}"
         if [[ "${scan_another}" =~ ^[yY] ]]; then
             pick_cdrom "${platform}"
         fi
-    else
-        log "ISO scan cancelled."
     fi
 }
 
@@ -1419,52 +1473,53 @@ list_isos() {
         done
         
         [[ $found -eq 0 ]] && warn "No ISOs found in ${start_dir}"
-        return 0
-    fi
-    
-    # Interactive mode: ask user for input
-    read -rp "Enter directory to scan for ISOs [${ISO_DIR}]: " start_dir
-    start_dir="${start_dir:-${ISO_DIR}}"
-    
-    # Validate directory exists and user wants to proceed
-    if [[ ! -d "${start_dir}" ]]; then
-        warn "Directory does not exist: ${start_dir}"
-        read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
-        navigate_choice="${navigate_choice:-y}"
-        if [[ "${navigate_choice}" =~ ^[yY] ]]; then
-            list_isos
-        fi
-        return 1
-    fi
-    
-    read -rp "Scan directory ${start_dir} for ISOs? (y/n) [y]: " confirm_scan
-    confirm_scan="${confirm_scan:-y}"
-    
-    if [[ "${confirm_scan}" =~ ^[yY] ]]; then
-        heading "Available ISOs in ${start_dir}"
-        
-        local found=0
-        local iso_dirs=("${start_dir}")
-        
-        for dir in "${iso_dirs[@]}"; do
-            [[ -d "${dir}" ]] || continue
-            log "Directory: ${dir}"
-            while IFS= read -r -d '' iso_file; do
-                log "  ${found}) $(basename "${iso_file}") [${iso_file}]"
-                ((found++)) || true
-            done < <(find "${dir}" -maxdepth 1 -type f \( -name "*.iso" -o -name "*.ISO" -o -name "*.dmg" -o -name "*.DMG" \) -print0 2>/dev/null | sort -z)
-        done
-        
-        [[ $found -eq 0 ]] && warn "No ISOs found in ${start_dir}"
-        
-        # Allow navigation to other directories
-        read -rp "Scan another directory? (y/n) [n]: " scan_another
-        scan_another="${scan_another:-n}"
-        if [[ "${scan_another}" =~ ^[yY] ]]; then
-            list_isos
-        fi
     else
-        log "ISO scan cancelled."
+        # Interactive mode: ask user for input
+        read -rp "Enter directory to scan for ISOs [${ISO_DIR}]: " start_dir
+        start_dir="${start_dir:-${ISO_DIR}}"
+        
+        # Validate directory exists and user wants to proceed
+        if [[ ! -d "${start_dir}" ]]; then
+            warn "Directory does not exist: ${start_dir}"
+            read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
+            navigate_choice="${navigate_choice:-y}"
+            if [[ "${navigate_choice}" =~ ^[yY] ]]; then
+                list_isos
+            fi
+            return 1
+        fi
+        
+        read -rp "Scan directory ${start_dir} for ISOs? (y/n) [y]: " confirm_scan
+        confirm_scan="${confirm_scan:-y}"
+        
+        if [[ "${confirm_scan}" =~ ^[yY] ]]; then
+            heading "Available ISOs in ${start_dir}"
+            
+            local found=0
+            local iso_dirs=("${start_dir}")
+            
+            for dir in "${iso_dirs[@]}"; do
+                [[ -d "${dir}" ]] || continue
+                log "Directory: ${dir}"
+                while IFS= read -r -d '' iso_file; do
+                    log "  ${found}) $(basename "${iso_file}") [${iso_file}]"
+                    ((found++)) || true
+                done < <(find "${dir}" -maxdepth 1 -type f \( -name "*.iso" -o -name "*.ISO" -o -name "*.dmg" -o -name "*.DMG" \) -print0 2>/dev/null | sort -z)
+            done
+            
+            [[ $found -eq 0 ]] && warn "No ISOs found in ${start_dir}"
+            
+            # Allow navigation to other directories (only in interactive mode)
+            if is_interactive; then
+                read -rp "Scan another directory? (y/n) [n]: " scan_another
+                scan_another="${scan_another:-n}"
+                if [[ "${scan_another}" =~ ^[yY] ]]; then
+                    list_isos
+                fi
+            fi
+        else
+            log "ISO scan cancelled."
+        fi
     fi
     
     return 0
@@ -1474,68 +1529,115 @@ list_isos() {
 select_iso() {
     local choice start_dir=""
     
-    # Enhanced UX: Ask user which directory to start with
-    log "Select ISO file for VM"
-    log "------------------------"
-    read -rp "Enter directory to scan for ISOs [${ISO_DIR}]: " start_dir
-    start_dir="${start_dir:-${ISO_DIR}}"
+    # Non-interactive mode: use default directory
+    if ! is_interactive; then
+        start_dir="${ISO_DIR}"
+    else
+        # Enhanced UX: Ask user which directory to start with
+        log "Select ISO file for VM"
+        log "------------------------"
+        read -rp "Enter directory to scan for ISOs [${ISO_DIR}]: " start_dir
+        start_dir="${start_dir:-${ISO_DIR}}"
+    fi
     
     # Validate directory exists
     if [[ ! -d "${start_dir}" ]]; then
         warn "Directory does not exist: ${start_dir}"
-        read -rp "Do you want to browse to another directory? (y/n) [y]: " navigate_choice
-        navigate_choice="${navigate_choice:-y}"
-        if [[ "${navigate_choice}" =~ ^[yY] ]]; then
-            select_iso
-        else
+        
+        # Non-interactive mode: just return error
+        if ! is_interactive; then
             return 1
-        fi
-        return 1
-    fi
-    
-    heading "Available ISOs in ${start_dir}"
-    
-    # List ISOs in the selected directory
-    local i=0
-    local iso_files=()
-    while IFS= read -r -d '' iso_file; do
-        iso_files+=("$iso_file")
-        local file_size=$(file_size_bytes "${iso_file}")
-        local human_size
-        if (( file_size >= 1073741824 )); then
-            human_size="$((file_size / 1073741824))G"
-        elif (( file_size >= 1048576 )); then
-            human_size="$((file_size / 1048576))M"
         else
-            human_size="${file_size}B"
-        fi
-        log "  [${i}] $(basename "${iso_file}") (${human_size})"
-        ((i++)) || true
-    done < <(find "${start_dir}" -maxdepth 1 -type f \( -name "*.iso" -o -name "*.ISO" -o -name "*.dmg" -o -name "*.DMG" \) -print0 2>/dev/null | sort -z)
-    
-    if [[ $i -eq 0 ]]; then
-        warn "No ISOs found in ${start_dir}"
-        read -rp "Try another directory? (y/n) [y]: " try_another
-        try_another="${try_another:-y}"
-        if [[ "${try_another}" =~ ^[yY] ]]; then
-            select_iso
-            return $?
-        else
-            return 1
+            read -rp "Do you want to browse to another directory? (y/n) [y]: " navigate_choice
+            navigate_choice="${navigate_choice:-y}"
+            if [[ "${navigate_choice}" =~ ^[yY] ]]; then
+                select_iso
+                return $?
+            else
+                return 1
+            fi
         fi
     fi
     
-    log ""
-    read -rp "Select ISO [0-$(($i-1))] or enter full path: " choice
+    # Non-interactive mode: auto-select first ISO if available
+    if ! is_interactive; then
+        local iso_files=()
+        while IFS= read -r -d '' iso_file; do
+            iso_files+=("$iso_file")
+        done < <(find "${start_dir}" -maxdepth 1 -type f \( -name "*.iso" -o -name "*.ISO" -o -name "*.dmg" -o -name "*.DMG" \) -print0 2>/dev/null | sort -z)
+        
+        if [[ ${#iso_files[@]} -eq 0 ]]; then
+            warn "No ISOs found in ${start_dir}"
+            return 1
+        fi
+        
+        # Return first ISO found
+        log "Auto-selected: $(basename "${iso_files[0]}")"
+        echo "${iso_files[0]}"
+        return 0
+    fi
     
-    if [[ "${choice}" =~ ^[0-9]+$ ]]; then
-        # Select by number
-        if [[ $choice -lt $i && $choice -ge 0 ]]; then
-            log "Selected: $(basename "${iso_files[$choice]}")"
-            echo "${iso_files[$choice]}"
+    # Interactive mode only from here
+    if is_interactive; then
+        heading "Available ISOs in ${start_dir}"
+        
+        # List ISOs in the selected directory
+        local i=0
+        local iso_files=()
+        while IFS= read -r -d '' iso_file; do
+            iso_files+=("$iso_file")
+            local file_size=$(file_size_bytes "${iso_file}")
+            local human_size
+            if (( file_size >= 1073741824 )); then
+                human_size="$((file_size / 1073741824))G"
+            elif (( file_size >= 1048576 )); then
+                human_size="$((file_size / 1048576))M"
+            else
+                human_size="${file_size}B"
+            fi
+            log "  [${i}] $(basename "${iso_file}") (${human_size})"
+            ((i++)) || true
+        done < <(find "${start_dir}" -maxdepth 1 -type f \( -name "*.iso" -o -name "*.ISO" -o -name "*.dmg" -o -name "*.DMG" \) -print0 2>/dev/null | sort -z)
+        
+        if [[ $i -eq 0 ]]; then
+            warn "No ISOs found in ${start_dir}"
+            read -rp "Try another directory? (y/n) [y]: " try_another
+            try_another="${try_another:-y}"
+            if [[ "${try_another}" =~ ^[yY] ]]; then
+                select_iso
+                return $?
+            else
+                return 1
+            fi
+        fi
+        
+        log ""
+        read -rp "Select ISO [0-$(($i-1))] or enter full path: " choice
+        
+        if [[ "${choice}" =~ ^[0-9]+$ ]]; then
+            # Select by number
+            if [[ $choice -lt $i && $choice -ge 0 ]]; then
+                log "Selected: $(basename "${iso_files[$choice]}")"
+                echo "${iso_files[$choice]}"
+                return 0
+            else
+                warn "Invalid ISO selection. Please choose a number between 0 and $(($i-1))."
+                read -rp "Try again? (y/n) [y]: " retry_choice
+                retry_choice="${retry_choice:-y}"
+                if [[ "${retry_choice}" =~ ^[yY] ]]; then
+                    select_iso
+                    return $?
+                else
+                    return 1
+                fi
+            fi
+        elif [[ -f "${choice}" ]]; then
+            # Direct path
+            log "Selected: $(basename "${choice}")"
+            echo "${choice}"
             return 0
         else
-            warn "Invalid ISO selection. Please choose a number between 0 and $(($i-1))."
+            warn "ISO not found: ${choice}"
             read -rp "Try again? (y/n) [y]: " retry_choice
             retry_choice="${retry_choice:-y}"
             if [[ "${retry_choice}" =~ ^[yY] ]]; then
@@ -1545,21 +1647,10 @@ select_iso() {
                 return 1
             fi
         fi
-    elif [[ -f "${choice}" ]]; then
-        # Direct path
-        log "Selected: $(basename "${choice}")"
-        echo "${choice}"
-        return 0
     else
-        warn "ISO not found: ${choice}"
-        read -rp "Try again? (y/n) [y]: " retry_choice
-        retry_choice="${retry_choice:-y}"
-        if [[ "${retry_choice}" =~ ^[yY] ]]; then
-            select_iso
-            return $?
-        else
-            return 1
-        fi
+        # Non-interactive mode: we should never reach here since we handled it earlier
+        warn "Non-interactive mode should have been handled earlier"
+        return 1
     fi
 }
 
@@ -1567,68 +1658,104 @@ select_iso() {
 select_disk() {
     local choice start_dir=""
     
-    # Enhanced UX: Ask user which directory to start with
-    log "Select Disk Image for VM"
-    log "--------------------------"
-    read -rp "Enter directory to scan for disk images [${DISK_DIR}]: " start_dir
-    start_dir="${start_dir:-${DISK_DIR}}"
-    
-    # Validate directory exists
-    if [[ ! -d "${start_dir}" ]]; then
-        warn "Directory does not exist: ${start_dir}"
-        read -rp "Do you want to browse to another directory? (y/n) [y]: " navigate_choice
-        navigate_choice="${navigate_choice:-y}"
-        if [[ "${navigate_choice}" =~ ^[yY] ]]; then
-            select_disk
-        else
+    # Non-interactive mode: use default directory
+    if ! is_interactive; then
+        start_dir="${DISK_DIR}"
+        
+        # Auto-select first disk image if available
+        local disk_files=()
+        while IFS= read -r -d '' disk_file; do
+            disk_files+=("$disk_file")
+        done < <(find "${start_dir}" -maxdepth 1 -type f \( -name "*.qcow2" -o -name "*.QCOW2" -o -name "*.img" -o -name "*.IMG" -o -name "*.raw" -o -name "*.RAW" -o -name "*.hda" -o -name "*.HDA" -o -name "*.dsk" -o -name "*.DSK" \) -print0 2>/dev/null | sort -z)
+        
+        if [[ ${#disk_files[@]} -eq 0 ]]; then
+            warn "No disk images found in ${start_dir}"
             return 1
         fi
-        return 1
-    fi
-    
-    heading "Available Disk Images in ${start_dir}"
-    
-    # List disk images in the selected directory
-    local i=0
-    local disk_files=()
-    while IFS= read -r -d '' disk_file; do
-        disk_files+=("$disk_file")
-        local file_size=$(file_size_bytes "${disk_file}")
-        local human_size
-        if (( file_size >= 1073741824 )); then
-            human_size="$((file_size / 1073741824))G"
-        elif (( file_size >= 1048576 )); then
-            human_size="$((file_size / 1048576))M"
-        else
-            human_size="${file_size}B"
+        
+        # Return first disk found
+        log "Auto-selected: $(basename "${disk_files[0]}")"
+        echo "${disk_files[0]}"
+        return 0
+    else
+        # Enhanced UX: Ask user which directory to start with
+        log "Select Disk Image for VM"
+        log "--------------------------"
+        read -rp "Enter directory to scan for disk images [${DISK_DIR}]: " start_dir
+        start_dir="${start_dir:-${DISK_DIR}}"
+        
+        # Validate directory exists
+        if [[ ! -d "${start_dir}" ]]; then
+            warn "Directory does not exist: ${start_dir}"
+            read -rp "Do you want to browse to another directory? (y/n) [y]: " navigate_choice
+            navigate_choice="${navigate_choice:-y}"
+            if [[ "${navigate_choice}" =~ ^[yY] ]]; then
+                select_disk
+                return $?
+            else
+                return 1
+            fi
         fi
-        log "  [${i}] $(basename "${disk_file}") (${human_size})"
-        ((i++)) || true
-    done < <(find "${start_dir}" -maxdepth 1 -type f \( -name "*.qcow2" -o -name "*.QCOW2" -o -name "*.img" -o -name "*.IMG" -o -name "*.raw" -o -name "*.RAW" -o -name "*.hda" -o -name "*.HDA" -o -name "*.dsk" -o -name "*.DSK" \) -print0 2>/dev/null | sort -z)
-    
-    if [[ $i -eq 0 ]]; then
-        warn "No disk images found in ${start_dir}"
-        read -rp "Try another directory? (y/n) [y]: " try_another
-        try_another="${try_another:-y}"
-        if [[ "${try_another}" =~ ^[yY] ]]; then
-            select_disk
-            return $?
-        else
-            return 1
+        
+        heading "Available Disk Images in ${start_dir}"
+        
+        # List disk images in the selected directory
+        local i=0
+        local disk_files=()
+        while IFS= read -r -d '' disk_file; do
+            disk_files+=("$disk_file")
+            local file_size=$(file_size_bytes "${disk_file}")
+            local human_size
+            if (( file_size >= 1073741824 )); then
+                human_size="$((file_size / 1073741824))G"
+            elif (( file_size >= 1048576 )); then
+                human_size="$((file_size / 1048576))M"
+            else
+                human_size="${file_size}B"
+            fi
+            log "  [${i}] $(basename "${disk_file}") (${human_size})"
+            ((i++)) || true
+        done < <(find "${start_dir}" -maxdepth 1 -type f \( -name "*.qcow2" -o -name "*.QCOW2" -o -name "*.img" -o -name "*.IMG" -o -name "*.raw" -o -name "*.RAW" -o -name "*.hda" -o -name "*.HDA" -o -name "*.dsk" -o -name "*.DSK" \) -print0 2>/dev/null | sort -z)
+        
+        if [[ $i -eq 0 ]]; then
+            warn "No disk images found in ${start_dir}"
+            read -rp "Try another directory? (y/n) [y]: " try_another
+            try_another="${try_another:-y}"
+            if [[ "${try_another}" =~ ^[yY] ]]; then
+                select_disk
+                return $?
+            else
+                return 1
+            fi
         fi
-    fi
-    
-    log ""
-    read -rp "Select disk image [0-$(($i-1))] or enter full path: " choice
-    
-    if [[ "${choice}" =~ ^[0-9]+$ ]]; then
-        # Select by number
-        if [[ $choice -lt $i && $choice -ge 0 ]]; then
-            log "Selected: $(basename "${disk_files[$choice]}")"
-            echo "${disk_files[$choice]}"
+        
+        log ""
+        read -rp "Select disk image [0-$(($i-1))] or enter full path: " choice
+        
+        if [[ "${choice}" =~ ^[0-9]+$ ]]; then
+            # Select by number
+            if [[ $choice -lt $i && $choice -ge 0 ]]; then
+                log "Selected: $(basename "${disk_files[$choice]}")"
+                echo "${disk_files[$choice]}"
+                return 0
+            else
+                warn "Invalid disk selection. Please choose a number between 0 and $(($i-1))."
+                read -rp "Try again? (y/n) [y]: " retry_choice
+                retry_choice="${retry_choice:-y}"
+                if [[ "${retry_choice}" =~ ^[yY] ]]; then
+                    select_disk
+                    return $?
+                else
+                    return 1
+                fi
+            fi
+        elif [[ -f "${choice}" ]]; then
+            # Direct path
+            log "Selected: $(basename "${choice}")"
+            echo "${choice}"
             return 0
         else
-            warn "Invalid disk selection. Please choose a number between 0 and $(($i-1))."
+            warn "Disk image not found: ${choice}"
             read -rp "Try again? (y/n) [y]: " retry_choice
             retry_choice="${retry_choice:-y}"
             if [[ "${retry_choice}" =~ ^[yY] ]]; then
@@ -1638,21 +1765,6 @@ select_disk() {
                 return 1
             fi
         fi
-    elif [[ -f "${choice}" ]]; then
-        # Direct path
-        log "Selected: $(basename "${choice}")"
-        echo "${choice}"
-        return 0
-    else
-        warn "Disk image not found: ${choice}"
-        read -rp "Try again? (y/n) [y]: " retry_choice
-        retry_choice="${retry_choice:-y}"
-        if [[ "${retry_choice}" =~ ^[yY] ]]; then
-            select_disk
-            return $?
-        else
-            return 1
-        fi
     fi
 }
 
@@ -1660,68 +1772,104 @@ select_disk() {
 select_rom() {
     local choice start_dir=""
     
-    # Enhanced UX: Ask user which directory to start with
-    log "Select ROM File for VM"
-    log "----------------------"
-    read -rp "Enter directory to scan for ROM files [${ROM_DIR}]: " start_dir
-    start_dir="${start_dir:-${ROM_DIR}}"
-    
-    # Validate directory exists
-    if [[ ! -d "${start_dir}" ]]; then
-        warn "Directory does not exist: ${start_dir}"
-        read -rp "Do you want to browse to another directory? (y/n) [y]: " navigate_choice
-        navigate_choice="${navigate_choice:-y}"
-        if [[ "${navigate_choice}" =~ ^[yY] ]]; then
-            select_rom
-        else
+    # Non-interactive mode: use default directory
+    if ! is_interactive; then
+        start_dir="${ROM_DIR}"
+        
+        # Auto-select first ROM if available
+        local rom_files=()
+        while IFS= read -r -d '' rom_file; do
+            rom_files+=("$rom_file")
+        done < <(find "${start_dir}" -maxdepth 1 -type f \( -name "*.rom" -o -name "*.ROM" -o -name "*.bin" -o -name "*.BIN" \) -print0 2>/dev/null | sort -z)
+        
+        if [[ ${#rom_files[@]} -eq 0 ]]; then
+            warn "No ROM files found in ${start_dir}"
             return 1
         fi
-        return 1
-    fi
-    
-    heading "Available ROM Files in ${start_dir}"
-    
-    # List ROM files in the selected directory
-    local i=0
-    local rom_files=()
-    while IFS= read -r -d '' rom_file; do
-        rom_files+=("$rom_file")
-        local file_size=$(file_size_bytes "${rom_file}")
-        local human_size
-        if (( file_size >= 1073741824 )); then
-            human_size="$((file_size / 1073741824))G"
-        elif (( file_size >= 1048576 )); then
-            human_size="$((file_size / 1048576))M"
-        else
-            human_size="${file_size}B"
+        
+        # Return first ROM found
+        log "Auto-selected: $(basename "${rom_files[0]}")"
+        echo "${rom_files[0]}"
+        return 0
+    else
+        # Enhanced UX: Ask user which directory to start with
+        log "Select ROM File for VM"
+        log "----------------------"
+        read -rp "Enter directory to scan for ROM files [${ROM_DIR}]: " start_dir
+        start_dir="${start_dir:-${ROM_DIR}}"
+        
+        # Validate directory exists
+        if [[ ! -d "${start_dir}" ]]; then
+            warn "Directory does not exist: ${start_dir}"
+            read -rp "Do you want to browse to another directory? (y/n) [y]: " navigate_choice
+            navigate_choice="${navigate_choice:-y}"
+            if [[ "${navigate_choice}" =~ ^[yY] ]]; then
+                select_rom
+                return $?
+            else
+                return 1
+            fi
         fi
-        log "  [${i}] $(basename "${rom_file}") (${human_size})"
-        ((i++)) || true
-    done < <(find "${start_dir}" -maxdepth 1 -type f \( -name "*.rom" -o -name "*.ROM" -o -name "*.bin" -o -name "*.BIN" \) -print0 2>/dev/null | sort -z)
-    
-    if [[ $i -eq 0 ]]; then
-        warn "No ROM files found in ${start_dir}"
-        read -rp "Try another directory? (y/n) [y]: " try_another
-        try_another="${try_another:-y}"
-        if [[ "${try_another}" =~ ^[yY] ]]; then
-            select_rom
-            return $?
-        else
-            return 1
+        
+        heading "Available ROM Files in ${start_dir}"
+        
+        # List ROM files in the selected directory
+        local i=0
+        local rom_files=()
+        while IFS= read -r -d '' rom_file; do
+            rom_files+=("$rom_file")
+            local file_size=$(file_size_bytes "${rom_file}")
+            local human_size
+            if (( file_size >= 1073741824 )); then
+                human_size="$((file_size / 1073741824))G"
+            elif (( file_size >= 1048576 )); then
+                human_size="$((file_size / 1048576))M"
+            else
+                human_size="${file_size}B"
+            fi
+            log "  [${i}] $(basename "${rom_file}") (${human_size})"
+            ((i++)) || true
+        done < <(find "${start_dir}" -maxdepth 1 -type f \( -name "*.rom" -o -name "*.ROM" -o -name "*.bin" -o -name "*.BIN" \) -print0 2>/dev/null | sort -z)
+        
+        if [[ $i -eq 0 ]]; then
+            warn "No ROM files found in ${start_dir}"
+            read -rp "Try another directory? (y/n) [y]: " try_another
+            try_another="${try_another:-y}"
+            if [[ "${try_another}" =~ ^[yY] ]]; then
+                select_rom
+                return $?
+            else
+                return 1
+            fi
         fi
-    fi
-    
-    log ""
-    read -rp "Select ROM file [0-$(($i-1))] or enter full path: " choice
-    
-    if [[ "${choice}" =~ ^[0-9]+$ ]]; then
-        # Select by number
-        if [[ $choice -lt $i && $choice -ge 0 ]]; then
-            log "Selected: $(basename "${rom_files[$choice]}")"
-            echo "${rom_files[$choice]}"
+        
+        log ""
+        read -rp "Select ROM file [0-$(($i-1))] or enter full path: " choice
+        
+        if [[ "${choice}" =~ ^[0-9]+$ ]]; then
+            # Select by number
+            if [[ $choice -lt $i && $choice -ge 0 ]]; then
+                log "Selected: $(basename "${rom_files[$choice]}")"
+                echo "${rom_files[$choice]}"
+                return 0
+            else
+                warn "Invalid ROM selection. Please choose a number between 0 and $(($i-1))."
+                read -rp "Try again? (y/n) [y]: " retry_choice
+                retry_choice="${retry_choice:-y}"
+                if [[ "${retry_choice}" =~ ^[yY] ]]; then
+                    select_rom
+                    return $?
+                else
+                    return 1
+                fi
+            fi
+        elif [[ -f "${choice}" ]]; then
+            # Direct path
+            log "Selected: $(basename "${choice}")"
+            echo "${choice}"
             return 0
         else
-            warn "Invalid ROM selection. Please choose a number between 0 and $(($i-1))."
+            warn "ROM file not found: ${choice}"
             read -rp "Try again? (y/n) [y]: " retry_choice
             retry_choice="${retry_choice:-y}"
             if [[ "${retry_choice}" =~ ^[yY] ]]; then
@@ -1730,21 +1878,6 @@ select_rom() {
             else
                 return 1
             fi
-        fi
-    elif [[ -f "${choice}" ]]; then
-        # Direct path
-        log "Selected: $(basename "${choice}")"
-        echo "${choice}"
-        return 0
-    else
-        warn "ROM file not found: ${choice}"
-        read -rp "Try again? (y/n) [y]: " retry_choice
-        retry_choice="${retry_choice:-y}"
-        if [[ "${retry_choice}" =~ ^[yY] ]]; then
-            select_rom
-            return $?
-        else
-            return 1
         fi
     fi
 }
@@ -4499,86 +4632,85 @@ list_roms() {
         fi
         
         if [[ ${#global_available_roms_paths[@]} -gt 0 ]]; then
-            return 0
+            : # Do nothing, files found
         else
             log "No ROM files found in ${start_dir}."
-            return 0
-        fi
-    fi
-    
-    # Interactive mode: ask user for input
-    read -rp "Enter directory to scan for ROM files [${ROM_DIR}]: " start_dir
-    start_dir="${start_dir:-${ROM_DIR}}"
-    
-    # Validate directory exists and user wants to proceed
-    if [[ ! -d "${start_dir}" ]]; then
-        warn "Directory does not exist: ${start_dir}"
-        read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
-        navigate_choice="${navigate_choice:-y}"
-        if [[ "${navigate_choice}" =~ ^[yY] ]]; then
-            list_roms
-        fi
-        return 1
-    fi
-    
-    read -rp "Scan directory ${start_dir} for ROM files? (y/n) [y]: " confirm_scan
-    confirm_scan="${confirm_scan:-y}"
-    
-    if [[ "${confirm_scan}" =~ ^[yY] ]]; then
-        heading "Available ROM Files in ${start_dir}"
-        
-        local global_available_roms_paths=()
-        local index=1
-        local selected_rom=""
-
-        log "Scanning for ROM files..."
-
-        if [[ -d "${start_dir}" ]]; then
-            while IFS= read -r -d '' file; do
-                case "${file}" in
-                    *.rom|*.ROM|*.bin|*.BIN)
-                        # Check for duplicates
-                        local already_found=false
-                        for existing in "${global_available_roms_paths[@]}"; do
-                            if [[ "$existing" = "$file" ]]; then
-                                already_found=true
-                                break
-                            fi
-                        done
-                        if [[ "$already_found" = false ]]; then
-                            global_available_roms_paths+=("$file")
-                            echo "  [${index}] $(basename "$file")"
-                            ((index++))
-                        fi
-                        ;;
-                esac
-            done < <(find "${start_dir}" -type f \( -iname "*.rom" -o -iname "*.bin" \) -print0 2>/dev/null)
-        fi
-
-        if [[ ${#global_available_roms_paths[@]} -gt 0 ]]; then
-            read -rp "Select a ROM [1-${#global_available_roms_paths[@]}] (or press Enter to skip): " selected_index
-            if [[ -n "${selected_index}" && "${selected_index}" =~ ^[0-9]+$ && ${selected_index} -le ${#global_available_roms_paths[@]} && ${selected_index} -gt 0 ]]; then
-                selected_rom="${global_available_roms_paths[$((selected_index-1))]}"
-                log "Selected ROM: ${selected_rom}"
-                echo "${selected_rom}"
-                return 0
-            else
-                log "No ROM selected."
-                echo ""
-                return 0
-            fi
-        else
-            log "No ROM files found in ${start_dir}."
-        fi
-        
-        # Allow navigation to other directories
-        read -rp "Scan another directory? (y/n) [n]: " scan_another
-        scan_another="${scan_another:-n}"
-        if [[ "${scan_another}" =~ ^[yY] ]]; then
-            list_roms
         fi
     else
-        log "ROM scan cancelled."
+        # Interactive mode: ask user for input
+        read -rp "Enter directory to scan for ROM files [${ROM_DIR}]: " start_dir
+        start_dir="${start_dir:-${ROM_DIR}}"
+        
+        # Validate directory exists and user wants to proceed
+        if [[ ! -d "${start_dir}" ]]; then
+            warn "Directory does not exist: ${start_dir}"
+            read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
+            navigate_choice="${navigate_choice:-y}"
+            if [[ "${navigate_choice}" =~ ^[yY] ]]; then
+                list_roms
+            fi
+            return 1
+        fi
+        
+        read -rp "Scan directory ${start_dir} for ROM files? (y/n) [y]: " confirm_scan
+        confirm_scan="${confirm_scan:-y}"
+        
+        if [[ "${confirm_scan}" =~ ^[yY] ]]; then
+            heading "Available ROM Files in ${start_dir}"
+            
+            local global_available_roms_paths=()
+            local index=1
+            local selected_rom=""
+
+            log "Scanning for ROM files..."
+
+            if [[ -d "${start_dir}" ]]; then
+                while IFS= read -r -d '' file; do
+                    case "${file}" in
+                        *.rom|*.ROM|*.bin|*.BIN)
+                            # Check for duplicates
+                            local already_found=false
+                            for existing in "${global_available_roms_paths[@]}"; do
+                                if [[ "$existing" = "$file" ]]; then
+                                    already_found=true
+                                    break
+                                fi
+                            done
+                            if [[ "$already_found" = false ]]; then
+                                global_available_roms_paths+=("$file")
+                                echo "  [${index}] $(basename "$file")"
+                                ((index++))
+                            fi
+                            ;;
+                    esac
+                done < <(find "${start_dir}" -type f \( -iname "*.rom" -o -iname "*.bin" \) -print0 2>/dev/null)
+            fi
+
+            if [[ ${#global_available_roms_paths[@]} -gt 0 ]]; then
+                read -rp "Select a ROM [1-${#global_available_roms_paths[@]}] (or press Enter to skip): " selected_index
+                if [[ -n "${selected_index}" && "${selected_index}" =~ ^[0-9]+$ && ${selected_index} -le ${#global_available_roms_paths[@]} && ${selected_index} -gt 0 ]]; then
+                    selected_rom="${global_available_roms_paths[$((selected_index-1))]}"
+                    log "Selected ROM: ${selected_rom}"
+                    echo "${selected_rom}"
+                    return 0
+                else
+                    log "No ROM selected."
+                    echo ""
+                    return 0
+                fi
+            else
+                log "No ROM files found in ${start_dir}."
+            fi
+            
+            # Allow navigation to other directories
+            read -rp "Scan another directory? (y/n) [n]: " scan_another
+            scan_another="${scan_another:-n}"
+            if [[ "${scan_another}" =~ ^[yY] ]]; then
+                list_roms
+            fi
+        else
+            log "ROM scan cancelled."
+        fi
     fi
     
     return 0
@@ -4618,63 +4750,62 @@ list_disks() {
             echo "  [${index}] $(basename "${disk}") (${human_size})"
             ((index++))
         done
-        return 0
-    fi
-    
-    # Interactive mode: ask user for input
-    read -rp "Enter directory to scan for disk images [${DISK_DIR}]: " start_dir
-    start_dir="${start_dir:-${DISK_DIR}}"
-    
-    # Validate directory exists and user wants to proceed
-    if [[ ! -d "${start_dir}" ]]; then
-        warn "Directory does not exist: ${start_dir}"
-        read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
-        navigate_choice="${navigate_choice:-y}"
-        if [[ "${navigate_choice}" =~ ^[yY] ]]; then
-            list_disks
-        fi
-        return 1
-    fi
-    
-    read -rp "Scan directory ${start_dir} for disk images? (y/n) [y]: " confirm_scan
-    confirm_scan="${confirm_scan:-y}"
-    
-    if [[ "${confirm_scan}" =~ ^[yY] ]]; then
-        heading "Available Disk Images in ${start_dir}"
-        
-        local disks=()
-        while IFS= read -r -d '' file; do
-            disks+=("$file")
-        done < <(find "${start_dir}" -type f \( -iname "*.qcow2" -o -iname "*.img" -o -iname "*.raw" -o -iname "*.hda" -o -iname "*.dsk" \) -print0 2>/dev/null | sort -z)
-        
-        if [[ ${#disks[@]} -eq 0 ]]; then
-            warn "No disk images found in ${start_dir}"
-        else
-            local index=1
-            for disk in "${disks[@]}"; do
-                local disk_size
-                disk_size=$(file_size_bytes "${disk}")
-                local human_size
-                if (( disk_size >= 1073741824 )); then
-                    human_size="$((disk_size / 1073741824))G"
-                elif (( disk_size >= 1048576 )); then
-                    human_size="$((disk_size / 1048576))M"
-                else
-                    human_size="${disk_size}B"
-                fi
-                echo "  [${index}] $(basename "${disk}") (${human_size})"
-                ((index++))
-            done
-        fi
-        
-        # Allow navigation to other directories
-        read -rp "Scan another directory? (y/n) [n]: " scan_another
-        scan_another="${scan_another:-n}"
-        if [[ "${scan_another}" =~ ^[yY] ]]; then
-            list_disks
-        fi
     else
-        log "Disk scan cancelled."
+        # Interactive mode: ask user for input
+        read -rp "Enter directory to scan for disk images [${DISK_DIR}]: " start_dir
+        start_dir="${start_dir:-${DISK_DIR}}"
+        
+        # Validate directory exists and user wants to proceed
+        if [[ ! -d "${start_dir}" ]]; then
+            warn "Directory does not exist: ${start_dir}"
+            read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
+            navigate_choice="${navigate_choice:-y}"
+            if [[ "${navigate_choice}" =~ ^[yY] ]]; then
+                list_disks
+            fi
+            return 1
+        fi
+        
+        read -rp "Scan directory ${start_dir} for disk images? (y/n) [y]: " confirm_scan
+        confirm_scan="${confirm_scan:-y}"
+        
+        if [[ "${confirm_scan}" =~ ^[yY] ]]; then
+            heading "Available Disk Images in ${start_dir}"
+            
+            local disks=()
+            while IFS= read -r -d '' file; do
+                disks+=("$file")
+            done < <(find "${start_dir}" -type f \( -iname "*.qcow2" -o -iname "*.img" -o -iname "*.raw" -o -iname "*.hda" -o -iname "*.dsk" \) -print0 2>/dev/null | sort -z)
+            
+            if [[ ${#disks[@]} -eq 0 ]]; then
+                warn "No disk images found in ${start_dir}"
+            else
+                local index=1
+                for disk in "${disks[@]}"; do
+                    local disk_size
+                    disk_size=$(file_size_bytes "${disk}")
+                    local human_size
+                    if (( disk_size >= 1073741824 )); then
+                        human_size="$((disk_size / 1073741824))G"
+                    elif (( disk_size >= 1048576 )); then
+                        human_size="$((disk_size / 1048576))M"
+                    else
+                        human_size="${disk_size}B"
+                    fi
+                    echo "  [${index}] $(basename "${disk}") (${human_size})"
+                    ((index++))
+                done
+            fi
+            
+            # Allow navigation to other directories
+            read -rp "Scan another directory? (y/n) [n]: " scan_another
+            scan_another="${scan_another:-n}"
+            if [[ "${scan_another}" =~ ^[yY] ]]; then
+                list_disks
+            fi
+        else
+            log "Disk scan cancelled."
+        fi
     fi
     
     return 0
