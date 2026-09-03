@@ -2164,6 +2164,19 @@ detect_gdb() {
     export GDB_INSTALLED GDB_BIN
 }
 
+# Find Netatalk/afpd binary
+find_afpd_bin() {
+    if command -v afpd &> /dev/null; then
+        echo "$(command -v afpd)"
+    elif [[ -x "/opt/local/sbin/afpd" ]]; then
+        echo "/opt/local/sbin/afpd"
+    elif [[ -x "/usr/local/sbin/afpd" ]]; then
+        echo "/usr/local/sbin/afpd"
+    else
+        echo ""
+    fi
+}
+
 # Start Netatalk share for AppleShare file sharing
 start_netatalk_share() {
     local share_name="$1"
@@ -2232,6 +2245,251 @@ stop_netatalk_share() {
         rm -f /tmp/vm-assistant-netatalk.pid
         log "Netatalk stopped"
     fi
+}
+
+# Configure Netatalk with proper config files
+configure_netatalk() {
+    heading "Configuring Netatalk (AFP)"
+    
+    detect_netatalk
+    if [[ "$NETATALK_INSTALLED" != true ]]; then
+        warn "Netatalk not installed. Install with: brew install netatalk or sudo port install netatalk"
+        return 1
+    fi
+    
+    local current_user=$(whoami)
+    local netatalk_config=""
+    
+    # Determine config location
+    if [[ -d "/opt/local/etc/netatalk" ]]; then
+        netatalk_config="/opt/local/etc/netatalk/afpd.conf"
+    elif [[ -d "/usr/local/etc/netatalk" ]]; then
+        netatalk_config="/usr/local/etc/netatalk/afpd.conf"
+    else
+        netatalk_config="${CONFIG_DIR}/netatalk/afpd.conf"
+        ensure_dir "$(dirname "$netatalk_config")"
+    fi
+    
+    # Backup existing config
+    if [[ -f "$netatalk_config" ]]; then
+        cp "$netatalk_config" "${netatalk_config}.bak.$(date +%Y%m%d%H%M%S)"
+        log "Backed up existing config to: ${netatalk_config}.bak.*"
+    fi
+    
+    ensure_dir "$(dirname "$netatalk_config")"
+    
+    # Create Netatalk configuration
+    cat > "$netatalk_config" << EOF
+[Global]
+   mimic model = RackMac
+   vol preset = VM_Shares
+   max connections = 10
+
+[VM_Shares]
+   path = ${SHARED_DIR}
+   cnidscheme = dbd
+   vol size limit = 0
+   valid users = ${current_user}
+   rwlist = ${current_user}
+
+[VM_Disks]
+   path = ${DISK_DIR}
+   cnidscheme = dbd
+   vol size limit = 0
+   valid users = ${current_user}
+   rwlist = ${current_user}
+
+[VM_ISOs]
+   path = ${ISO_DIR}
+   cnidscheme = dbd
+   vol size limit = 0
+   valid users = ${current_user}
+   rolist = ${current_user}
+EOF
+    
+    # Create AppleVolumes.default
+    local apple_volumes_dir="$(dirname "$netatalk_config")"
+    local apple_volumes="${apple_volumes_dir}/AppleVolumes.default"
+    ensure_dir "$apple_volumes_dir"
+    
+    cat > "$apple_volumes" << EOF
+${SHARED_DIR} "VM RAMDISK" options:usedots,noadouble
+${DISK_DIR} "VM Disques" options:usedots,noadouble
+${ISO_DIR} "VM ISOs" options:usedots,noadouble,ro
+EOF
+    
+    log "Netatalk configuration created: $netatalk_config"
+    log "AppleVolumes configuration created: $apple_volumes"
+    
+    # Try to start Netatalk via launchd
+    local netatalk_launchd_plist=""
+    if [[ -f "/Library/LaunchDaemons/org.macports.afpd.plist" ]]; then
+        netatalk_launchd_plist="/Library/LaunchDaemons/org.macports.afpd.plist"
+    elif [[ -f "/Library/LaunchDaemons/org.netatalk.afpd.plist" ]]; then
+        netatalk_launchd_plist="/Library/LaunchDaemons/org.netatalk.afpd.plist"
+    fi
+    
+    if [[ -n "$netatalk_launchd_plist" ]]; then
+        log "Using launchd for Netatalk..."
+        if launchctl print "system/org.macports.afpd" &>/dev/null || \
+           launchctl print "system/org.netatalk.afpd" &>/dev/null; then
+            sudo launchctl unload "$netatalk_launchd_plist" 2>/dev/null
+            sleep 1
+        fi
+        sudo launchctl load "$netatalk_launchd_plist"
+        log "Netatalk started via launchd"
+    else
+        local afpd_bin=$(find_afpd_bin)
+        if [[ -z "$afpd_bin" ]]; then
+            warn "afpd binary not found"
+            return 1
+        fi
+        log "Manual Netatalk startup..."
+        if pgrep -x "afpd" &>/dev/null; then
+            sudo killall afpd 2>/dev/null || true
+            sleep 1
+        fi
+        sudo "$afpd_bin" -F "$netatalk_config" 2>/dev/null &
+        log "Netatalk started manually"
+    fi
+    
+    return 0
+}
+
+# Find Samba binary
+find_smbd_bin() {
+    if command -v smbd &> /dev/null; then
+        echo "$(command -v smbd)"
+    elif [[ -x "/opt/local/sbin/smbd" ]]; then
+        echo "/opt/local/sbin/smbd"
+    elif [[ -x "/usr/local/sbin/smbd" ]]; then
+        echo "/usr/local/sbin/smbd"
+    else
+        echo ""
+    fi
+}
+
+# Configure Samba with proper config files
+configure_samba() {
+    heading "Configuring Samba"
+    
+    if ! command -v smbd &>/dev/null; then
+        warn "Samba not installed. Install with: brew install samba or sudo port install samba4"
+        return 1
+    fi
+    
+    local current_user=$(whoami)
+    local samba_config=""
+    local system_smbd=""
+    
+    # Handle system smbd
+    if pgrep -x "smbd" &>/dev/null; then
+        system_smbd=$(ps aux | grep "[s]mbd" | grep -v grep | head -1 | awk '{print $NF}')
+        if [[ "$system_smbd" == "/usr/sbin/smbd"* ]]; then
+            log "System smbd detected, disabling..."
+            if [[ -f "/System/Library/LaunchDaemons/com.apple.smbd.plist" ]]; then
+                sudo launchctl unload -w /System/Library/LaunchDaemons/com.apple.smbd.plist 2>/dev/null || true
+                sleep 1
+            fi
+            sudo killall /usr/sbin/smbd 2>/dev/null || true
+            sleep 1
+            samba_config="${CONFIG_DIR}/samba/smb.conf"
+            ensure_dir "$(dirname "$samba_config")"
+            log "System Samba service disabled"
+        fi
+    fi
+    
+    # Determine config path
+    if [[ -z "$samba_config" ]]; then
+        if [[ -d "/opt/local/etc/samba" && -w "/opt/local/etc/samba" ]]; then
+            samba_config="/opt/local/etc/samba/smb.conf"
+        elif [[ -d "/usr/local/etc/samba" && -w "/usr/local/etc/samba" ]]; then
+            samba_config="/usr/local/etc/samba/smb.conf"
+        else
+            samba_config="${CONFIG_DIR}/samba/smb.conf"
+            ensure_dir "$(dirname "$samba_config")"
+        fi
+    fi
+    
+    # Backup existing config
+    if [[ -f "$samba_config" ]]; then
+        cp "$samba_config" "${samba_config}.bak.$(date +%Y%m%d%H%M%S)"
+        log "Backed up existing Samba config"
+    fi
+    
+    ensure_dir "$(dirname "$samba_config")"
+    
+    # Create Samba private directory
+    local samba_private_dir="/tmp/samba_private"
+    ensure_dir "$samba_private_dir"
+    sudo chmod 1777 "$samba_private_dir" 2>/dev/null || true
+    sudo chown root:wheel "$samba_private_dir" 2>/dev/null || true
+    log "Samba private directory: $samba_private_dir"
+    
+    # Handle Homebrew Samba
+    if [[ -d "/usr/local/Cellar/samba" ]]; then
+        local samba_version=$(ls /usr/local/Cellar/samba/ | grep -E '^[0-9]+\.[0-9]+' | sort -V | tail -1)
+        if [[ -n "$samba_version" ]]; then
+            local homebrew_samba_private="/usr/local/Cellar/samba/${samba_version}/private"
+            if [[ ! -L "$homebrew_samba_private" && ! -d "$homebrew_samba_private" ]]; then
+                sudo mkdir -p "$(dirname "$homebrew_samba_private")" 2>/dev/null || true
+                sudo ln -sf "$samba_private_dir" "$homebrew_samba_private" 2>/dev/null || true
+                log "Symbolic link: $homebrew_samba_private -> $samba_private_dir"
+            fi
+        fi
+    fi
+    
+    # Create Samba configuration
+    local netbios_name=$(hostname | cut -c1-15)
+    cat > "$samba_config" << EOF
+[global]
+   workgroup = WORKGROUP
+   server string = VM Assistant Samba Server
+   netbios name = ${netbios_name}
+   security = user
+   map to guest = bad user
+   guest account = ${current_user}
+   dns proxy = no
+   private dir = ${samba_private_dir}
+   lock directory = ${samba_private_dir}
+   pid directory = ${samba_private_dir}
+   log file = ${samba_private_dir}/log.smbd
+
+[VM_Shares]
+   comment = VM Assistant Share
+   path = ${SHARED_DIR}
+   browsable = yes
+   read only = no
+   guest ok = yes
+   create mask = 0777
+   directory mask = 0777
+   force user = ${current_user}
+
+[VM_Disks]
+   comment = VM Disks
+   path = ${DISK_DIR}
+   browsable = yes
+   read only = no
+   guest ok = yes
+   create mask = 0777
+   directory mask = 0777
+   force user = ${current_user}
+
+[VM_ISOs]
+   comment = VM ISOs
+   path = ${ISO_DIR}
+   browsable = yes
+   read only = yes
+   guest ok = yes
+   create mask = 0755
+   directory mask = 0755
+   force user = ${current_user}
+EOF
+    
+    log "Samba configuration created: $samba_config"
+    log "Start Samba with: sudo smbd -D -s $samba_config"
+    
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -3148,6 +3406,8 @@ show_main_menu() {
         echo ""
         echo "🔍 Diagnostics:"
         echo "  [37] Test sharing services (Samba/Netatalk)"
+        echo "  [38] Configure Netatalk (AFP) file sharing"
+        echo "  [39] Configure Samba file sharing"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -3193,6 +3453,8 @@ show_main_menu() {
             35) show_architectures ;;
             36) show_vm_configs ;;
             37) test_sharing_services ;;
+            38) configure_netatalk ;;
+            39) configure_samba ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -3478,6 +3740,8 @@ Information:
   capabilities     Detect QEMU capabilities
   check-deps       Check system dependencies
   test-connections  Test sharing services (Samba/Netatalk)
+  configure-netatalk Configure Netatalk (AFP) file sharing
+  configure-samba   Configure Samba file sharing
   menu             Interactive menu (default)
   help             Show this help
 
@@ -3585,6 +3849,8 @@ main() {
         capabilities|detect-capabilities) detect_qemu_capabilities ;;
         check-deps|detect-deps) detect_dependencies ;;
         test-connections|check-sharing|test-sharing) test_sharing_services ;;
+        configure-netatalk|setup-netatalk) configure_netatalk ;;
+        configure-samba|setup-samba) configure_samba ;;
         
         # Disk/ISO management
         disk-create|create-disk) create_disk_image ;;
