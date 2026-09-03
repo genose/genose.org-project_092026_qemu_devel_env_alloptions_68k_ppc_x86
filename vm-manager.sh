@@ -254,6 +254,19 @@ file_size_bytes() {
     fi
 }
 
+# Check if running in an interactive terminal
+is_interactive() {
+    # Check if stdin is connected to a terminal
+    if [[ -t 0 ]]; then
+        return 0
+    fi
+    # Check if we're running in a terminal
+    if [[ -t 1 ]]; then
+        return 0
+    fi
+    return 1
+}
+
 # Ask for RAM size with validation (supports plain MiB or M/G suffixes)
 ask_ram_size() {
     local prompt="$1" default="$2" answer
@@ -1109,7 +1122,28 @@ create_disk() {
 list_isos() {
     local start_dir=""
     
-    # Ask user which directory to start with
+    # Non-interactive mode: use default directory and auto-scan
+    if ! is_interactive; then
+        start_dir="${ISO_DIR}"
+        heading "Available ISOs in ${start_dir}"
+        
+        local found=0
+        local iso_dirs=("${start_dir}")
+        
+        for dir in "${iso_dirs[@]}"; do
+            [[ -d "${dir}" ]] || continue
+            log "Directory: ${dir}"
+            while IFS= read -r -d '' iso_file; do
+                log "  ${found}) $(basename "${iso_file}") [${iso_file}]"
+                ((found++)) || true
+            done < <(find "${dir}" -maxdepth 1 -type f \( -name "*.iso" -o -name "*.ISO" -o -name "*.dmg" -o -name "*.DMG" \) -print0 2>/dev/null | sort -z)
+        done
+        
+        [[ $found -eq 0 ]] && warn "No ISOs found in ${start_dir}"
+        return 0
+    fi
+    
+    # Interactive mode: ask user for input
     read -rp "Enter directory to scan for ISOs [${ISO_DIR}]: " start_dir
     start_dir="${start_dir:-${ISO_DIR}}"
     
@@ -3433,20 +3467,20 @@ download_iso() {
     ensure_dir "${ISO_DIR}"
     
     local iso_urls=(
-        "https://cdimage.debian.org/mirror/cdimage/archive/11.6.0/amd64/iso-dvd/debian-11.6.0-amd64-DVD-1.iso:Debian 11.6.0 amd64"
-        "https://cdimage.ubuntu.com/releases/22.04/release/ubuntu-22.04-desktop-amd64.iso:Ubuntu 22.04 Desktop"
-        "https://archlinux.org/iso/latest/archlinux-x86_64.iso:Arch Linux Latest"
-        "https://download.freebsd.org/ftp/releases/amd64/amd64/ISO-IMAGES/13.2/FreeBSD-13.2-RELEASE-amd64-disc1.iso:FreeBSD 13.2"
-        "https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.0/amd64cd.iso:NetBSD 10.0"
-        "https://download.opensuse.org/tumbleweed/iso/openSUSE-Tumbleweed-DVD-x86_64-Current.iso:openSUSE Tumbleweed"
-        "https://cdimage.ubuntu.com/releases/24.04/release/ubuntu-24.04-desktop-amd64.iso:Ubuntu 24.04 Desktop"
-        "https://cdimage.ubuntu.com/releases/jammy/release/ubuntu-22.04.4-desktop-amd64.iso:Ubuntu 22.04.4 Desktop"
+        "https://cdimage.debian.org/mirror/cdimage/archive/11.6.0/amd64/iso-dvd/debian-11.6.0-amd64-DVD-1.iso|Debian 11.6.0 amd64"
+        "https://cdimage.ubuntu.com/releases/22.04/release/ubuntu-22.04-desktop-amd64.iso|Ubuntu 22.04 Desktop"
+        "https://archlinux.org/iso/latest/archlinux-x86_64.iso|Arch Linux Latest"
+        "https://download.freebsd.org/ftp/releases/amd64/amd64/ISO-IMAGES/13.2/FreeBSD-13.2-RELEASE-amd64-disc1.iso|FreeBSD 13.2"
+        "https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.0/amd64cd.iso|NetBSD 10.0"
+        "https://download.opensuse.org/tumbleweed/iso/openSUSE-Tumbleweed-DVD-x86_64-Current.iso|openSUSE Tumbleweed"
+        "https://cdimage.ubuntu.com/releases/24.04/release/ubuntu-24.04-desktop-amd64.iso|Ubuntu 24.04 Desktop"
+        "https://cdimage.ubuntu.com/releases/jammy/release/ubuntu-22.04.4-desktop-amd64.iso|Ubuntu 22.04.4 Desktop"
     )
     
     log "Predefined ISO URLs:"
     log "-------------------"
     for i in "${!iso_urls[@]}"; do
-        IFS=':' read -r url desc <<< "${iso_urls[$i]}"
+        IFS='|' read -r url desc <<< "${iso_urls[$i]}"
         log "  [$((i+1))] $desc"
     done
     
@@ -3462,7 +3496,7 @@ download_iso() {
     local iso_name=""
     
     if [[ "$url_choice" =~ ^[0-9]+$ ]] && [ "$url_choice" -ge 1 ] && [ "$url_choice" -le ${#iso_urls[@]} ]; then
-        IFS=':' read -r iso_url iso_name <<< "${iso_urls[$((url_choice-1))]}"
+        IFS='|' read -r iso_url iso_name <<< "${iso_urls[$((url_choice-1))]}"
     elif [[ "$url_choice" == http* || "$url_choice" == ftp* ]]; then
         iso_url="$url_choice"
         iso_name=$(basename "$url_choice")
@@ -4152,7 +4186,48 @@ EOF
 list_roms() {
     local start_dir=""
     
-    # Ask user which directory to start with
+    # Non-interactive mode: use default directory and auto-scan
+    if ! is_interactive; then
+        start_dir="${ROM_DIR}"
+        heading "Available ROM Files in ${start_dir}"
+        
+        local global_available_roms_paths=()
+        local index=1
+        local selected_rom=""
+
+        log "Scanning for ROM files..."
+        
+        if [[ -d "${start_dir}" ]]; then
+            while IFS= read -r -d '' file; do
+                case "${file}" in
+                    *.rom|*.ROM|*.bin|*.BIN)
+                        # Check for duplicates
+                        local already_found=false
+                        for existing in "${global_available_roms_paths[@]}"; do
+                            if [[ "$existing" = "$file" ]]; then
+                                already_found=true
+                                break
+                            fi
+                        done
+                        if [[ "$already_found" = false ]]; then
+                            global_available_roms_paths+=("$file")
+                            echo "  [${index}] $(basename "$file")"
+                            ((index++))
+                        fi
+                        ;;
+                esac
+            done < <(find "${start_dir}" -type f \( -iname "*.rom" -o -iname "*.bin" \) -print0 2>/dev/null)
+        fi
+        
+        if [[ ${#global_available_roms_paths[@]} -gt 0 ]]; then
+            return 0
+        else
+            log "No ROM files found in ${start_dir}."
+            return 0
+        fi
+    fi
+    
+    # Interactive mode: ask user for input
     read -rp "Enter directory to scan for ROM files [${ROM_DIR}]: " start_dir
     start_dir="${start_dir:-${ROM_DIR}}"
     
@@ -4234,7 +4309,40 @@ list_roms() {
 list_disks() {
     local start_dir=""
     
-    # Ask user which directory to start with
+    # Non-interactive mode: use default directory and auto-scan
+    if ! is_interactive; then
+        start_dir="${DISK_DIR}"
+        heading "Available Disk Images in ${start_dir}"
+        
+        local disks=()
+        while IFS= read -r -d '' file; do
+            disks+=("$file")
+        done < <(find "${start_dir}" -type f \( -iname "*.qcow2" -o -iname "*.img" -o -iname "*.raw" -o -iname "*.hda" -o -iname "*.dsk" \) -print0 2>/dev/null | sort -z)
+        
+        if [[ ${#disks[@]} -eq 0 ]]; then
+            warn "No disk images found in ${start_dir}"
+            return 0
+        fi
+        
+        local index=1
+        for disk in "${disks[@]}"; do
+            local disk_size
+            disk_size=$(file_size_bytes "${disk}")
+            local human_size
+            if (( disk_size >= 1073741824 )); then
+                human_size="$((disk_size / 1073741824))G"
+            elif (( disk_size >= 1048576 )); then
+                human_size="$((disk_size / 1048576))M"
+            else
+                human_size="${disk_size}B"
+            fi
+            echo "  [${index}] $(basename "${disk}") (${human_size})"
+            ((index++))
+        done
+        return 0
+    fi
+    
+    # Interactive mode: ask user for input
     read -rp "Enter directory to scan for disk images [${DISK_DIR}]: " start_dir
     start_dir="${start_dir:-${DISK_DIR}}"
     
@@ -4510,18 +4618,18 @@ show_main_menu() {
         echo "  [17] Eject ISO from VM"
         echo ""
         echo "🍎 UTM.app Integration:"
-        echo "  [16] Create UTM VM configuration"
-        echo "  [17] Export VM to UTM format"
+        echo "  [18] Create UTM VM configuration"
+        echo "  [19] Export VM to UTM format"
         echo ""
         echo "🔧 Advanced VM Management:"
-        echo "  [18] Stop a running VM"
-        echo "  [19] Edit VM configuration"
-        echo "  [20] List ROM files"
-        echo "  [21] List disk images"
+        echo "  [20] Stop a running VM"
+        echo "  [21] Edit VM configuration"
+        echo "  [22] List ROM files"
+        echo "  [23] List disk images"
         echo ""
         echo "💾 Backup & Restore:"
-        echo "  [22] Create configuration backup"
-        echo "  [23] List available backups"
+        echo "  [24] Create configuration backup"
+        echo "  [25] List available backups"
         echo "  [24] Restore from backup"
         echo ""
         echo "🚀 Quick Launch (Platform Presets):"
