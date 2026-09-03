@@ -3641,11 +3641,6 @@ test_netatalk_connection() {
     
     heading "Testing Netatalk Connection: afp://$host/$share"
     
-    if ! command -v afp &>/dev/null; then
-        warn "AFP client not found. Try: open afp://$host/$share"
-        return 1
-    fi
-    
     # Test with mount_afp
     if command -v mount_afp &>/dev/null; then
         local mount_point="/tmp/vm_test_afp_$$"
@@ -3662,8 +3657,8 @@ test_netatalk_connection() {
             return 1
         fi
     else
-        log "Try: open afp://$host/$share"
-        return 0
+        warn "mount_afp not found. Try: open afp://$host/$share"
+        return 1
     fi
 }
 
