@@ -3763,6 +3763,43 @@ restore_configuration() {
     fi
 }
 
+# Backup and restore interactive menu
+backup_restore_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "backup_restore_menu function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Backup and Restore Menu"
+    
+    echo "Available backups:"
+    list_backups
+    
+    local backup_dir="${SCRIPT_DIR}/backups"
+    local backups=()
+    
+    if [[ -d "${backup_dir}" ]]; then
+        while IFS= read -r -d '' backup_file; do
+            [[ "$backup_file" == *.tar.gz ]] && backups+=("$backup_file")
+        done < <(find "${backup_dir}" -maxdepth 1 -type f -name "vm-assistant-backup-*.tar.gz" -print0 2>/dev/null)
+    fi
+    
+    if [[ ${#backups[@]} -eq 0 ]]; then
+        log "No backups available to restore"
+        return 0
+    fi
+    
+    echo ""
+    backup_choice=$(ask "Select backup to restore (number)" "")
+    
+    if [[ -n "$backup_choice" && "$backup_choice" =~ ^[0-9]+$ && $backup_choice -ge 1 && $backup_choice -le ${#backups[@]} ]]; then
+        restore_configuration "${backups[$((backup_choice-1))]}"
+    else
+        log "No backup selected"
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Connection Testing Functions
 # Test all sharing services (Samba, Netatalk, local)
