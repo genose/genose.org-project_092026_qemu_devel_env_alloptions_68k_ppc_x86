@@ -5105,35 +5105,35 @@ show_main_menu() {
         echo "  [26] Restore from backup"
         echo ""
         echo "🚀 Quick Launch (Platform Presets):"
-        echo "  [25] MacOS 68k (System 7-8.1)"
-        echo "  [26] MacOS PPC (7.5.2-9.2.2, G3/G4)"
-        echo "  [27] MacOS PPC64 (Mac OS X, G5)"
-        echo "  [28] HaikuOS"
-        echo "  [29] Linux (generic)"
-        echo "  [30] Atari ST/TT/Falcon (68k)"
-        echo "  [31] Commodore Amiga (68k/AROS)"
-        echo "  [32] Solaris x86"
-        echo "  [33] Solaris SPARC"
-        echo "  [34] Windows XP"
-        echo "  [35] OpenStep x86"
-        echo "  [36] Custom QEMU (any architecture)"
+        echo "  [27] MacOS 68k (System 7-8.1)"
+        echo "  [28] MacOS PPC (7.5.2-9.2.2, G3/G4)"
+        echo "  [29] MacOS PPC64 (Mac OS X, G5)"
+        echo "  [30] HaikuOS"
+        echo "  [31] Linux (generic)"
+        echo "  [32] Atari ST/TT/Falcon (68k)"
+        echo "  [33] Commodore Amiga (68k/AROS)"
+        echo "  [34] Solaris x86"
+        echo "  [35] Solaris SPARC"
+        echo "  [36] Windows XP"
+        echo "  [37] OpenStep x86"
+        echo "  [38] Custom QEMU (any architecture)"
         echo ""
         echo "📖 Information:"
-        echo "  [37] Show QEMU version"
-        echo "  [38] Show available architectures"
-        echo "  [39] Show VM configurations"
+        echo "  [39] Show QEMU version"
+        echo "  [40] Show available architectures"
+        echo "  [41] Show VM configurations"
         echo ""
         echo "🔍 Diagnostics:"
-        echo "  [40] Test sharing services (Samba/Netatalk)"
-        echo "  [41] Configure Netatalk (AFP) file sharing"
-        echo "  [42] Configure Samba file sharing"
-        echo "  [43] Verify all dependencies"
-        echo "  [44] Configure XQuartz for X11 display"
-        echo "  [45] Configure RAMDISK for sharing"
-        echo "  [46] Test Samba connection"
-        echo "  [47] Test Netatalk connection"
-        echo "  [48] Test SSH connection"
-        echo "  [49] Show QEMU command (debugging)"
+        echo "  [42] Test sharing services (Samba/Netatalk)"
+        echo "  [43] Configure Netatalk (AFP) file sharing"
+        echo "  [44] Configure Samba file sharing"
+        echo "  [45] Verify all dependencies"
+        echo "  [46] Configure XQuartz for X11 display"
+        echo "  [47] Configure RAMDISK for sharing"
+        echo "  [48] Test Samba connection"
+        echo "  [49] Test Netatalk connection"
+        echo "  [50] Test SSH connection"
+        echo "  [51] Show QEMU command (debugging)"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -5180,19 +5180,19 @@ show_main_menu() {
             36) launch_windows_xp ;;
             37) launch_openstep ;;
             38) launch_custom ;;
-            37) show_qemu_version ;;
-            38) show_architectures ;;
-            39) show_vm_configs ;;
-            40) test_sharing_services ;;
-            41) configure_netatalk ;;
-            42) configure_samba ;;
-            43) verify_dependencies ;;
-            44) configure_xquartz ;;
-            45) configure_ramdisk ;;
-            46) test_samba_connection localhost VM_Shares ;;
-            47) test_netatalk_connection localhost VM_Shares ;;
-            48) test_ssh_connection localhost 22 ;;
-            49) show_qemu_command_menu ;;
+            39) show_qemu_version ;;
+            40) show_architectures ;;
+            41) show_vm_configs ;;
+            42) test_sharing_services ;;
+            43) configure_netatalk ;;
+            44) configure_samba ;;
+            45) verify_dependencies ;;
+            46) configure_xquartz ;;
+            47) configure_ramdisk ;;
+            48) test_samba_connection localhost VM_Shares ;;
+            49) test_netatalk_connection localhost VM_Shares ;;
+            50) test_ssh_connection localhost 22 ;;
+            51) show_qemu_command_menu ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
