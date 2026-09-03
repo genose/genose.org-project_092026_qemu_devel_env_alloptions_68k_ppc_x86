@@ -88,11 +88,11 @@ COPILOT-CONTEXT.MD   Live task context — keep updated each session
 | `QEMU_X86_COMPAT_CFLAGS` | `-march=x86-64 -mtune=westmere -mno-avx -mno-avx2` | x86 host only |
 | `JOBS` | `nproc` | |
 | `QEMU_PREFIX` | `~/.local/qemu-retro` | vm_assist.sh |
-| `VM_IMAGE_DIR` | `~/vm-images` | |
-| `VM_SHARED_DIR` | `~/vm-shared` | |
-| `VM_LOG_DIR` | `~/vm-logs` | |
+| `VM_IMAGE_DIR` | `~/vm_assistant/images` | |
+| `VM_SHARED_DIR` | `~/vm_assistant/shares` | |
+| `VM_LOG_DIR` | `~/vm_assistant/logs` | |
 | `DEFAULT_DISPLAY` | `sdl` | sdl/gtk/vnc/curses/none |
-| `DEFAULT_MACOS_SHARE_DIR` | `/tmp/volatile_hd` | host share for classic Mac guests |
+| `DEFAULT_MACOS_SHARE_DIR` | `~/vm_assistant/shares` | host share for classic Mac guests |
 | `DEFAULT_GDB_BRIDGE_PORT` | `2346` | host-side bridge port |
 | `DEFAULT_QEMU_GDB_PORT` | `1234` | QEMU GDB stub port |
 

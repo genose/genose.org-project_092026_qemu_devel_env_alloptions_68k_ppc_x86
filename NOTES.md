@@ -315,14 +315,14 @@ sudo ifconfig tap0 up
 
 ```bash
 # Partage basique
--fsdev local,security_model=mapped,id=fsdev0,path=/tmp/volatile_hd
+-fsdev local,security_model=mapped,id=fsdev0,path=~/vm_assistant
 -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare
 
 # Avec plus de sécurité
--fsdev local,security_model=passthrough,id=fsdev0,path=/tmp/volatile_hd
+-fsdev local,security_model=passthrough,id=fsdev0,path=~/vm_assistant
 
 # Plusieurs partages
--fsdev local,security_model=mapped,id=fsdev0,path=/tmp/volatile_hd
+-fsdev local,security_model=mapped,id=fsdev0,path=~/vm_assistant
 -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare
 -fsdev local,security_model=mapped,id=fsdev1,path=/Users/xenon/CodeWarrior
 -device virtio-9p-pci,id=fsdev1,fsdev=fsdev1,mount_tag=cw
@@ -367,12 +367,12 @@ mount_virtiofs hostshare /Volumes/hostshare
 **Commande fonctionnelle :**
 ```bash
 qemu-system-ppc \
-  -bios "/tmp/volatile_hd/vm-assistant/resources/roms/MacROMan/TestImages/1MB ROMs/1992-07-22 - E33B2724 - PB160, PB165, PB165c, PB180, PB180c - 7.1-7.6.1 - 4-14M.ROM" \
+  -bios "~/vm_assistant/vm-assistant/resources/roms/MacROMan/TestImages/1MB ROMs/1992-07-22 - E33B2724 - PB160, PB165, PB165c, PB180, PB180c - 7.1-7.6.1 - 4-14M.ROM" \
   -machine mac99,via=pmu \
   -cpu 604 \
   -m 256M \
   -display cocoa \
-  -cdrom /private/tmp/volatile_hd/MAC_OS_7-6-1_RETAIL.ISO \
+  -cdrom /private~/vm_assistant/MAC_OS_7-6-1_RETAIL.ISO \
   -boot d \
   -device loader,addr=0x4000000,file=/Users/xenon/Library/Containers/com.utmapp.UTM/Data/Library/Caches/qemu/ppc-ndrvloader \
   -prom-env "auto-boot?=true" \
@@ -441,7 +441,7 @@ qemu-system-ppc \
 which qemu-system-ppc
 
 # Vérifier les permissions
-chmod +x /tmp/volatile_hd/vm-assistant/vm-assistant-*.sh
+chmod +x ~/vm_assistant/vm-assistant/vm-assistant-*.sh
 
 # Vérifier les dépendances
 brew doctor  # Pour Homebrew
@@ -475,13 +475,13 @@ port doctor  # Pour MacPorts
 **Solutions :**
 ```bash
 # Vérifier que le chemin existe
-ls /tmp/volatile_hd
+ls ~/vm_assistant
 
 # Vérifier les permissions
-chmod -R a+rw /tmp/volatile_hd
+chmod -R a+rw ~/vm_assistant
 
 # Utiliser security_model=mapped
--fsdev local,security_model=mapped,id=fsdev0,path=/tmp/volatile_hd
+-fsdev local,security_model=mapped,id=fsdev0,path=~/vm_assistant
 ```
 
 ### QEMU bloque sur le BIOS

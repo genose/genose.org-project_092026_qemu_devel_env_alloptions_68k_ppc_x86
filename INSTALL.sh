@@ -36,7 +36,7 @@ chmod +x vm-assistant*.sh
 # Créer le répertoire de configuration
 echo ""
 echo "Création du répertoire de configuration..."
-mkdir -p "$HOME/.vm-assistant/vms" "$HOME/.vm-assistant/isos" "$HOME/.vm-assistant/disks" "$HOME/.vm-assistant/logs"
+mkdir -p "$HOME/vm_assistant/vms" "$HOME/vm_assistant/isos" "$HOME/vm_assistant/images" "$HOME/vm_assistant/logs" "$HOME/vm_assistant/shares" "$HOME/vm_assistant/roms"
 
 # Vérifier les dépendances de base
 echo ""
@@ -80,7 +80,7 @@ echo "Pour démarrer VM Assistant, exécutez:"
 echo "  $SCRIPT_DIR/vm-assistant.sh"
 echo ""
 echo "Ou depuis n'importe quel répertoire:"
-echo "  cd /tmp/volatile_hd && ./vm-assistant.sh"
+echo "  cd ~/vm_assistant && ./vm-assistant.sh"
 echo ""
 echo "Pour copier dans /usr/local/bin (optionnel):"
 echo "  sudo cp $SCRIPT_DIR/vm-assistant.sh /usr/local/bin/vm-assistant"

@@ -5,8 +5,8 @@ echo "=========================================="
 echo ""
 
 # Test 1: Partage local
-echo "[1] Test du partage local (/tmp/volatile_hd)..."
-test -d /tmp/volatile_hd && test -w /tmp/volatile_hd && echo "  ✓ Partage local: OK" || echo "  ✗ Partage local: ECHEC"
+echo "[1] Test du partage local (~/vm_assistant/shares)..."
+test -d "$HOME/vm_assistant/shares" && test -w "$HOME/vm_assistant/shares" && echo "  ✓ Partage local: OK" || echo "  ✗ Partage local: ECHEC"
 
 # Test 2: Samba
 echo ""
@@ -25,4 +25,4 @@ echo ""
 echo "[4] Adresses d'acces:"
 echo "  Samba:  smb://$(ifconfig | grep -Eo 'inet (addr:)?([0-9]*\\.){3}[0-9]*' | grep -Eo '([0-9]*\\.){3}[0-9]*' | grep -v '127.0.0.1' | head -n 1)/VM_Shares"
 echo "  AFP:    afp://$(ifconfig | grep -Eo 'inet (addr:)?([0-9]*\\.){3}[0-9]*' | grep -Eo '([0-9]*\\.){3}[0-9]*' | grep -v '127.0.0.1' | head -n 1)/VM_Shares"
-echo "  Local:  /tmp/volatile_hd"
+echo "  Local:  $HOME/vm_assistant/shares"

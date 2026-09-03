@@ -3,12 +3,12 @@
 # VM Assistant - Gestion de machines virtuelles QEMU/UTM
 # Version: 2.0 - Avec support UTM.app
 
-CONFIG_DIR="$HOME/.vm-assistant"
+CONFIG_DIR="$HOME/vm_assistant"
 VM_DIR="$CONFIG_DIR/vms"
-DISK_DIR="$CONFIG_DIR/disks"
+DISK_DIR="$CONFIG_DIR/vms"
 ISO_DIR="$CONFIG_DIR/isos"
-SHARE_DIR="/tmp/volatile_hd"
-ROM_DIR="/tmp/volatile_hd/MacROMan/TestImages"
+SHARE_DIR="$HOME/vm_assistant/shares"
+ROM_DIR="$HOME/vm_assistant/roms"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -85,7 +85,7 @@ list_roms() {
 
 list_isos() {
     log_header "Liste des ISOs disponibles"
-    local iso_dirs=("$ISO_DIR" "$SHARE_DIR" "/tmp/volatile_hd")
+    local iso_dirs=("$ISO_DIR" "$SHARE_DIR")
     local found_isos=()
     local index=1
     for dir in "${iso_dirs[@]}"; do
@@ -114,7 +114,7 @@ list_isos() {
 
 list_disks() {
     log_header "Liste des disques disponibles"
-    local disk_dirs=("$DISK_DIR" "$SHARE_DIR" "/tmp/volatile_hd")
+    local disk_dirs=("$DISK_DIR" "$SHARE_DIR")
     local found_disks=()
     local index=1
     for dir in "${disk_dirs[@]}"; do
@@ -246,8 +246,8 @@ edit_vm() {
                 network_mode=${network_mode:-nat}
                 ;;
             6)
-                read -p "Share directory [${share_dir:-/tmp/volatile_hd}]: " share_dir
-                share_dir=${share_dir:-/tmp/volatile_hd}
+                read -p "Share directory [${share_dir:-$HOME/vm_assistant/shares}]: " share_dir
+                share_dir=${share_dir:-$HOME/vm_assistant/shares}
                 ;;
             7)
                 list_roms && rom_file="$selected_rom" || echo "No ROM selected"
@@ -283,7 +283,7 @@ num_screens=${num_screens:-1}
 # Methode multi-ecran
 multi_screen_method=${multi_screen_method:-auto}
 # Partages
-share_dir=${share_dir:-/tmp/volatile_hd}
+share_dir=${share_dir:-$HOME/vm_assistant/shares}
 via=${via:-cuda}
 rom_file=${rom_file:-}
 CONFIG
@@ -320,7 +320,7 @@ start_qemu_vm() {
     local num_screens="${num_screens:-1}"
     local disk="${disk:-}"
     local iso="${iso:-}"
-    local share_dir="${share_dir:-/tmp/volatile_hd}"
+    local share_dir="${share_dir:-$HOME/vm_assistant/shares}"
     local network_mode="${network_mode:-nat}"
     local via="${via:-cuda}"
     local multi_screen_method="${multi_screen_method:-auto}"

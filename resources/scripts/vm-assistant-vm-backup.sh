@@ -10,11 +10,11 @@
 # Configuration globale
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="vm-assistant"
-CONFIG_DIR="$HOME/.${SCRIPT_NAME}"
+CONFIG_DIR="$HOME/vm_assistant"
 VM_DIR="$CONFIG_DIR/vms"
 ISO_DIR="$CONFIG_DIR/isos"
-DISK_DIR="$CONFIG_DIR/disks"
-SHARE_DIR="/tmp/volatile_hd"
+DISK_DIR="$CONFIG_DIR/vms"
+SHARE_DIR="$HOME/vm_assistant/shares"
 
 # Ports
 SPICE_PORT=5900
@@ -192,7 +192,6 @@ ensure_dir() {
 # Detecter les ISOs disponibles (LOCAL ONLY - pas /Volumes)
 detect_available_isos() {
     local search_dirs=(
-        "/tmp/volatile_hd"
         "$ISO_DIR"
         "$SHARE_DIR"
         "$HOME/Downloads"
@@ -2923,7 +2922,6 @@ create_test_vm() {
     if [ -z "$iso_path" ]; then
         # Chercher un ISO Mac OS 9 dans les r'epertoires connus
         local iso_dirs=(
-            "/tmp/volatile_hd"
             "$ISO_DIR"
             "$SHARE_DIR"
             "$HOME/Downloads"

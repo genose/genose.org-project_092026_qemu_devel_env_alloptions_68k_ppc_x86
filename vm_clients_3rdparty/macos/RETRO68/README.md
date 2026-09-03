@@ -24,7 +24,7 @@
 ### 🔹 Méthode 1 : Depuis les Sources (Recommandée)
 
 ```bash
-cd /tmp/volatile_hd/vm-assistant/vm_clients_3rdparty/macos/
+cd ~/vm_assistant/vm_clients_3rdparty/macos/
 git clone https://github.com/automatedjdw/Retro68.git
 cd Retro68
 xcodebuild -scheme Retro68 -configuration Release
@@ -52,7 +52,7 @@ Retro68 --version
 
 ```bash
 # Dans ~/.zshrc ou ~/.bashrc
-export PATH="/tmp/volatile_hd/vm-assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
+export PATH="~/vm_assistant/vm-assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
 source ~/.zshrc
 ```
 
@@ -86,7 +86,7 @@ Retro68 -g -O0 -m68040 hello.c -o HelloWorld
 ### Compiler MacOS71_GDB_ICMP_Test
 
 ```bash
-cd /tmp/volatile_hd/vm-assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm-assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 
 Retro68 -g -O0 -m68040 -I src \
     src/main.c \
@@ -166,12 +166,12 @@ qemu-system-ppc \
     -M mac99 \
     -m 256M \
     -cpu 68040 \
-    -bios /tmp/volatile_hd/MacROMan/TestImages/68040.ROM \
+    -bios ~/vm_assistant/MacROMan/TestImages/68040.ROM \
     -drive file=macos71.qcow2,format=qcow2 \
     -gdb tcp::1234 \
     -S \
     -device loader,addr=0x4000000,file=/chemin/vers/ppc-ndrvloader \
-    -fsdev local,security_model=mapped,id=fsdev0,path=/tmp/volatile_hd \
+    -fsdev local,security_model=mapped,id=fsdev0,path=~/vm_assistant \
     -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare
 ```
 
@@ -225,13 +225,13 @@ Retro68 -g -O0 -I src src/*.c -o build/app
 
 ### 2. Copier dans VM
 ```bash
-cp build/app /tmp/volatile_hd/
+cp build/app ~/vm_assistant/
 ```
 
 ### 3. Démarrer QEMU
 ```bash
 qemu-system-ppc -m 256M -cpu 68040 -gdb tcp::1234 -S \
-    -fsdev local,path=/tmp/volatile_hd,id=fsdev0 \
+    -fsdev local,path=~/vm_assistant,id=fsdev0 \
     -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare
 ```
 

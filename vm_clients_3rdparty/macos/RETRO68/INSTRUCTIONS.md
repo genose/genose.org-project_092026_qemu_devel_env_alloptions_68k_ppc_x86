@@ -18,7 +18,7 @@
 
 ```bash
 # Se placer dans le répertoire des outils 3rd party
-cd /tmp/volatile_hd/vm-assistant/vm_clients_3rdparty/macos/
+cd ~/vm_assistant/vm-assistant/vm_clients_3rdparty/macos/
 
 # Cloner le dépôt Retro68
 git clone https://github.com/automatedjdw/Retro68.git
@@ -80,7 +80,7 @@ Pour une utilisation plus facile, ajoutez Retro68 à votre variable d'environnem
 nano ~/.zshrc
 
 # Ajouter cette ligne à la fin (remplacez le chemin par le vôtre)
-export PATH="/tmp/volatile_hd/vm-assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
+export PATH="~/vm_assistant/vm-assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
 
 # Recharger le fichier
 source ~/.zshrc
@@ -93,7 +93,7 @@ source ~/.zshrc
 nano ~/.bashrc
 
 # Ajouter cette ligne à la fin
-export PATH="/tmp/volatile_hd/vm-assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
+export PATH="~/vm_assistant/vm-assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
 
 # Recharger le fichier
 source ~/.bashrc
@@ -120,7 +120,7 @@ xcode-select --install
 
 ```bash
 # Se placer dans le répertoire du projet
-cd /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 
 # Compiler avec Retro68 (cible par défaut = 68040)
 make -f Makefile.retro68
@@ -131,7 +131,7 @@ make -f Makefile.retro68
 ### Méthode 2 : Compilation Manuelle
 
 ```bash
-cd /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 
 # Créer le répertoire build
 mkdir -p build
@@ -166,7 +166,7 @@ Si vous n'avez pas encore d'image pour Mac OS 7.1 :
 
 ```bash
 # Créer une image disque de 5 Go
-qemu-img create -f qcow2 /tmp/volatile_hd/disks/macos71.qcow2 5G
+qemu-img create -f qcow2 ~/vm_assistant/disks/macos71.qcow2 5G
 ```
 
 ### Démarrer QEMU avec Mac OS 7.1
@@ -176,11 +176,11 @@ qemu-system-ppc \
     -M mac99 \
     -m 512M \
     -cpu 68040 \
-    -bios /tmp/volatile_hd/MacROMan/TestImages/68040.ROM \
-    -drive file=/tmp/volatile_hd/disks/macos71.qcow2,format=qcow2,if=ide \
-    -drive file=/tmp/volatile_hd/MAC_OS_7-6-1_RETAIL.ISO,media=cdrom \
+    -bios ~/vm_assistant/MacROMan/TestImages/68040.ROM \
+    -drive file=~/vm_assistant/disks/macos71.qcow2,format=qcow2,if=ide \
+    -drive file=~/vm_assistant/MAC_OS_7-6-1_RETAIL.ISO,media=cdrom \
     -device loader,addr=0x4000000,file=/chemin/vers/ppc-ndrvloader \
-    -fsdev local,security_model=mapped,id=fsdev0,path=/tmp/volatile_hd \
+    -fsdev local,security_model=mapped,id=fsdev0,path=~/vm_assistant \
     -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare \
     -prom-env "auto-boot?=true"
 ```
@@ -196,7 +196,7 @@ qemu-system-ppc \
 
 ```bash
 # Depuis l'hôte, copier dans le partage
-cp build/MacOS71_GDB_ICMP_Test /tmp/volatile_hd/
+cp build/MacOS71_GDB_ICMP_Test ~/vm_assistant/
 ```
 
 Dans la VM (Finder) :
@@ -215,12 +215,12 @@ qemu-system-ppc \
     -M mac99 \
     -m 256M \
     -cpu 68040 \
-    -bios /tmp/volatile_hd/MacROMan/TestImages/68040.ROM \
-    -drive file=/tmp/volatile_hd/disks/macos71.qcow2,format=qcow2 \
+    -bios ~/vm_assistant/MacROMan/TestImages/68040.ROM \
+    -drive file=~/vm_assistant/disks/macos71.qcow2,format=qcow2 \
     -gdb tcp::1234 \
     -S \
     -device loader,addr=0x4000000,file=/chemin/vers/ppc-ndrvloader \
-    -fsdev local,security_model=mapped,id=fsdev0,path=/tmp/volatile_hd \
+    -fsdev local,security_model=mapped,id=fsdev0,path=~/vm_assistant \
     -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare
 ```
 
@@ -412,20 +412,20 @@ watch gTestValue
 
 ```bash
 # 1. Se placer dans le répertoire du projet
-cd /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 
 # 2. Compiler avec Retro68
 make -f Makefile.retro68
 
 # 3. Copier dans le partage
-cp build/MacOS71_GDB_ICMP_Test /tmp/volatile_hd/
+cp build/MacOS71_GDB_ICMP_Test ~/vm_assistant/
 
 # 4. Démarrer QEMU (sans GDB pour test simple)
 qemu-system-ppc \
     -M mac99 -m 256M -cpu 68040 \
-    -bios /tmp/volatile_hd/MacROMan/TestImages/68040.ROM \
-    -drive file=/tmp/volatile_hd/disks/macos71.qcow2,format=qcow2 \
-    -fsdev local,path=/tmp/volatile_hd,id=fsdev0 \
+    -bios ~/vm_assistant/MacROMan/TestImages/68040.ROM \
+    -drive file=~/vm_assistant/disks/macos71.qcow2,format=qcow2 \
+    -fsdev local,path=~/vm_assistant,id=fsdev0 \
     -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare
 
 # 5. Dans la VM : Ouvrir hostshare, copier l'app sur le bureau, lancer
@@ -440,11 +440,11 @@ make -f Makefile.retro68 target_gdb
 # 2. Démarrer QEMU avec GDB
 qemu-system-ppc \
     -M mac99 -m 256M -cpu 68040 \
-    -bios /tmp/volatile_hd/MacROMan/TestImages/68040.ROM \
-    -drive file=/tmp/volatile_hd/disks/macos71.qcow2,format=qcow2 \
+    -bios ~/vm_assistant/MacROMan/TestImages/68040.ROM \
+    -drive file=~/vm_assistant/disks/macos71.qcow2,format=qcow2 \
     -gdb tcp::1234 -S \
     -device loader,addr=0x4000000,file=/chemin/vers/ppc-ndrvloader \
-    -fsdev local,path=/tmp/volatile_hd,id=fsdev0 \
+    -fsdev local,path=~/vm_assistant,id=fsdev0 \
     -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare
 
 # 3. Dans un autre terminal, démarrer GDB
@@ -478,7 +478,7 @@ make -f Makefile.retro68 resources
 make -f Makefile.retro68 target_with_resources
 
 # 4. Copier dans la VM
-cp build/MacOS71_GDB_ICMP_Test /tmp/volatile_hd/
+cp build/MacOS71_GDB_ICMP_Test ~/vm_assistant/
 ```
 
 ### Workflow 4 : Test Spécifique GDB
@@ -530,7 +530,7 @@ make -f Makefile.retro68 test_icmp
 | Breakpoints non atteints | Symboles de debug manquants | Compiler avec `-g` et charger les symboles dans GDB |
 | Application plante au lancement | Architecture incompatible | Vérifiez que vous compilez pour la bonne architecture (`-m68040`) |
 | Pas assez de mémoire | Mémoire insuffisante | Augmentez la mémoire avec `-m 512M` ou plus |
-| Partage non accessible | Problème de partage | Vérifiez que `/tmp/volatile_hd` existe et est accessible |
+| Partage non accessible | Problème de partage | Vérifiez que `~/vm_assistant` existe et est accessible |
 
 ### Vérifier l'Installation
 

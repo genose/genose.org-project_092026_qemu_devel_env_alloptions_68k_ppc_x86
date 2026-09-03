@@ -211,7 +211,7 @@ cat > /tmp/afp_vm.conf << EOF
   max connections = 20
 
 [VM_Shares]
-  path = /tmp/volatile_hd
+  path = ~/vm_assistant
   valid users = @* guest
   rwlist = @* guest
   file perm = 0664
@@ -309,7 +309,7 @@ ssh utilisateur@localhost -p 2222
 # Configuration
 # - Architecture: G4
 # - RAM: 2048MB
-# - Partage: /tmp/volatile_hd
+# - Partage: ~/vm_assistant
 # - Option C: GDB=y (1234), SSH=y (2222), Netatalk=y (VM_Full)
 
 # Démarrer
@@ -351,13 +351,13 @@ ssh utilisateur@localhost -p 2222
 ## Fichiers importants
 
 ```
-/tmp/volatile_hd/vm-assistant/
+~/vm_assistant/vm-assistant/
 ├── vm-assistant-vm.sh          # Script principal
 ├── vm-assistant-test-connections.sh  # Testeur de connexions
 ├── vm-assistant-network.sh     # Gestion Samba (existante)
 └── NOTES_OptionC.md           # Ce fichier
 
-~/.vm-assistant/
+~/vm_assistant/
 ├── vms/
 │   └── nom_vm/
 │       ├── config              # Contient les params Option C
@@ -397,7 +397,7 @@ sudo dscl . -passwd /Users/vmuser motdepasse
 
 ### Netatalk
 - Netatalk est plus rapide que Samba pour les clients Mac OS classique
-- Le partage via `/tmp/volatile_hd` (RAM disk) est ultra-rapide
+- Le partage via `~/vm_assistant` (RAM disk) est ultra-rapide
 
 ### SSH
 - Le forward de port fonctionne mieux avec le mode réseau User

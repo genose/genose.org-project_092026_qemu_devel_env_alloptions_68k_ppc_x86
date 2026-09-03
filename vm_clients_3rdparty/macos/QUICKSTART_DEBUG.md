@@ -4,14 +4,14 @@
 - Retro68 installed (see RETRO68/README.md)
 - gdb-multiarch installed
 - QEMU with PowerPC support
-- ROM file in /tmp/volatile_hd/MacROMan/TestImages/
-- ppc-ndrvloader in /tmp/volatile_hd/
-- Disk image at /tmp/volatile_hd/disks/macos71.qcow2
+- ROM file in ~/vm_assistant/roms/MacROMan/TestImages/
+- ppc-ndrvloader in ~/vm_assistant/shares/
+- Disk image at ~/vm_assistant/vms/macos71.qcow2
 
 ## Step 1: Compile the Application
 
 ```bash
-cd /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 make -f Makefile.retro68 clean
 make -f Makefile.retro68
 ```
@@ -21,7 +21,7 @@ Output: `build/MacOS71_GDB_ICMP_Test`
 ## Step 2: Copy to Shared Directory
 
 ```bash
-cp build/MacOS71_GDB_ICMP_Test /tmp/volatile_hd/
+cp build/MacOS71_GDB_ICMP_Test ~/vm_assistant/
 ```
 
 ## Step 3: Start QEMU with GDB Support
@@ -32,12 +32,12 @@ qemu-system-ppc \
     -M mac99 \
     -m 512M \
     -cpu 68040 \
-    -bios /tmp/volatile_hd/MacROMan/TestImages/68040.ROM \
-    -drive file=/tmp/volatile_hd/disks/macos71.qcow2,format=qcow2 \
+    -bios ~/vm_assistant/MacROMan/TestImages/68040.ROM \
+    -drive file=~/vm_assistant/disks/macos71.qcow2,format=qcow2 \
     -gdb tcp::1234 \
     -S \
-    -device loader,addr=0x4000000,file=/tmp/volatile_hd/ppc-ndrvloader \
-    -fsdev local,path=/tmp/volatile_hd,id=fsdev0 \
+    -device loader,addr=0x4000000,file=~/vm_assistant/ppc-ndrvloader \
+    -fsdev local,path=~/vm_assistant,id=fsdev0 \
     -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare \
     -prom-env "auto-boot?=true"
 ```
@@ -48,7 +48,7 @@ qemu-system-ppc \
 ```bash
 gdb-multiarch
 (gdb) target remote localhost:1234
-(gdb) file /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test
+(gdb) file ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test
 (gdb) break main
 (gdb) break test_gdb_function
 (gdb) break test_icmp_function
@@ -101,9 +101,9 @@ info locals       # Local variables
 
 **Compile, copy, and debug:**
 ```bash
-cd /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test && \
+cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test && \
 make -f Makefile.retro68 && \
-cp build/MacOS71_GDB_ICMP_Test /tmp/volatile_hd/
+cp build/MacOS71_GDB_ICMP_Test ~/vm_assistant/
 ```
 
 **GDB connect and debug:**

@@ -24,8 +24,8 @@ which Retro68 2>&1 || echo "Retro68 non installe"
 which gdb-multiarch 2>&1 || echo "gdb-multiarch non installe"
 which qemu-system-ppc 2>&1 || echo "qemu-system-ppc non installe"
 ls /opt/local/bin/m68k-elf-* 2>&1 | wc -l
-ls /tmp/volatile_hd/MacROMan/TestImages/*.ROM 2>&1 | wc -l
-ls /tmp/volatile_hd/*.ISO 2>&1 | grep -i mac | wc -l
+ls ~/vm_assistant/MacROMan/TestImages/*.ROM 2>&1 | wc -l
+ls ~/vm_assistant/*.ISO 2>&1 | grep -i mac | wc -l
 ```
 
 ---
@@ -33,11 +33,11 @@ ls /tmp/volatile_hd/*.ISO 2>&1 | grep -i mac | wc -l
 ## 2. Installation de Retro68
 
 ```bash
-cd /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/
+cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/
 git clone https://github.com/automatedjdw/Retro68.git
 cd Retro68
 xcodebuild -scheme Retro68 -configuration Release
-export PATH="/tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
+export PATH="~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
 Retro68 --version
 ```
 
@@ -46,7 +46,7 @@ Retro68 --version
 ## 3. Compilation de l'Application
 
 ```bash
-cd /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 make -f Makefile.retro68 clean
 make -f Makefile.retro68
 ```
@@ -62,15 +62,15 @@ Retro68 -g -O0 -m68040 -I src src/main.c src/gdb_test.c src/icmp_test.c -o build
 
 ### Verifier les fichiers
 ```bash
-ROM_FILE=$(ls /tmp/volatile_hd/MacROMan/TestImages/*.ROM 2>/dev/null | head -1)
-NDRVLOADER=$(find /tmp/volatile_hd /Users/xenon -name "ppc-ndrvloader" 2>/dev/null | head -1)
+ROM_FILE=$(ls ~/vm_assistant/MacROMan/TestImages/*.ROM 2>/dev/null | head -1)
+NDRVLOADER=$(find ~/vm_assistant /Users/xenon -name "ppc-ndrvloader" 2>/dev/null | head -1)
 if [ -z "$NDRVLOADER" ]; then
-    curl -L https://github.com/automatedjdw/qemu-macOS/raw/main/ppc-ndrvloader -o /tmp/volatile_hd/ppc-ndrvloader
-    chmod +x /tmp/volatile_hd/ppc-ndrvloader
-    NDRVLOADER="/tmp/volatile_hd/ppc-ndrvloader"
+    curl -L https://github.com/automatedjdw/qemu-macOS/raw/main/ppc-ndrvloader -o ~/vm_assistant/ppc-ndrvloader
+    chmod +x ~/vm_assistant/ppc-ndrvloader
+    NDRVLOADER="~/vm_assistant/ppc-ndrvloader"
 fi
-mkdir -p /tmp/volatile_hd/disks
-[ ! -f "/tmp/volatile_hd/disks/macos71.qcow2" ] && qemu-img create -f qcow2 /tmp/volatile_hd/disks/macos71.qcow2 2G
+mkdir -p ~/vm_assistant/disks
+[ ! -f "~/vm_assistant/disks/macos71.qcow2" ] && qemu-img create -f qcow2 ~/vm_assistant/disks/macos71.qcow2 2G
 ```
 
 ---
@@ -80,11 +80,11 @@ mkdir -p /tmp/volatile_hd/disks
 ```bash
 qemu-system-ppc \
     -M mac99 -m 512M -cpu 68040 \
-    -bios /tmp/volatile_hd/MacROMan/TestImages/68040.ROM \
-    -drive file=/tmp/volatile_hd/disks/macos71.qcow2,format=qcow2,if=ide \
-    -drive file=/tmp/volatile_hd/MAC_OS_7-6-1_RETAIL.ISO,media=cdrom \
-    -device loader,addr=0x4000000,file=/tmp/volatile_hd/ppc-ndrvloader \
-    -fsdev local,path=/tmp/volatile_hd,id=fsdev0 \
+    -bios ~/vm_assistant/MacROMan/TestImages/68040.ROM \
+    -drive file=~/vm_assistant/disks/macos71.qcow2,format=qcow2,if=ide \
+    -drive file=~/vm_assistant/MAC_OS_7-6-1_RETAIL.ISO,media=cdrom \
+    -device loader,addr=0x4000000,file=~/vm_assistant/ppc-ndrvloader \
+    -fsdev local,path=~/vm_assistant,id=fsdev0 \
     -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare
 ```
 
@@ -97,11 +97,11 @@ Suivre les instructions dans QEMU pour installer Mac OS 7.1.
 ```bash
 qemu-system-ppc \
     -M mac99 -m 512M -cpu 68040 \
-    -bios /tmp/volatile_hd/MacROMan/TestImages/68040.ROM \
-    -drive file=/tmp/volatile_hd/disks/macos71.qcow2,format=qcow2 \
+    -bios ~/vm_assistant/MacROMan/TestImages/68040.ROM \
+    -drive file=~/vm_assistant/disks/macos71.qcow2,format=qcow2 \
     -gdb tcp::1234 -S \
-    -device loader,addr=0x4000000,file=/tmp/volatile_hd/ppc-ndrvloader \
-    -fsdev local,path=/tmp/volatile_hd,id=fsdev0 \
+    -device loader,addr=0x4000000,file=~/vm_assistant/ppc-ndrvloader \
+    -fsdev local,path=~/vm_assistant,id=fsdev0 \
     -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare \
     -prom-env "auto-boot?=true" \
     -display cocoa
@@ -120,7 +120,7 @@ qemu-system-ppc \
 ```bash
 gdb-multiarch
 target remote localhost:1234
-file /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test
+file ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test
 break main
 break test_gdb_function
 break test_icmp_function
@@ -194,7 +194,7 @@ break *0x00000400
 
 ```bash
 #!/bin/bash
-# /tmp/volatile_hd/debug_macos71.sh
+# ~/vm_assistant/debug_macos71.sh
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -206,27 +206,27 @@ info_msg() { echo -e "${BLUE}[INFO]${NC} $1"; }
 
 # Etape 1: Verification
 info_msg "Verification des prerequis..."
-command -v Retro68 &>/dev/null || { info_msg "Installation de Retro68..."; cd /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/ && git clone https://github.com/automatedjdw/Retro68.git && cd Retro68 && xcodebuild -scheme Retro68 -configuration Release; }
+command -v Retro68 &>/dev/null || { info_msg "Installation de Retro68..."; cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/ && git clone https://github.com/automatedjdw/Retro68.git && cd Retro68 && xcodebuild -scheme Retro68 -configuration Release; }
 
 # Etape 2: Compilation
 info_msg "Compilation..."
-cd /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 make -f Makefile.retro68 clean 2>/dev/null; make -f Makefile.retro68 || error_exit "Compilation echouee"
 
 # Etape 3: Copie
-cp build/MacOS71_GDB_ICMP_Test /tmp/volatile_hd/ || error_exit "Copie echouee"
+cp build/MacOS71_GDB_ICMP_Test ~/vm_assistant/ || error_exit "Copie echouee"
 
 # Etape 4: Verification QEMU
-ROM_FILE=$(ls /tmp/volatile_hd/MacROMan/TestImages/*.ROM 2>/dev/null | head -1)
-NDRVLOADER=$(find /tmp/volatile_hd /Users/xenon -name "ppc-ndrvloader" 2>/dev/null | head -1)
-[ ! -f "/tmp/volatile_hd/disks/macos71.qcow2" ] && qemu-img create -f qcow2 /tmp/volatile_hd/disks/macos71.qcow2 2G
+ROM_FILE=$(ls ~/vm_assistant/MacROMan/TestImages/*.ROM 2>/dev/null | head -1)
+NDRVLOADER=$(find ~/vm_assistant /Users/xenon -name "ppc-ndrvloader" 2>/dev/null | head -1)
+[ ! -f "~/vm_assistant/disks/macos71.qcow2" ] && qemu-img create -f qcow2 ~/vm_assistant/disks/macos71.qcow2 2G
 
 # Etape 5: Instructions
 info_msg "INSTRUCTIONS:"
 info_msg "1. QEMU demarre avec GDB sur port 1234"
 info_msg "2. Dans un autre terminal: gdb-multiarch"
 info_msg "3. (gdb) target remote localhost:1234"
-info_msg "4. (gdb) file /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test"
+info_msg "4. (gdb) file ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test"
 info_msg "5. (gdb) break main; continue"
 info_msg "6. Dans VM: Ouvrir hostshare, copier app, lancer"
 
@@ -234,10 +234,10 @@ info_msg "6. Dans VM: Ouvrir hostshare, copier app, lancer"
 qemu-system-ppc \
     -M mac99 -m 512M -cpu 68040 \
     -bios "$ROM_FILE" \
-    -drive file=/tmp/volatile_hd/disks/macos71.qcow2,format=qcow2 \
+    -drive file=~/vm_assistant/disks/macos71.qcow2,format=qcow2 \
     -gdb tcp::1234 -S \
     -device loader,addr=0x4000000,file="$NDRVLOADER" \
-    -fsdev local,path=/tmp/volatile_hd,id=fsdev0 \
+    -fsdev local,path=~/vm_assistant,id=fsdev0 \
     -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare \
     -prom-env "auto-boot?=true"
 ```
@@ -250,7 +250,7 @@ qemu-system-ppc \
 |----------|----------|
 | Retro68: command not found | Executer l'installation dans la section 2 |
 | xcrun error | xcode-select --install |
-| ROM manquant | Ajouter ROM dans /tmp/volatile_hd/MacROMan/TestImages/ |
+| ROM manquant | Ajouter ROM dans ~/vm_assistant/MacROMan/TestImages/ |
 | Could not connect to remote target | Verifier QEMU demarre avec -gdb tcp::1234 -S |
 | No symbol table loaded | Compiler avec -g, charger avec file dans GDB |
 | Breakpoints non atteints | Verifier chemin dans file avec GDB |
@@ -262,25 +262,25 @@ qemu-system-ppc \
 **Workflow minimal:**
 ```bash
 # Compiler
-cd /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 make -f Makefile.retro68
 
 # Copier
-cp build/MacOS71_GDB_ICMP_Test /tmp/volatile_hd/
+cp build/MacOS71_GDB_ICMP_Test ~/vm_assistant/
 
 # Terminal 1: QEMU
 qemu-system-ppc -M mac99 -m 512M -cpu 68040 \
-    -bios /tmp/volatile_hd/MacROMan/TestImages/68040.ROM \
-    -drive file=/tmp/volatile_hd/disks/macos71.qcow2,format=qcow2 \
+    -bios ~/vm_assistant/MacROMan/TestImages/68040.ROM \
+    -drive file=~/vm_assistant/disks/macos71.qcow2,format=qcow2 \
     -gdb tcp::1234 -S \
-    -device loader,addr=0x4000000,file=/tmp/volatile_hd/ppc-ndrvloader \
-    -fsdev local,path=/tmp/volatile_hd,id=fsdev0 \
+    -device loader,addr=0x4000000,file=~/vm_assistant/ppc-ndrvloader \
+    -fsdev local,path=~/vm_assistant,id=fsdev0 \
     -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare
 
 # Terminal 2: GDB
 gdb-multiarch
 (gdb) target remote localhost:1234
-(gdb) file /tmp/volatile_hd/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test
+(gdb) file ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test
 (gdb) break main
 (gdb) continue
 ```

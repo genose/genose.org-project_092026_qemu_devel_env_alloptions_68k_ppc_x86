@@ -24,7 +24,7 @@
 #   ✓ Multi-screen support
 #   ✓ GDB debugging
 #   ✓ Network sharing (Samba/Netatalk)
-#   ✓ RAMDISK support (/tmp/volatile_hd)
+#   ✓ RAMDISK support (~/vm_assistant/shares)
 # =============================================================================
 set -euo pipefail
 
@@ -35,18 +35,18 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 VM_CONFIG_DIR="${SCRIPT_DIR}/vm-configs"
 QEMU_PREFIX="${QEMU_PREFIX:-${HOME}/.local/qemu-retro}"
 QEMU_BIN_DIR="${QEMU_BIN_DIR:-${QEMU_PREFIX}/bin}"
-VM_IMAGE_DIR="${VM_IMAGE_DIR:-${HOME}/vm-images}"
-VM_SHARED_DIR="${VM_SHARED_DIR:-${HOME}/vm-shared}"
+VM_IMAGE_DIR="${VM_IMAGE_DIR:-${HOME}/vm_assistant/images}"
+VM_SHARED_DIR="${VM_SHARED_DIR:-${HOME}/vm_assistant/shares}"
 DEFAULT_RAM_MB="${DEFAULT_RAM_MB:-256}"
 DEFAULT_DISPLAY="${DEFAULT_DISPLAY:-sdl}"
 
-# VM Assistant specific
-CONFIG_DIR="${HOME}/.vm-assistant"
+# VM Assistant specific - Unified vm_assistant directory structure
+CONFIG_DIR="${HOME}/vm_assistant"
 VM_DIR="${CONFIG_DIR}/vms"
-DISK_DIR="${CONFIG_DIR}/disks"
+DISK_DIR="${CONFIG_DIR}/vms"
 ISO_DIR="${CONFIG_DIR}/isos"
-SHARE_DIR="/tmp/volatile_hd"
-ROM_DIR="/tmp/volatile_hd/MacROMan/TestImages"
+SHARE_DIR="${CONFIG_DIR}/shares"
+ROM_DIR="${CONFIG_DIR}/roms"
 
 # Default ports
 DEFAULT_GDB_PORT=1234
@@ -280,7 +280,7 @@ ask_ram_size() {
 # List available ISOs
 # ---------------------------------------------------------------------------
 list_isos() {
-    local iso_dirs=("${ISO_DIR}" "/tmp/volatile_hd" "${SCRIPT_DIR}" "${HOME}/Downloads" "${HOME}/ISO")
+    local iso_dirs=("${ISO_DIR}" "${HOME}/vm_assistant/shares" "${SCRIPT_DIR}" "${HOME}/Downloads" "${HOME}/ISO")
     local global_available_isos_paths=()
     local index=1
     local selected_iso=""
@@ -332,7 +332,7 @@ list_isos() {
 # List available disks
 # ---------------------------------------------------------------------------
 list_disks() {
-    local disk_dirs=("${DISK_DIR}" "/tmp/volatile_hd" "${SCRIPT_DIR}" "${HOME}/vm-images" "${HOME}/VirtualMachines")
+    local disk_dirs=("${DISK_DIR}" "${HOME}/vm_assistant/shares" "${SCRIPT_DIR}" "${HOME}/vm_assistant/images" "${HOME}/VirtualMachines")
     local global_available_disks_paths=()
     local index=1
     local selected_disk=""
@@ -405,7 +405,7 @@ create_disk() {
 # List ROMs
 # ---------------------------------------------------------------------------
 list_roms() {
-    local rom_dirs=("${ROM_DIR}" "${SCRIPT_DIR}/resources/roms/MacROMan" "/tmp/volatile_hd/MacROMan" "/tmp/volatile_hd/MacROMan/TestImages")
+    local rom_dirs=("${ROM_DIR}" "${SCRIPT_DIR}/resources/roms/MacROMan" "${HOME}/vm_assistant/roms/MacROMan" "${HOME}/vm_assistant/roms/MacROMan/TestImages")
     local global_available_roms_paths=()
     local index=1
     local selected_rom=""
@@ -786,7 +786,7 @@ start_qemu_vm() {
     local num_screens="${num_screens:-1}"
     local disk="${disk:-}"
     local iso="${iso:-}"
-    local share_dir="${share_dir:-/tmp/volatile_hd}"
+    local share_dir="${share_dir:-${HOME}/vm_assistant/shares}"
     local network_mode="${network_mode:-nat}"
     local via="${via:-pmu}"
     local multi_screen_method="${multi_screen_method:-auto}"
@@ -1189,7 +1189,7 @@ start_qemu_vm() {
                 "/opt/local/share/qemu/ppc-ndrvloader" \
                 "${HOME}/Library/Containers/com.utmapp.UTM/Data/Library/Caches/qemu/ppc-ndrvloader" \
                 "/Applications/UTM.app/Contents/Resources/qemu/share/qemu/ppc-ndrvloader" \
-                "/tmp/volatile_hd/ppc-ndrvloader"; do
+                "${HOME}/vm_assistant/shares/ppc-ndrvloader"; do
                 if [ -f "${path}" ]; then
                     ndrv_loader="${path}"
                     break
@@ -1931,9 +1931,9 @@ edit_vm() {
                 ;;
 
             6)
-                read -rp "Share directory [${share_dir:-/tmp/volatile_hd}]: " share_dir
+                read -rp "Share directory [${share_dir:-${HOME}/vm_assistant/shares}]: " share_dir
                 read -rp "File sharing method (9p/virtiofs) [${file_sharing_method:-9p}]: " file_sharing_method
-                share_dir=${share_dir:-/tmp/volatile_hd}
+                share_dir=${share_dir:-${HOME}/vm_assistant/shares}
                 file_sharing_method=${file_sharing_method:-9p}
                 ;;
 
@@ -2027,7 +2027,7 @@ display=${display:-cocoa}
 num_screens=${num_screens:-1}
 multi_screen_method=${multi_screen_method:-auto}
 # Sharing
-share_dir=${share_dir:-/tmp/volatile_hd}
+share_dir=${share_dir:-${HOME}/vm_assistant/shares}
 via=${via:-cuda}
 rom_file=${rom_file:-}
 file_sharing_method=${file_sharing_method:-9p}

@@ -26,7 +26,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 
 # Directories
-CONFIG_DIR="${HOME}/.vm-assistant"
+CONFIG_DIR="${HOME}/vm_assistant"
 VM_CONFIG_DIR="${SCRIPT_DIR}/vm-configs"
 PATCHES_DIR="${SCRIPT_DIR}/patches"
 QEMU_PREFIX="${QEMU_PREFIX:-${HOME}/.local/qemu-retro}"
@@ -34,15 +34,15 @@ QEMU_BIN_DIR="${QEMU_BIN_DIR:-${QEMU_PREFIX}/bin}"
 QEMU_SRC_DIR="${QEMU_SRC_DIR:-${SCRIPT_DIR}/qemu-9.2.0}"
 QEMU_BUILD_DIR="${QEMU_BUILD_DIR:-${QEMU_SRC_DIR}/build}"
 
-# VM storage
+# VM storage - Unified vm_assistant directory structure
 VM_DIR="${CONFIG_DIR}/vms"
-DISK_DIR="${CONFIG_DIR}/disks"
+DISK_DIR="${CONFIG_DIR}/vms"
 ISO_DIR="${CONFIG_DIR}/isos"
-SHARE_DIR="/tmp/volatile_hd"
-ROM_DIR="/tmp/volatile_hd/MacROMan/TestImages"
-VM_IMAGE_DIR="${VM_IMAGE_DIR:-${HOME}/vm-images}"
-VM_SHARED_DIR="${VM_SHARED_DIR:-${HOME}/vm-shared}"
-VM_LOG_DIR="${VM_LOG_DIR:-${HOME}/vm-logs}"
+SHARE_DIR="${CONFIG_DIR}/shares"
+ROM_DIR="${CONFIG_DIR}/roms"
+VM_IMAGE_DIR="${VM_IMAGE_DIR:-${HOME}/vm_assistant/images}"
+VM_SHARED_DIR="${VM_SHARED_DIR:-${HOME}/vm_assistant/shares}"
+VM_LOG_DIR="${VM_LOG_DIR:-${HOME}/vm_assistant/logs}"
 
 # Defaults
 DEFAULT_RAM_MB="${DEFAULT_RAM_MB:-256}"
@@ -63,7 +63,7 @@ DEFAULT_AFP_HOST="10.0.2.2"
 DEFAULT_AFP_PORT=548
 DEFAULT_TLS_PROXY_HOST="10.0.2.2"
 DEFAULT_TLS_PROXY_PORT=8443
-DEFAULT_MACOS_SHARE_DIR="/tmp/volatile_hd"
+DEFAULT_MACOS_SHARE_DIR="${HOME}/vm_assistant/shares"
 
 # ---------------------------------------------------------------------------
 # Colour Helpers
@@ -2872,7 +2872,7 @@ test_sharing_services() {
     heading "Sharing Services Test"
     
     local share_name="${NETATALK_SHARE_NAME:-VM_Shares}"
-    local volatile_hd="/tmp/volatile_hd"
+    local volatile_hd="${HOME}/vm_assistant/shares"
     local results=()
     local ip_address
     
@@ -3454,7 +3454,7 @@ EOF
 list_roms() {
     heading "Available ROM Files"
     
-    local rom_dirs=("${ROM_DIR}" "${SCRIPT_DIR}/resources/roms/MacROMan" "/tmp/volatile_hd/MacROMan" "/tmp/volatile_hd/MacROMan/TestImages")
+    local rom_dirs=("${ROM_DIR}" "${SCRIPT_DIR}/resources/roms/MacROMan" "${HOME}/vm_assistant/roms/MacROMan" "${HOME}/vm_assistant/roms/MacROMan/TestImages")
     local global_available_roms_paths=()
     local index=1
     local selected_rom=""
@@ -4151,10 +4151,10 @@ Information:
 Environment Variables:
   QEMU_VERSION              QEMU version to build       (default: 9.2.0)
   QEMU_INSTALL_PREFIX       Installation prefix          (default: ~/.local/qemu-retro)
-  VM_IMAGE_DIR              VM images directory          (default: ~/vm-images)
-  VM_SHARED_DIR             Shared directory             (default: ~/vm-shared)
-  VM_LOG_DIR                Logs directory               (default: ~/vm-logs)
-  CONFIG_DIR                Config directory             (default: ~/.vm-assistant)
+  VM_IMAGE_DIR              VM images directory          (default: ~/vm_assistant/images)
+  VM_SHARED_DIR             Shared directory             (default: ~/vm_assistant/shares)
+  VM_LOG_DIR                Logs directory               (default: ~/vm_assistant/logs)
+  CONFIG_DIR                Config directory             (default: ~/vm_assistant)
 
 Examples:
   # Build QEMU with all retro targets

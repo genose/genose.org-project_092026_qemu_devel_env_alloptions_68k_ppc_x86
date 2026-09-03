@@ -132,7 +132,7 @@ show_main_menu() {
                     log_info "XQuartz est installe"
                     
                     # Verifier et configurer le RAMDISK
-                    SHARE_DIR="/tmp/volatile_hd"
+                    SHARE_DIR="${HOME}/vm_assistant/shares"
                     if [ -d "$SHARE_DIR" ]; then
                         log_info "RAMDISK $SHARE_DIR existe deja"
                     else
@@ -181,14 +181,14 @@ show_main_menu() {
                         read -p "Nom de la VM pour le disque: " vm_name
                         read -p "Taille du disque [20G]: " disk_size
                         disk_size=${disk_size:-20G}
-                        mkdir -p "$HOME/.vm-assistant/disks"
-                        qemu-img create -f qcow2 "$HOME/.vm-assistant/disks/${vm_name:-new_vm}.qcow2" "$disk_size" || \
+                        mkdir -p "$HOME/vm_assistant/vms"
+                        qemu-img create -f qcow2 "$HOME/vm_assistant/vms/${vm_name:-new_vm}.qcow2" "$disk_size" || \
                             log_error "Echec de la creation du disque"
-                        log_info "Disque cree: $HOME/.vm-assistant/disks/${vm_name:-new_vm}.qcow2"
+                        log_info "Disque cree: $HOME/vm_assistant/vms/${vm_name:-new_vm}.qcow2"
                         ;;
                     2)
-                        echo "Disques dans $HOME/.vm-assistant/disks/:"
-                        ls -lh "$HOME/.vm-assistant/disks/" 2>/dev/null || echo "  Aucun disque trouve"
+                        echo "Disques dans $HOME/vm_assistant/vms/:"
+                        ls -lh "$HOME/vm_assistant/vms/" 2>/dev/null || echo "  Aucun disque trouve"
                         echo ""
                         echo "Disques dans $SCRIPT_DIR/:"
                         ls -lh "$SCRIPT_DIR/*.qcow2" "$SCRIPT_DIR/*.img" "$SCRIPT_DIR/*.raw" 2>/dev/null || echo "  Aucun disque trouve"
@@ -243,7 +243,7 @@ show_main_menu() {
                 read -p "Selection: " adv_choice
                 case "$adv_choice" in
                     1)
-                        tar -czf "$SCRIPT_DIR/vm-assistant-backup-$(date +%Y%m%d).tar.gz" "$HOME/.vm-assistant" 2>/dev/null || \
+                        tar -czf "$SCRIPT_DIR/vm-assistant-backup-$(date +%Y%m%d).tar.gz" "$HOME/vm_assistant" 2>/dev/null || \
                             log_error "Echec de la sauvegarde"
                         log_info "Sauvegarde creee: $SCRIPT_DIR/vm-assistant-backup-$(date +%Y%m%d).tar.gz"
                         ;;
@@ -252,7 +252,7 @@ show_main_menu() {
                             echo "Aucune sauvegarde trouvee"
                         read -p "Nom de la sauvegarde a restaurer: " backup_file
                         if [ -f "$SCRIPT_DIR/$backup_file" ]; then
-                            rm -rf "$HOME/.vm-assistant"
+                            rm -rf "$HOME/vm_assistant"
                             tar -xzf "$SCRIPT_DIR/$backup_file" -C "$HOME" || \
                                 log_error "Echec de la restauration"
                             log_info "Sauvegarde restauree"

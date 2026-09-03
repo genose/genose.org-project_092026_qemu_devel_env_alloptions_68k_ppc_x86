@@ -9,11 +9,11 @@
 # Obtenir le repertoire du script en cours
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="vm-assistant"
-CONFIG_DIR="$HOME/.${SCRIPT_NAME}"
+CONFIG_DIR="$HOME/vm_assistant"
 VM_DIR="$CONFIG_DIR/vms"
 ISO_DIR="$CONFIG_DIR/isos"
-DISK_DIR="$CONFIG_DIR/disks"
-SHARE_DIR="/tmp/volatile_hd"
+DISK_DIR="$CONFIG_DIR/vms"
+SHARE_DIR="$HOME/vm_assistant/shares"
 
 # Couleurs
 RED='\033[0;31m'
@@ -116,7 +116,7 @@ configure_samba() {
             fi
             sudo killall /usr/sbin/smbd 2>/dev/null || true
             sleep 1
-            samba_config="$HOME/.vm-assistant/samba/smb.conf"
+            samba_config="$HOME/vm_assistant/samba/smb.conf"
             ensure_dir "$(dirname "$samba_config")"
             log_info "Service Samba système désactivé"
         fi
@@ -129,7 +129,7 @@ configure_samba() {
         elif [ -d "/usr/local/etc/samba" ] && [ -w "/usr/local/etc/samba" ]; then
             samba_config="/usr/local/etc/samba/smb.conf"
         else
-            samba_config="$HOME/.vm-assistant/samba/smb.conf"
+            samba_config="$HOME/vm_assistant/samba/smb.conf"
             ensure_dir "$(dirname "$samba_config")"
         fi
     fi
@@ -232,7 +232,7 @@ SMBCONF
     elif [ -d "/usr/local/private" ]; then
         smbpasswd_file="/usr/local/private/smbpasswd"
     else
-        smbpasswd_file="$HOME/.vm-assistant/private/smbpasswd"
+        smbpasswd_file="$HOME/vm_assistant/private/smbpasswd"
         ensure_dir "$(dirname "$smbpasswd_file")"
     fi
 
@@ -312,7 +312,7 @@ configure_netatalk() {
     elif [ -d "/usr/local/etc/netatalk" ]; then
         netatalk_config="/usr/local/etc/netatalk/afpd.conf"
     else
-        netatalk_config="$HOME/.vm-assistant/netatalk/afpd.conf"
+        netatalk_config="$HOME/vm_assistant/netatalk/afpd.conf"
         ensure_dir "$(dirname "$netatalk_config")"
     fi
 
@@ -421,8 +421,8 @@ test_samba() {
     log_info "Samba (smbd) est en cours d'exécution"
 
     local smbd_config=""
-    if [ -f "$HOME/.vm-assistant/samba/smb.conf" ]; then
-        smbd_config="$HOME/.vm-assistant/samba/smb.conf"
+    if [ -f "$HOME/vm_assistant/samba/smb.conf" ]; then
+        smbd_config="$HOME/vm_assistant/samba/smb.conf"
     elif [ -f "/opt/local/etc/samba/smb.conf" ]; then
         smbd_config="/opt/local/etc/samba/smb.conf"
     fi
