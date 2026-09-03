@@ -664,26 +664,8 @@ detect_qemu_capabilities() {
 
 # Detect system dependencies for VM management
 detect_dependencies() {
-    log "Checking system dependencies..."
-    
-    local deps=("qemu-system-x86_64" "qemu-img" "curl" "tar" "make")
-    local missing_deps=()
-    
-    for dep in "${deps[@]}"; do
-        if ! command -v "${dep}" >/dev/null 2>&1; then
-            missing_deps+=("${dep}")
-            warn "  ✗ ${dep} not found"
-        else
-            log "  ✓ ${dep}"
-        fi
-    done
-    
-    if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        warn "Missing dependencies: ${missing_deps[*]}"
-        return 1
-    fi
-    
-    return 0
+    # Alias for verify_dependencies
+    verify_dependencies "$@"
 }
 
 # ---------------------------------------------------------------------------
@@ -2493,6 +2475,174 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Dependency Checking Functions (from vm-assistant-macports.sh)
+# ---------------------------------------------------------------------------
+
+# Check if MacPorts is installed
+check_macports() {
+    if command -v port &>/dev/null; then
+        return 0
+    elif [[ -d "/opt/local" && -f "/opt/local/bin/port" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Check if Homebrew is installed
+check_homebrew() {
+    if command -v brew &>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Verify all dependencies
+verify_dependencies() {
+    heading "Dependency Verification"
+    
+    local missing_deps=()
+    local found_deps=()
+    
+    # Check package managers
+    if check_macports; then
+        log "✓ MacPorts is installed"
+        found_deps+=("MacPorts")
+    else
+        warn "✗ MacPorts is not installed"
+        missing_deps+=("MacPorts")
+    fi
+    
+    if check_homebrew; then
+        log "✓ Homebrew is installed"
+        found_deps+=("Homebrew")
+    else
+        warn "✗ Homebrew is not installed"
+        missing_deps+=("Homebrew")
+    fi
+    
+    # Check QEMU binaries
+    local qemu_deps=(
+        "qemu-system-x86_64"
+        "qemu-system-i386"
+        "qemu-system-ppc"
+        "qemu-system-ppc64"
+        "qemu-system-m68k"
+        "qemu-system-arm"
+        "qemu-system-sparc"
+        "qemu-system-sparc64"
+    )
+    
+    local qemu_installed=false
+    for qemu_bin in "${qemu_deps[@]}"; do
+        if command -v "$qemu_bin" &>/dev/null; then
+            log "✓ Found: $qemu_bin"
+            qemu_installed=true
+        fi
+    done
+    
+    if ! $qemu_installed; then
+        warn "✗ No QEMU versions found"
+        missing_deps+=("QEMU")
+    fi
+    
+    # Check other dependencies
+    local other_deps=("samba" "netatalk" "XQuartz")
+    
+    for dep in "${other_deps[@]}"; do
+        case $dep in
+            "samba")
+                if command -v smbd &>/dev/null; then
+                    log "✓ Samba is installed"
+                else
+                    warn "✗ Samba is not installed"
+                    missing_deps+=("Samba")
+                fi
+                ;;
+            "netatalk")
+                if command -v afpd &>/dev/null; then
+                    log "✓ Netatalk is installed"
+                else
+                    warn "✗ Netatalk is not installed"
+                    missing_deps+=("Netatalk")
+                fi
+                ;;
+            "XQuartz")
+                if [[ -d "/Applications/Utilities/XQuartz.app" ]]; then
+                    log "✓ XQuartz is installed"
+                else
+                    warn "✗ XQuartz is not installed"
+                    missing_deps+=("XQuartz")
+                fi
+                ;;
+        esac
+    done
+    
+    # Check UTM.app
+    if [[ -d "/Applications/UTM.app" ]]; then
+        log "✓ UTM.app is installed"
+    else
+        warn "✗ UTM.app is not installed"
+        missing_deps+=("UTM.app")
+    fi
+    
+    # Summary
+    echo ""
+    if [[ ${#missing_deps[@]} -eq 0 ]]; then
+        log "✅ All dependencies are installed!"
+        return 0
+    else
+        warn "❌ Missing dependencies: ${missing_deps[*]}"
+        if [[ " ${missing_deps[*]} " == *"MacPorts"* || " ${missing_deps[*]} " == *"Homebrew"* ]]; then
+            echo ""
+            log "Install package managers:"
+            log "  MacPorts: https://www.macports.org/install.php"
+            log "  Homebrew: https://brew.sh"
+        fi
+        return 1
+    fi
+}
+
+# Configure XQuartz for X11 display
+configure_xquartz() {
+    heading "Configuring XQuartz"
+    
+    if [[ ! -d "/Applications/Utilities/XQuartz.app" ]]; then
+        warn "XQuartz not installed"
+        log "Download from: https://www.xquartz.org"
+        return 1
+    fi
+    
+    [[ ! -f "$HOME/.Xauthority" ]] && touch "$HOME/.Xauthority" && chmod 600 "$HOME/.Xauthority"
+    export DISPLAY=":0"
+    
+    xhost +local: &>/dev/null || xhost +local:
+    log "XQuartz configured for local connections"
+    
+    if pgrep -x "Xquartz" &>/dev/null; then
+        log "XQuartz is running"
+    else
+        warn "XQuartz is not running"
+        log "Start with: open -a XQuartz"
+    fi
+    return 0
+}
+
+# Configure RAM disk for sharing
+configure_ramdisk() {
+    heading "Configuring RAMDISK"
+    ensure_dir "$SHARE_DIR"
+    sudo chmod 1777 "$SHARE_DIR" 2>/dev/null || true
+    sudo chown root:wheel "$SHARE_DIR" 2>/dev/null || true
+    
+    local disk_usage=$(df -h "$SHARE_DIR" 2>/dev/null | tail -1 | awk '{print $4}')
+    [[ -n "$disk_usage" ]] && log "Available space: $disk_usage"
+    log "RAMDISK configured: $SHARE_DIR"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # Connection Testing Functions (from test_connection.sh)
 # ---------------------------------------------------------------------------
 
@@ -3408,6 +3558,9 @@ show_main_menu() {
         echo "  [37] Test sharing services (Samba/Netatalk)"
         echo "  [38] Configure Netatalk (AFP) file sharing"
         echo "  [39] Configure Samba file sharing"
+        echo "  [40] Verify all dependencies"
+        echo "  [41] Configure XQuartz for X11 display"
+        echo "  [42] Configure RAMDISK for sharing"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -3455,6 +3608,9 @@ show_main_menu() {
             37) test_sharing_services ;;
             38) configure_netatalk ;;
             39) configure_samba ;;
+            40) verify_dependencies ;;
+            41) configure_xquartz ;;
+            42) configure_ramdisk ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -3739,9 +3895,12 @@ Information:
   vm-configs       Show VM configuration templates
   capabilities     Detect QEMU capabilities
   check-deps       Check system dependencies
+  verify-deps      Verify all dependencies (detailed)
   test-connections  Test sharing services (Samba/Netatalk)
   configure-netatalk Configure Netatalk (AFP) file sharing
   configure-samba   Configure Samba file sharing
+  configure-xquartz Configure XQuartz for X11 display
+  configure-ramdisk Configure RAMDISK for sharing
   menu             Interactive menu (default)
   help             Show this help
 
@@ -3848,9 +4007,12 @@ main() {
         # Capability detection
         capabilities|detect-capabilities) detect_qemu_capabilities ;;
         check-deps|detect-deps) detect_dependencies ;;
+        verify-deps|verify-dependencies) verify_dependencies ;;
         test-connections|check-sharing|test-sharing) test_sharing_services ;;
         configure-netatalk|setup-netatalk) configure_netatalk ;;
         configure-samba|setup-samba) configure_samba ;;
+        configure-xquartz|setup-xquartz) configure_xquartz ;;
+        configure-ramdisk|setup-ramdisk) configure_ramdisk ;;
         
         # Disk/ISO management
         disk-create|create-disk) create_disk_image ;;
