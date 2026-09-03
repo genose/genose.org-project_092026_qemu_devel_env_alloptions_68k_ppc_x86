@@ -5102,7 +5102,7 @@ show_main_menu() {
         echo "💾 Backup & Restore:"
         echo "  [24] Create configuration backup"
         echo "  [25] List available backups"
-        echo "  [24] Restore from backup"
+        echo "  [26] Restore from backup"
         echo ""
         echo "🚀 Quick Launch (Platform Presets):"
         echo "  [25] MacOS 68k (System 7-8.1)"
@@ -5177,9 +5177,9 @@ show_main_menu() {
             33) launch_amiga ;;
             34) launch_solaris_x86 ;;
             35) launch_solaris_sparc ;;
-            34) launch_windows_xp ;;
-            35) launch_openstep ;;
-            36) launch_custom ;;
+            36) launch_windows_xp ;;
+            37) launch_openstep ;;
+            38) launch_custom ;;
             37) show_qemu_version ;;
             38) show_architectures ;;
             39) show_vm_configs ;;
