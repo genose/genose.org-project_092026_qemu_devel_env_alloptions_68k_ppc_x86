@@ -2058,6 +2058,12 @@ delete_vm() {
 create_vm() {
     local vm_name vm_type disk_size iso_path
     
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "create_vm function requires interactive mode"
+        return 1
+    fi
+    
     heading "Create New Virtual Machine"
     log "This will create a new VM with bundled directory structure:"
     log "  ~/vm_assistant/vms/VM_NAME_PLATFORM/"
@@ -2073,8 +2079,7 @@ create_vm() {
     # Validate VM name doesn't contain invalid characters
     if [[ "${vm_name}" =~ [^a-zA-Z0-9_-] ]]; then
         warn "VM name should only contain alphanumeric characters, underscores, and hyphens"
-        read -rp "Continue with this name anyway? (y/n) [n]: " confirm_name
-        confirm_name="${confirm_name:-n}"
+        confirm_name=$(ask "Continue with this name anyway?" "n")
         if [[ "${confirm_name}" != "y" ]]; then
             create_vm
             return
@@ -2085,14 +2090,12 @@ create_vm() {
     local existing_vm_dir="${VM_DIR}/${vm_name}"
     if [[ -d "${existing_vm_dir}" ]]; then
         warn "A VM directory already exists: ${existing_vm_dir}"
-        read -rp "Overwrite existing VM? (y/n) [n]: " overwrite_choice
-        overwrite_choice="${overwrite_choice:-n}"
+        overwrite_choice=$(ask "Overwrite existing VM?" "n")
         if [[ "${overwrite_choice}" =~ ^[yY] ]]; then
             log "Removing existing VM..."
             rm -rf "${existing_vm_dir}"
         else
-            read -rp "Choose a different name? (y/n) [y]: " retry_choice
-            retry_choice="${retry_choice:-y}"
+            retry_choice=$(ask "Choose a different name?" "y")
             if [[ "${retry_choice}" =~ ^[yY] ]]; then
                 create_vm
                 return
@@ -2111,8 +2114,7 @@ create_vm() {
             ;;
         *)
             warn "Invalid platform. Please choose from: ppc, ppc64, x86_64, m68k, sparc, sparc64, i386, arm, arm64"
-            read -rp "Try again? (y/n) [y]: " retry_platform
-            retry_platform="${retry_platform:-y}"
+            retry_platform=$(ask "Try again?" "y")
             if [[ "${retry_platform}" =~ ^[yY] ]]; then
                 create_vm
                 return
@@ -3869,6 +3871,12 @@ test_sharing_services() {
 
 # Download ISO from predefined URLs or custom URL
 download_iso() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "download_iso function requires interactive mode"
+        return 1
+    fi
+    
     heading "Download ISO Image"
     
     ensure_dir "${ISO_DIR}"
@@ -3892,7 +3900,7 @@ download_iso() {
     done
     
     log ""
-    read -rp "Select ISO (number), enter custom URL, or press Enter to cancel: " url_choice
+    url_choice=$(ask "Select ISO (number), enter custom URL, or press Enter to cancel" "")
     
     if [[ -z "$url_choice" ]]; then
         log "ISO download cancelled."
@@ -3916,8 +3924,7 @@ download_iso() {
     
     # Check if file already exists
     if [[ -f "$output_file" ]]; then
-        read -rp "File already exists: ${output_file}. Overwrite? (y/n) [n]: " overwrite
-        overwrite="${overwrite:-n}"
+        overwrite=$(ask "File already exists: ${output_file}. Overwrite?" "n")
         if [[ "$overwrite" != "y" ]]; then
             log "Download cancelled."
             return 0
@@ -4149,6 +4156,12 @@ EOF
 
 # Create UTM VM configuration
 create_utm_vm() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "create_utm_vm function requires interactive mode"
+        return 1
+    fi
+    
     heading "Creating UTM VM"
     
     detect_utm || { warn "UTM.app not found. Please install UTM.app from https://mac.getutm.app/"; return 1; }
@@ -4170,8 +4183,7 @@ create_utm_vm() {
     echo "  4) Linux"
     echo "  5) Windows"
     echo "  6) DOS"
-    read -rp "OS Type [1]: " utm_os_type_choice
-    utm_os_type_choice=${utm_os_type_choice:-1}
+    utm_os_type_choice=$(ask "OS Type" "1")
     local utm_os_type=""
     case ${utm_os_type_choice} in
         1) utm_os_type="macOS9" ;;
@@ -4191,8 +4203,7 @@ create_utm_vm() {
     echo "  4) ARM"
     echo "  5) SPARC"
     echo "  6) SPARC64"
-    read -rp "Architecture [1]: " utm_arch_choice
-    utm_arch_choice=${utm_arch_choice:-1}
+    utm_arch_choice=$(ask "Architecture" "1")
     local utm_architecture=""
     case ${utm_arch_choice} in
         1) utm_architecture="ppc" ;;
@@ -4217,8 +4228,7 @@ create_utm_vm() {
     log "Creating UTM VM in: ${vm_base_dir}"
 
     # Display mode
-    read -rp "Display Mode [1=GUI/2=Terminal]: " utm_display_choice
-    utm_display_choice=${utm_display_choice:-1}
+    utm_display_choice=$(ask "Display Mode (1=GUI/2=Terminal)" "1")
     local utm_display=""
     case ${utm_display_choice} in
         1) utm_display="gui" ;;
@@ -4227,17 +4237,15 @@ create_utm_vm() {
     esac
 
     # File sharing
-    read -rp "Enable file sharing [y/N]: " utm_sharing
-    utm_sharing=${utm_sharing:-n}
+    utm_sharing=$(ask "Enable file sharing" "n")
     local utm_sharing_path=""
     if [[ "${utm_sharing}" == "y" ]]; then
-        read -rp "Share path [${SHARE_DIR}]: " utm_sharing_path_input
+        utm_sharing_path_input=$(ask "Share path" "${SHARE_DIR}")
         utm_sharing_path="${utm_sharing_path_input:-${SHARE_DIR}}"
     fi
 
     # Clipboard sharing
-    read -rp "Enable clipboard sharing [y/N]: " utm_clipboard
-    utm_clipboard=${utm_clipboard:-n}
+    utm_clipboard=$(ask "Enable clipboard sharing" "n")
 
     # Memory
     local utm_memory
@@ -4248,11 +4256,10 @@ create_utm_vm() {
     utm_cores=$(ask "CPU cores" "1")
 
     # Network
-    read -rp "Enable VNC [y/N]: " utm_vnc
-    utm_vnc=${utm_vnc:-n}
+    utm_vnc=$(ask "Enable VNC" "n")
     local utm_vnc_port=5900
     if [[ "${utm_vnc}" == "y" ]]; then
-        read -rp "VNC port [${utm_vnc_port}]: " utm_vnc_port_input
+        utm_vnc_port_input=$(ask "VNC port" "${utm_vnc_port}")
         utm_vnc_port="${utm_vnc_port_input:-${utm_vnc_port}}"
     fi
 
@@ -4411,7 +4418,11 @@ stop_vm() {
             qemu_pids=$(pgrep -f "qemu-system" 2>/dev/null || true)
             if [[ -n "${qemu_pids}" ]]; then
                 log "Found QEMU processes: ${qemu_pids}"
-                read -rp "Kill all QEMU processes for ${vm_name}? (y/N): " confirm
+                if is_interactive; then
+                    confirm=$(ask "Kill all QEMU processes for ${vm_name}?" "N")
+                else
+                    confirm="N"
+                fi
                 if [[ "${confirm:-N}" =~ ^[yY] ]]; then
                     kill ${qemu_pids} 2>/dev/null || true
                     log "Sent termination signal to QEMU processes"
@@ -4430,6 +4441,12 @@ stop_vm() {
 
 # Create VM configuration templates
 create_vm_template() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "create_vm_template function requires interactive mode"
+        return 1
+    fi
+    
     heading "Create VM Configuration Template"
     
     echo "Available templates:"
@@ -4444,8 +4461,7 @@ create_vm_template() {
     echo "  [9] Custom configuration"
     echo ""
     
-    read -rp "Select template [1-9]: " template_choice
-    template_choice=${template_choice:-1}
+    template_choice=$(ask "Select template" "1")
     
     local vm_name
     vm_name=$(ask "VM name" "")
@@ -4811,6 +4827,12 @@ edit_vm() {
     local vm_name="$1"
     local config_file=""
     
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "edit_vm function requires interactive mode"
+        return 1
+    fi
+    
     # Search for config file in the new directory structure (vms/VM_NAME_PLATFORM/conf/)
     while IFS= read -r -d '' file; do
         if [[ "$(basename "$file" .conf)" == "${vm_name}" ]]; then
@@ -4852,8 +4874,7 @@ edit_vm() {
         echo "  [9] Exit without saving"
         echo ""
         
-        read -rp "Select option [8]: " choice
-        choice=${choice:-8}
+        choice=$(ask "Select option" "8")
         
         case "${choice}" in
             1)
@@ -4937,7 +4958,9 @@ edit_vm() {
                 ;;
         esac
         
-        read -rp "Press Enter to continue..." _
+        if is_interactive; then
+            read -rp "Press Enter to continue..." _
+        fi
     done
 }
 
@@ -4995,6 +5018,13 @@ resize_disk_image() {
 # ---------------------------------------------------------------------------
 
 show_main_menu() {
+    # Main menu requires interactive mode
+    if ! is_interactive; then
+        warn "Main menu requires interactive mode. Use command-line arguments instead."
+        show_usage
+        return 1
+    fi
+    
     while true; do
         clear || echo ""
         heading "VM MANAGER - Main Menu"
@@ -5072,7 +5102,7 @@ show_main_menu() {
         echo "  [Q]  Quit"
         echo ""
         
-        read -rp "Select option: " choice
+        choice=$(ask "Select option" "")
         
         case "${choice,,}" in
             1) build_menu ;;
@@ -5130,7 +5160,9 @@ show_main_menu() {
             *) echo "Invalid option. Please try again." ;;
         esac
         
-        read -rp "Press Enter to continue..." _
+        if is_interactive; then
+            read -rp "Press Enter to continue..." _
+        fi
     done
 }
 
@@ -5146,6 +5178,12 @@ build_menu() {
 }
 
 build_step_by_step() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "build_step_by_step function requires interactive mode"
+        return 1
+    fi
+    
     heading "Build QEMU - Step by Step"
     echo ""
     echo "  1) Download source"
@@ -5156,7 +5194,7 @@ build_step_by_step() {
     echo "  6) All steps"
     echo "  7) Back to main menu"
     echo ""
-    read -rp "Select step: " step
+    step=$(ask "Select step" "")
     case "${step}" in
         1) download_qemu ;;
         2) apply_patches ;;
@@ -5167,13 +5205,21 @@ build_step_by_step() {
         7) return ;;
         *) echo "Invalid option." ;;
     esac
-    read -rp "Press Enter to continue..." _
+    if is_interactive; then
+        read -rp "Press Enter to continue..." _
+    fi
 }
 
 launch_vm_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "launch_vm_menu function requires interactive mode"
+        return 1
+    fi
+    
     list_vms
     [[ $? -ne 0 ]] && return 1
-    read -rp "Select VM number to launch: " vm_num
+    vm_num=$(ask "Select VM number to launch" "")
     
     # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
@@ -5196,9 +5242,15 @@ launch_vm_menu() {
 }
 
 delete_vm_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "delete_vm_menu function requires interactive mode"
+        return 1
+    fi
+    
     list_vms
     [[ $? -ne 0 ]] && return 1
-    read -rp "Select VM number to delete: " vm_num
+    vm_num=$(ask "Select VM number to delete" "")
     
     # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
@@ -5211,7 +5263,7 @@ delete_vm_menu() {
         [[ -f "${vm_conf}" ]] && {
             if [[ $i -eq $vm_num ]]; then
                 local vm_name=$(basename "${vm_conf}" .conf)
-                read -rp "Delete VM '${vm_name}'? (y/N): " confirm
+                confirm=$(ask "Delete VM '${vm_name}'?" "N")
                 [[ "${confirm:-N}" =~ ^[yY] ]] && delete_vm "${vm_name}"
                 return 0
             fi
@@ -5223,8 +5275,14 @@ delete_vm_menu() {
 
 # Menu for ISO insertion
 insert_iso_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "insert_iso_menu function requires interactive mode"
+        return 1
+    fi
+    
     list_vms || return 1
-    read -rp "Select VM number to insert ISO into: " vm_num
+    vm_num=$(ask "Select VM number to insert ISO into" "")
     
     # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
@@ -5248,8 +5306,14 @@ insert_iso_menu() {
 
 # Menu for ISO ejection
 eject_iso_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "eject_iso_menu function requires interactive mode"
+        return 1
+    fi
+    
     list_vms || return 1
-    read -rp "Select VM number to eject ISO from: " vm_num
+    vm_num=$(ask "Select VM number to eject ISO from" "")
     
     # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
@@ -5273,8 +5337,14 @@ eject_iso_menu() {
 
 # Menu for UTM export
 export_utm_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "export_utm_menu function requires interactive mode"
+        return 1
+    fi
+    
     list_vms || return 1
-    read -rp "Select VM number to export to UTM format: " vm_num
+    vm_num=$(ask "Select VM number to export to UTM format" "")
     
     # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
@@ -5298,8 +5368,14 @@ export_utm_menu() {
 
 # Menu for stopping VMs
 stop_vm_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "stop_vm_menu function requires interactive mode"
+        return 1
+    fi
+    
     list_vms || return 1
-    read -rp "Select VM number to stop: " vm_num
+    vm_num=$(ask "Select VM number to stop" "")
     
     # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
@@ -5323,8 +5399,14 @@ stop_vm_menu() {
 
 # Menu for editing VM configuration
 edit_vm_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "edit_vm_menu function requires interactive mode"
+        return 1
+    fi
+    
     list_vms || return 1
-    read -rp "Select VM number to edit: " vm_num
+    vm_num=$(ask "Select VM number to edit" "")
     
     # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
     local vm_confs=()
@@ -5562,9 +5644,15 @@ show_qemu_command() {
 
 # Show QEMU command menu
 show_qemu_command_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "show_qemu_command_menu function requires interactive mode"
+        return 1
+    fi
+    
     heading "Show QEMU Command"
     list_vms
-    read -rp "Enter VM name to show command: " vm_name
+    vm_name=$(ask "Enter VM name to show command" "")
     [[ -n "$vm_name" ]] && show_qemu_command "$vm_name"
 }
 
