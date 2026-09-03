@@ -5623,7 +5623,28 @@ EOF
 # Show QEMU command for debugging
 show_qemu_command() {
     local vm_name="$1"
-    local config_file="${VM_DIR}/${vm_name}.conf"
+    local platform="$2"
+    
+    # Enhanced bundled directory structure: look for config in VM_NAME_PLATFORM/conf/
+    if [[ -n "${platform}" ]]; then
+        local config_file="${VM_DIR}/${vm_name}_${platform}/conf/${vm_name}.conf"
+    else
+        # Try to find the config file by searching for VM directories
+        local config_file=""
+        local found=0
+        while IFS= read -r -d '' possible_config; do
+            local possible_vm_name=$(basename "$(dirname "$(dirname "${possible_config}")")" | sed 's/_.*//')
+            if [[ "${possible_vm_name}" == "${vm_name}" ]]; then
+                config_file="${possible_config}"
+                found=1
+                break
+            fi
+        done < <(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print0 2>/dev/null)
+        
+        if [[ ${found} -eq 0 ]]; then
+            die "VM configuration not found for: ${vm_name}"
+        fi
+    fi
     
     if [[ ! -f "${config_file}" ]]; then
         die "VM configuration not found: ${config_file}"
