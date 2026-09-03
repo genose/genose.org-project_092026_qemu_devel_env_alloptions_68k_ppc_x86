@@ -2333,6 +2333,167 @@ stop_vm() {
     return 0
 }
 
+# Create VM configuration templates
+create_vm_template() {
+    heading "Create VM Configuration Template"
+    
+    echo "Available templates:"
+    echo "  [1] MacOS 9 (PPC) - 512MB RAM, mac99 machine"
+    echo "  [2] MacOS X 10.4 (PPC64) - 1GB RAM, mac99 machine"
+    echo "  [3] MacOS X 10.5 (PPC64) - 2GB RAM, mac99 machine"
+    echo "  [4] HaikuOS (x86_64) - 512MB RAM, q35 machine"
+    echo "  [5] Ubuntu Linux (x86_64) - 2GB RAM, q35 machine"
+    echo "  [6] Windows XP (i386) - 1GB RAM, pc machine"
+    echo "  [7] Solaris 10 (x86) - 1GB RAM, pc machine"
+    echo "  [8] Solaris 10 (SPARC) - 1GB RAM, sun4u machine"
+    echo "  [9] Custom configuration"
+    echo ""
+    
+    read -rp "Select template [1-9]: " template_choice
+    template_choice=${template_choice:-1}
+    
+    local vm_name
+    vm_name=$(ask "VM name" "")
+    [[ -z "${vm_name}" ]] && { warn "VM name cannot be empty"; return 1; }
+    
+    local template_file="${VM_CONFIG_DIR}/${vm_name}.env"
+    mkdir -p "${VM_CONFIG_DIR}"
+    
+    case "${template_choice}" in
+        1)
+            # MacOS 9 (PPC)
+            cat > "${template_file}" << EOF
+# MacOS 9 Template (PPC)
+QEMU_BIN=qemu-system-ppc
+MACHINE=mac99,via=pmu
+CPU=7455
+RAM_MB=512
+DISPLAY_BACKEND=cocoa
+NETWORK_MODEL=sungem
+HDD_IMAGE=${VM_IMAGE_DIR}/macos-ppc/macos9.qcow2
+CDROM_IMAGE=
+QEMU_ARGS=
+EOF
+            ;;
+        2)
+            # MacOS X 10.4 (PPC64)
+            cat > "${template_file}" << EOF
+# MacOS X 10.4 Tiger Template (PPC64)
+QEMU_BIN=qemu-system-ppc64
+MACHINE=mac99,via=pmu
+CPU=970fx
+RAM_MB=1024
+DISPLAY_BACKEND=cocoa
+NETWORK_MODEL=sungem
+HDD_IMAGE=${VM_IMAGE_DIR}/macos-ppc64/macos104.qcow2
+CDROM_IMAGE=
+QEMU_ARGS=
+EOF
+            ;;
+        3)
+            # MacOS X 10.5 (PPC64)
+            cat > "${template_file}" << EOF
+# MacOS X 10.5 Leopard Template (PPC64)
+QEMU_BIN=qemu-system-ppc64
+MACHINE=mac99,via=pmu
+CPU=970fx
+RAM_MB=2048
+DISPLAY_BACKEND=cocoa
+NETWORK_MODEL=sungem
+HDD_IMAGE=${VM_IMAGE_DIR}/macos-ppc64/macos105.qcow2
+CDROM_IMAGE=
+QEMU_ARGS=
+EOF
+            ;;
+        4)
+            # HaikuOS (x86_64)
+            cat > "${template_file}" << EOF
+# HaikuOS Template (x86_64)
+QEMU_BIN=qemu-system-x86_64
+MACHINE=q35
+CPU=host
+RAM_MB=512
+DISPLAY_BACKEND=cocoa
+NETWORK_MODEL=e1000
+HDD_IMAGE=${VM_IMAGE_DIR}/haiku/haiku.qcow2
+CDROM_IMAGE=
+QEMU_ARGS=-enable-kvm
+EOF
+            ;;
+        5)
+            # Ubuntu Linux (x86_64)
+            cat > "${template_file}" << EOF
+# Ubuntu Linux Template (x86_64)
+QEMU_BIN=qemu-system-x86_64
+MACHINE=q35
+CPU=host
+RAM_MB=2048
+DISPLAY_BACKEND=cocoa
+NETWORK_MODEL=e1000
+HDD_IMAGE=${VM_IMAGE_DIR}/linux/ubuntu.qcow2
+CDROM_IMAGE=
+QEMU_ARGS=-enable-kvm
+EOF
+            ;;
+        6)
+            # Windows XP (i386)
+            cat > "${template_file}" << EOF
+# Windows XP Template (i386)
+QEMU_BIN=qemu-system-i386
+MACHINE=pc
+CPU=pentium3
+RAM_MB=1024
+DISPLAY_BACKEND=cocoa
+NETWORK_MODEL=rtl8139
+HDD_IMAGE=${VM_IMAGE_DIR}/windows-xp/windows_xp.qcow2
+CDROM_IMAGE=
+QEMU_ARGS=
+EOF
+            ;;
+        7)
+            # Solaris 10 (x86)
+            cat > "${template_file}" << EOF
+# Solaris 10 Template (x86)
+QEMU_BIN=qemu-system-i386
+MACHINE=pc
+CPU=pentium3
+RAM_MB=1024
+DISPLAY_BACKEND=cocoa
+NETWORK_MODEL=e1000
+HDD_IMAGE=${VM_IMAGE_DIR}/solaris-x86/solaris10.qcow2
+CDROM_IMAGE=
+QEMU_ARGS=
+EOF
+            ;;
+        8)
+            # Solaris 10 (SPARC)
+            cat > "${template_file}" << EOF
+# Solaris 10 Template (SPARC)
+QEMU_BIN=qemu-system-sparc64
+MACHINE=sun4u
+CPU=TI UltraSparc IIi
+RAM_MB=1024
+DISPLAY_BACKEND=cocoa
+NETWORK_MODEL=sunhme
+HDD_IMAGE=${VM_IMAGE_DIR}/solaris-sparc/solaris10.qcow2
+CDROM_IMAGE=
+QEMU_ARGS=
+EOF
+            ;;
+        9)
+            create_vm
+            return 0
+            ;;
+        *)
+            warn "Invalid template selection"
+            return 1
+            ;;
+    esac
+    
+    log "VM template created: ${template_file}"
+    log "You can now launch the VM with: ${SCRIPT_NAME} launch ${vm_name}"
+}
+
 # List available ROM files
 list_roms() {
     heading "Available ROM Files"
@@ -2610,47 +2771,48 @@ show_main_menu() {
         echo "  [4]  Initialize directories"
         echo ""
         echo "🖥️  VM Management:"
-        echo "  [4]  Create new VM"
-        echo "  [5]  List all VMs"
-        echo "  [6]  Launch VM"
-        echo "  [7]  Delete VM"
+        echo "  [5]  Create VM from template"
+        echo "  [6]  Create new VM"
+        echo "  [7]  List all VMs"
+        echo "  [8]  Launch VM"
+        echo "  [9]  Delete VM"
         echo ""
         echo "💾 Disk & ISO Management:"
-        echo "  [8]  Create disk image"
-        echo "  [9]  Convert disk image"
-        echo "  [10] Resize disk image"
-        echo "  [11] List available ISOs"
-        echo "  [12] Insert ISO into VM"
-        echo "  [13] Eject ISO from VM"
+        echo "  [10] Create disk image"
+        echo "  [11] Convert disk image"
+        echo "  [12] Resize disk image"
+        echo "  [13] List available ISOs"
+        echo "  [14] Insert ISO into VM"
+        echo "  [15] Eject ISO from VM"
         echo ""
         echo "🍎 UTM.app Integration:"
-        echo "  [14] Create UTM VM configuration"
-        echo "  [15] Export VM to UTM format"
+        echo "  [16] Create UTM VM configuration"
+        echo "  [17] Export VM to UTM format"
         echo ""
         echo "🔧 Advanced VM Management:"
-        echo "  [16] Stop a running VM"
-        echo "  [17] Edit VM configuration"
-        echo "  [18] List ROM files"
-        echo "  [19] List disk images"
+        echo "  [18] Stop a running VM"
+        echo "  [19] Edit VM configuration"
+        echo "  [20] List ROM files"
+        echo "  [21] List disk images"
         echo ""
         echo "🚀 Quick Launch (Platform Presets):"
-        echo "  [12] MacOS 68k (System 7-8.1)"
-        echo "  [13] MacOS PPC (7.5.2-9.2.2, G3/G4)"
-        echo "  [14] MacOS PPC64 (Mac OS X, G5)"
-        echo "  [15] HaikuOS"
-        echo "  [16] Linux (generic)"
-        echo "  [17] Atari ST/TT/Falcon (68k)"
-        echo "  [18] Commodore Amiga (68k/AROS)"
-        echo "  [19] Solaris x86"
-        echo "  [20] Solaris SPARC"
-        echo "  [21] Windows XP"
-        echo "  [22] OpenStep x86"
-        echo "  [23] Custom QEMU (any architecture)"
+        echo "  [22] MacOS 68k (System 7-8.1)"
+        echo "  [23] MacOS PPC (7.5.2-9.2.2, G3/G4)"
+        echo "  [24] MacOS PPC64 (Mac OS X, G5)"
+        echo "  [25] HaikuOS"
+        echo "  [26] Linux (generic)"
+        echo "  [27] Atari ST/TT/Falcon (68k)"
+        echo "  [28] Commodore Amiga (68k/AROS)"
+        echo "  [29] Solaris x86"
+        echo "  [30] Solaris SPARC"
+        echo "  [31] Windows XP"
+        echo "  [32] OpenStep x86"
+        echo "  [33] Custom QEMU (any architecture)"
         echo ""
         echo "📖 Information:"
-        echo "  [28] Show QEMU version"
-        echo "  [29] Show available architectures"
-        echo "  [30] Show VM configurations"
+        echo "  [34] Show QEMU version"
+        echo "  [35] Show available architectures"
+        echo "  [36] Show VM configurations"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -2663,37 +2825,38 @@ show_main_menu() {
             2) build_step_by_step ;;
             3) check_build_deps ;;
             4) init_directories ;;
-            5) create_vm ;;
-            6) list_vms ;;
-            7) launch_vm_menu ;;
-            8) delete_vm_menu ;;
-            9) create_disk_image ;;
-            10) convert_disk_image ;;
-            11) resize_disk_image ;;
-            12) list_isos ;;
-            13) insert_iso_menu ;;
-            14) eject_iso_menu ;;
-            15) create_utm_vm ;;
-            16) export_utm_menu ;;
-            17) stop_vm_menu ;;
-            18) edit_vm_menu ;;
-            19) list_roms ;;
-            20) list_disks ;;
-            21) launch_macos_68k ;;
-            22) launch_macos_ppc ;;
-            23) launch_macos_ppc64 ;;
-            24) launch_haiku ;;
-            25) launch_linux ;;
-            26) launch_atari ;;
-            27) launch_amiga ;;
-            28) launch_solaris_x86 ;;
-            29) launch_solaris_sparc ;;
-            30) launch_windows_xp ;;
-            31) launch_openstep ;;
-            32) launch_custom ;;
-            33) show_qemu_version ;;
-            34) show_architectures ;;
-            35) show_vm_configs ;;
+            5) create_vm_template ;;
+            6) create_vm ;;
+            7) list_vms ;;
+            8) launch_vm_menu ;;
+            9) delete_vm_menu ;;
+            10) create_disk_image ;;
+            11) convert_disk_image ;;
+            12) resize_disk_image ;;
+            13) list_isos ;;
+            14) insert_iso_menu ;;
+            15) eject_iso_menu ;;
+            16) create_utm_vm ;;
+            17) export_utm_menu ;;
+            18) stop_vm_menu ;;
+            19) edit_vm_menu ;;
+            20) list_roms ;;
+            21) list_disks ;;
+            22) launch_macos_68k ;;
+            23) launch_macos_ppc ;;
+            24) launch_macos_ppc64 ;;
+            25) launch_haiku ;;
+            26) launch_linux ;;
+            27) launch_atari ;;
+            28) launch_amiga ;;
+            29) launch_solaris_x86 ;;
+            30) launch_solaris_sparc ;;
+            31) launch_windows_xp ;;
+            32) launch_openstep ;;
+            33) launch_custom ;;
+            34) show_qemu_version ;;
+            35) show_architectures ;;
+            36) show_vm_configs ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -2933,6 +3096,7 @@ Build QEMU:
 
 VM Management:
   create            Create new VM
+  create-template   Create VM from template
   list              List all VMs
   launch <name>    Launch a VM
   delete <name>    Delete a VM
@@ -2996,6 +3160,9 @@ Examples:
   ${SCRIPT_NAME} create
   ${SCRIPT_NAME} launch my-macos-vm
 
+  # Create VM from template
+  ${SCRIPT_NAME} create-template
+
   # Launch with preset configuration
   ${SCRIPT_NAME} macos-ppc
 
@@ -3046,6 +3213,7 @@ main() {
         
         # VM management
         create) create_vm ;;
+        create-template|create-vm-template|template) create_vm_template ;;
         list|list-vms) list_vms ;;
         launch) 
             [[ -n "${2:-}" ]] && launch_vm "$2" || launch_vm_menu
