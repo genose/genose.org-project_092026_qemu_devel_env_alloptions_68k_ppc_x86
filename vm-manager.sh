@@ -883,6 +883,75 @@ validate_vm_config() {
     [[ $errors -eq 0 ]] && return 0 || return 1
 }
 
+# Edit Option C: Debug & Network settings for VM
+edit_vm_option_c() {
+    local config_file="$1"
+    
+    # Load current config if it exists
+    if [[ -f "${config_file}" ]]; then
+        source "${config_file}" 2>/dev/null || true
+    fi
+    
+    heading "Option C: Debug & Network Settings"
+    echo "Current settings:"
+    echo "  GDB: ${ENABLE_GDB:-n} ${GDB_PORT:+port=$GDB_PORT}"
+    echo "  SSH: ${ENABLE_SSH:-n} ${SSH_PORT:+port=$SSH_PORT}"
+    echo "  Netatalk: ${ENABLE_NETATALK:-n} ${NETATALK_SHARE_NAME:+share=$NETATALK_SHARE_NAME}"
+    echo ""
+    
+    # GDB Configuration
+    local enable_gdb
+    enable_gdb=$(ask "Enable GDB debugging" "${ENABLE_GDB:-n}")
+    
+    local gdb_port=""
+    if [[ "$enable_gdb" == "y" ]]; then
+        gdb_port=$(ask "GDB port" "${GDB_PORT:-${DEFAULT_GDB_PORT}}")
+    fi
+    
+    # SSH Configuration
+    local enable_ssh
+    enable_ssh=$(ask "Enable SSH port forwarding" "${ENABLE_SSH:-n}")
+    
+    local ssh_port=""
+    if [[ "$enable_ssh" == "y" ]]; then
+        ssh_port=$(ask "SSH port (host side)" "${SSH_PORT:-${DEFAULT_SSH_PORT}}")
+    fi
+    
+    # Netatalk Configuration
+    local enable_netatalk
+    enable_netatalk=$(ask "Enable Netatalk (AppleShare)" "${ENABLE_NETATALK:-n}")
+    
+    local netatalk_share_name=""
+    local share_dir=""
+    if [[ "$enable_netatalk" == "y" ]]; then
+        netatalk_share_name=$(ask "Netatalk share name" "${NETATALK_SHARE_NAME:-VM_Share}")
+        share_dir=$(ask "Share directory path" "${SHARED_DIR:-${DEFAULT_MACOS_SHARE_DIR}}")
+    fi
+    
+    # Update configuration file
+    local updates=(
+        "ENABLE_GDB=${enable_gdb}"
+        "GDB_PORT=${gdb_port}"
+        "ENABLE_SSH=${enable_ssh}"
+        "SSH_PORT=${ssh_port}"
+        "ENABLE_NETATALK=${enable_netatalk}"
+        "NETATALK_SHARE_NAME=${netatalk_share_name}"
+        "SHARED_DIR=${share_dir}"
+    )
+    
+    for update in "${updates[@]}"; do
+        local key="${update%%=*}"
+        local value="${update#*=}"
+        if grep -q "^${key}=" "${config_file}" 2>/dev/null; then
+            sed -i.bak "s|^${key}=.*|${key}=\"${value}\"|" "${config_file}"
+        else
+            echo "${key}=\"${value}\"" >> "${config_file}"
+        fi
+    done
+    
+    log "Option C settings updated successfully"
+}
+
 # Create a new VM configuration
 create_vm_config() {
     local vm_name="$1"
@@ -909,6 +978,15 @@ RAM_MB=2048
 HDD_IMAGE=${DISK_DIR}/${vm_name}.qcow2
 DISPLAY_BACKEND=${DEFAULT_DISPLAY}
 NETWORK_MODEL=e1000
+
+# Option C: Debug & Network Settings
+ENABLE_GDB=n
+GDB_PORT=${DEFAULT_GDB_PORT}
+ENABLE_SSH=n
+SSH_PORT=${DEFAULT_SSH_PORT}
+ENABLE_NETATALK=n
+NETATALK_SHARE_NAME=VM_${vm_name}
+SHARED_DIR=${DEFAULT_MACOS_SHARE_DIR}
 EOF
         log "Created basic VM config: ${config_file}"
     fi
@@ -1040,8 +1118,42 @@ launch_vm() {
     # Add network
     cmd+=(-nic user,model="${NETWORK_MODEL:-e1000}")
     
+    # Option C: GDB debugging support
+    if [[ "${ENABLE_GDB:-n}" == "y" ]]; then
+        local gdb_port="${GDB_PORT:-${DEFAULT_GDB_PORT}}"
+        cmd+=(-gdb "tcp::${gdb_port}" -S)
+        log "GDB debugging active on port: ${gdb_port}"
+        log "Connect with: ${GDB_BIN:-gdb-multiarch} -ex 'target remote localhost:${gdb_port}'"
+    fi
+    
+    # Option C: SSH port forwarding
+    if [[ "${ENABLE_SSH:-n}" == "y" ]]; then
+        local ssh_port="${SSH_PORT:-${DEFAULT_SSH_PORT}}"
+        cmd+=(-netdev "user,id=sshnet0,hostfwd=tcp::${ssh_port}-:22")
+        cmd+=(-device "virtio-net-pci,netdev=sshnet0")
+        log "SSH forwarding active: host:${ssh_port} -> guest:22"
+        log "Connect with: ssh user@localhost -p ${ssh_port}"
+    fi
+    
     # Add other devices
     cmd+=(-device usb-kbd -device usb-mouse -rtc base=localtime)
+    
+    # Option C: Start Netatalk if enabled
+    if [[ "${ENABLE_NETATALK:-n}" == "y" ]]; then
+        local netatalk_share_name="${NETATALK_SHARE_NAME:-VM_${vm_name}}"
+        local share_dir="${SHARED_DIR:-${DEFAULT_MACOS_SHARE_DIR}}"
+        detect_netatalk
+        if [[ "$NETATALK_INSTALLED" == true ]]; then
+            if start_netatalk_share "$netatalk_share_name" "$share_dir"; then
+                log "Netatalk share started: $netatalk_share_name"
+                log "Share available via: afp://$(hostname):${DEFAULT_NETATALK_PORT}/$netatalk_share_name"
+            else
+                warn "Netatalk failed to start - continuing without AppleShare"
+            fi
+        else
+            warn "Netatalk not installed - install with: brew install netatalk or sudo port install netatalk"
+        fi
+    fi
     
     log "Launching VM: ${vm_name}"
     log "Command: ${cmd[*]}"
@@ -2015,6 +2127,113 @@ detect_utm() {
     export UTM_INSTALLED UTM_PATH UTM_QEMU_PATH
 }
 
+# ---------------------------------------------------------------------------
+# Option C: Debug & Network Sharing Functions
+# ---------------------------------------------------------------------------
+
+# Detect Netatalk (AppleShare) installation
+detect_netatalk() {
+    if command -v afpd &>/dev/null; then
+        NETATALK_INSTALLED=true
+        NETATALK_BIN="afpd"
+    elif [[ -x "/opt/local/sbin/afpd" ]]; then
+        NETATALK_INSTALLED=true
+        NETATALK_BIN="/opt/local/sbin/afpd"
+    elif [[ -x "/usr/local/sbin/afpd" ]]; then
+        NETATALK_INSTALLED=true
+        NETATALK_BIN="/usr/local/sbin/afpd"
+    else
+        NETATALK_INSTALLED=false
+        NETATALK_BIN=""
+    fi
+    export NETATALK_INSTALLED NETATALK_BIN
+}
+
+# Detect GDB installation
+detect_gdb() {
+    if command -v gdb &>/dev/null; then
+        GDB_INSTALLED=true
+        GDB_BIN="gdb"
+    elif command -v ggdb &>/dev/null; then
+        GDB_INSTALLED=true
+        GDB_BIN="ggdb"
+    else
+        GDB_INSTALLED=false
+        GDB_BIN=""
+    fi
+    export GDB_INSTALLED GDB_BIN
+}
+
+# Start Netatalk share for AppleShare file sharing
+start_netatalk_share() {
+    local share_name="$1"
+    local share_path="$2"
+    local netatalk_config="/tmp/vm-assistant-netatalk.conf"
+
+    detect_netatalk
+    if [[ "$NETATALK_INSTALLED" != true ]]; then
+        warn "Netatalk not installed. Install with: brew install netatalk or sudo port install netatalk"
+        return 1
+    fi
+
+    mkdir -p "$share_path"
+
+    cat > "$netatalk_config" << EOF
+[Global]
+  mimic model = RackMac
+  uam list = uams_guest.so,uams_dhx.so,uams_dhx2.so
+  guest account = guest
+  log file = /tmp/vm-assistant-netatalk.log
+  max connections = 20
+
+[$share_name]
+  path = $share_path
+  valid users = @* guest
+  rwlist = @* guest
+  file perm = 0664
+  directory perm = 0775
+  cnid scheme = dbd
+  aapl use sentry = no
+EOF
+
+    log "Starting Netatalk with config: $netatalk_config"
+    log "Share: $share_name -> $share_path"
+
+    # Kill any existing afpd
+    pkill afpd 2>/dev/null || true
+    sleep 1
+
+    # Create private directory if needed
+    mkdir -p /tmp/samba_private
+    export ATLKD_PRI_DIR=/tmp/samba_private
+
+    # Start afpd with custom config
+    sudo "$NETATALK_BIN" -F "$netatalk_config" -d 2>>/tmp/vm-assistant-netatalk.log &
+    local afpd_pid=$!
+    echo "$afpd_pid" > /tmp/vm-assistant-netatalk.pid
+
+    log "Netatalk started with PID: $afpd_pid"
+    log "Share available via: afp://$(hostname):${DEFAULT_NETATALK_PORT}/$share_name"
+
+    sleep 2
+    if ps -p "$afpd_pid" > /dev/null 2>&1; then
+        return 0
+    else
+        warn "Failed to start Netatalk. See /tmp/vm-assistant-netatalk.log"
+        return 1
+    fi
+}
+
+# Stop Netatalk share
+stop_netatalk_share() {
+    if [[ -f /tmp/vm-assistant-netatalk.pid ]]; then
+        local pid=$(cat /tmp/vm-assistant-netatalk.pid)
+        kill "$pid" 2>/dev/null || true
+        rm -f /tmp/vm-assistant-netatalk.pid
+        log "Netatalk stopped"
+    fi
+}
+
 # Export VM to UTM format
 export_utm() {
     local vm_name="$1"
@@ -2617,8 +2836,9 @@ edit_vm() {
         echo "  [4] Change disk image"
         echo "  [5] Change CDROM/ISO"
         echo "  [6] Change display settings"
-        echo "  [7] Save and exit"
-        echo "  [8] Exit without saving"
+        echo "  [7] Option C: Debug & Network settings (GDB/SSH/Netatalk)"
+        echo "  [8] Save and exit"
+        echo "  [9] Exit without saving"
         echo ""
         
         read -rp "Select option [8]: " choice
@@ -2690,10 +2910,14 @@ edit_vm() {
                 log "Display backend updated to: ${new_display}"
                 ;;
             7)
+                # Option C: Debug & Network settings
+                edit_vm_option_c "${config_file}"
+                ;;
+            8)
                 log "Configuration saved"
                 return 0
                 ;;
-            8|q|quit|exit)
+            9|q|quit|exit)
                 log "Edit cancelled, no changes saved"
                 return 1
                 ;;
