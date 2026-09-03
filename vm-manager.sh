@@ -3565,7 +3565,8 @@ configure_xquartz() {
     heading "Configuring XQuartz"
     
     if [[ ! -d "/Applications/Utilities/XQuartz.app" ]]; then
-        die "XQuartz not installed. Download from: https://www.xquartz.org"
+        warn "XQuartz not installed. Download from: https://www.xquartz.org"
+        return 1
     fi
     
     # Ensure .Xauthority file exists with correct permissions
@@ -3642,7 +3643,8 @@ test_samba_connection() {
     heading "Testing Samba Connection: smb://$host/$share"
     
     if ! command -v smbutil &>/dev/null; then
-        die "smbutil not found. Install Samba client tools."
+        warn "smbutil not found. Install Samba client tools."
+        return 1
     fi
     
     # If username not provided and we're in interactive mode, ask for it
@@ -3682,7 +3684,8 @@ test_samba_connection() {
             return 0
         fi
     else
-        die "✗ Samba connection failed to $host. Check that smbd is running and the share exists."
+        warn "✗ Samba connection failed to $host. Check that smbd is running and the share exists."
+        return 1
     fi
 }
 
@@ -3724,7 +3727,8 @@ test_netatalk_connection() {
         fi
     fi
     
-    die "Netatalk connection test failed. Try: open afp://$host/$share manually."
+    warn "Netatalk connection test failed. Try: open afp://$host/$share manually."
+    return 1
 }
 
 # Test individual SSH connection
@@ -3735,7 +3739,8 @@ test_ssh_connection() {
     heading "Testing SSH Connection: $host:$port"
     
     if ! command -v ssh &>/dev/null; then
-        die "SSH client not found. Install OpenSSH client."
+        warn "SSH client not found. Install OpenSSH client."
+        return 1
     fi
     
     log "Attempting SSH connection to $host on port $port..."
@@ -3745,7 +3750,8 @@ test_ssh_connection() {
         log "✓ SSH server is responding on $host:$port"
         return 0
     else
-        die "✗ SSH connection failed to $host:$port. Check that SSH server is running and accessible."
+        warn "✗ SSH connection failed to $host:$port. Check that SSH server is running and accessible."
+        return 1
     fi
 }
 
