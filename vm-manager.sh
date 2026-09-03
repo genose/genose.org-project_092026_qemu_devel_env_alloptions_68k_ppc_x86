@@ -2234,6 +2234,114 @@ stop_netatalk_share() {
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Connection Testing Functions (from test_connection.sh)
+# ---------------------------------------------------------------------------
+
+# Test all sharing services (Samba, Netatalk, local)
+test_sharing_services() {
+    heading "Sharing Services Test"
+    
+    local share_name="${NETATALK_SHARE_NAME:-VM_Shares}"
+    local volatile_hd="/tmp/volatile_hd"
+    local results=()
+    local ip_address
+    
+    # Get local IP address (non-loopback)
+    if command -v ifconfig &>/dev/null; then
+        ip_address=$(ifconfig | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -Eo '([0-9]*\.){3}[0-9]*' | grep -v '127.0.0.1' | head -n 1)
+    else
+        ip_address="localhost"
+    fi
+    
+    echo "Local IP: ${ip_address:-Not detected}"
+    echo ""
+    
+    # Test 1: Local share
+    echo "[1] Local share (${volatile_hd})..."
+    if [[ -d "${volatile_hd}" && -w "${volatile_hd}" ]]; then
+        log "✓ Local share: OK"
+        results+=("✓ Local share: OK")
+    else
+        warn "✗ Local share: FAILED"
+        results+=("✗ Local share: FAILED")
+    fi
+    
+    # Test 2: Samba
+    echo ""
+    echo "[2] Samba..."
+    if pgrep -x "smbd" &>/dev/null; then
+        log "✓ smbd is running"
+        results+=("✓ smbd is running")
+        
+        if command -v smbclient &>/dev/null; then
+            if smbclient -L localhost -U% 2>/dev/null | grep -q "${share_name}"; then
+                log "✓ Samba shares visible"
+                results+=("✓ Samba shares visible")
+            else
+                warn "✗ Samba shares not visible"
+                results+=("✗ Samba shares not visible")
+            fi
+            
+            if smbclient "//localhost/${share_name}" -U"$(whoami)" -N -c "ls" 2>/dev/null | grep -q "blocks"; then
+                log "✓ Access to ${share_name}: OK"
+                results+=("✓ Access to ${share_name}: OK")
+            else
+                warn "⚠️  Access to ${share_name}: needs authentication"
+                results+=("⚠️  Access to ${share_name}: needs authentication")
+            fi
+        fi
+    else
+        warn "✗ smbd is not running"
+        results+=("✗ smbd is not running")
+    fi
+    
+    # Test 3: Netatalk
+    echo ""
+    echo "[3] Netatalk..."
+    if pgrep -x "afpd" &>/dev/null; then
+        log "✓ afpd is running"
+        results+=("✓ afpd is running")
+        
+        if command -v afpclient &>/dev/null; then
+            if afpclient -l localhost 2>/dev/null | grep -q "${share_name}"; then
+                log "✓ Netatalk shares visible"
+                results+=("✓ Netatalk shares visible")
+            else
+                warn "✗ Netatalk shares not visible"
+                results+=("✗ Netatalk shares not visible")
+            fi
+        else
+            warn "⚠️  afpclient not available - cannot test Netatalk shares"
+            results+=("⚠️  afpclient not available - cannot test Netatalk shares")
+        fi
+    else
+        warn "✗ afpd is not running"
+        results+=("✗ afpd is not running")
+    fi
+    
+    # Display access information
+    echo ""
+    echo "Access URLs:"
+    if [[ -n "${ip_address}" ]]; then
+        log "  Samba: smb://${ip_address}/${share_name}"
+        log "  AFP:    afp://${ip_address}/${share_name}"
+    else
+        log "  Samba: smb://localhost/${share_name}"
+        log "  AFP:    afp://localhost/${share_name}"
+    fi
+    log "  Local:  ${volatile_hd}"
+    
+    # Summary
+    echo ""
+    heading "Test Summary"
+    for result in "${results[@]}"; do
+        echo "  ${result}"
+    done
+    
+    return 0
+}
+
 # Export VM to UTM format
 export_utm() {
     local vm_name="$1"
@@ -3038,6 +3146,9 @@ show_main_menu() {
         echo "  [35] Show available architectures"
         echo "  [36] Show VM configurations"
         echo ""
+        echo "🔍 Diagnostics:"
+        echo "  [37] Test sharing services (Samba/Netatalk)"
+        echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
         echo ""
@@ -3081,6 +3192,7 @@ show_main_menu() {
             34) show_qemu_version ;;
             35) show_architectures ;;
             36) show_vm_configs ;;
+            37) test_sharing_services ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -3365,6 +3477,7 @@ Information:
   vm-configs       Show VM configuration templates
   capabilities     Detect QEMU capabilities
   check-deps       Check system dependencies
+  test-connections  Test sharing services (Samba/Netatalk)
   menu             Interactive menu (default)
   help             Show this help
 
@@ -3471,6 +3584,7 @@ main() {
         # Capability detection
         capabilities|detect-capabilities) detect_qemu_capabilities ;;
         check-deps|detect-deps) detect_dependencies ;;
+        test-connections|check-sharing|test-sharing) test_sharing_services ;;
         
         # Disk/ISO management
         disk-create|create-disk) create_disk_image ;;
