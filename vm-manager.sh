@@ -5345,7 +5345,8 @@ launch_vm_menu() {
             ((i++)) || true
         }
     done
-    die "Invalid VM selection"
+    warn "Invalid VM selection"
+    return 1
 }
 
 delete_vm_menu() {
@@ -5377,7 +5378,8 @@ delete_vm_menu() {
             ((i++)) || true
         }
     done
-    die "Invalid VM selection"
+    warn "Invalid VM selection"
+    return 1
 }
 
 # Menu for ISO insertion
@@ -5408,7 +5410,8 @@ insert_iso_menu() {
             ((i++)) || true
         }
     done
-    die "Invalid VM selection"
+    warn "Invalid VM selection"
+    return 1
 }
 
 # Menu for ISO ejection
@@ -5439,7 +5442,8 @@ eject_iso_menu() {
             ((i++)) || true
         }
     done
-    die "Invalid VM selection"
+    warn "Invalid VM selection"
+    return 1
 }
 
 # Menu for UTM export
@@ -5470,7 +5474,8 @@ export_utm_menu() {
             ((i++)) || true
         }
     done
-    die "Invalid VM selection"
+    warn "Invalid VM selection"
+    return 1
 }
 
 # Menu for stopping VMs
@@ -5501,7 +5506,8 @@ stop_vm_menu() {
             ((i++)) || true
         }
     done
-    die "Invalid VM selection"
+    warn "Invalid VM selection"
+    return 1
 }
 
 # Menu for editing VM configuration
@@ -5532,7 +5538,8 @@ edit_vm_menu() {
             ((i++)) || true
         }
     done
-    die "Invalid VM selection"
+    warn "Invalid VM selection"
+    return 1
 }
 
 show_qemu_version() {
