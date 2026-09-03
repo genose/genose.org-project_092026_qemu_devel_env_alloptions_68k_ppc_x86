@@ -788,34 +788,6 @@ configure_x86_compat() {
 # ---------------------------------------------------------------------------
 # QEMU Build Functions (from build_qemu.sh)
 
-list_all_softmmu_targets() {
-    local targets_dir="${QEMU_SRC_DIR}/configs/targets"
-    [[ -d "${targets_dir}" ]] || return 1
-    find "${targets_dir}" -maxdepth 1 -type f -name '*-softmmu.mak' \
-        -exec sh -c 'for file_path in "$@"; do basename "$file_path" .mak; done' sh {} + \
-        | sort
-}
-
-resolve_qemu_targets() {
-    local targets=()
-    if [[ "$(uname -m)" =~ x86_64|amd64|i386|i486|i586|i686 ]]; then
-        if mapfile -t targets < <(list_all_softmmu_targets) && [[ ${#targets[@]} -gt 0 ]]; then
-            log "x86 host detected — enabling all qemu-system-* targets."
-        else
-            warn "Could not enumerate all softmmu targets; using retro defaults."
-            targets=("${QEMU_SOFTMMU_TARGETS[@]}")
-        fi
-    else
-        targets=("${QEMU_SOFTMMU_TARGETS[@]}")
-    fi
-    
-    if [[ "$(uname -s)" == "Linux" ]]; then
-        targets+=("${QEMU_LINUX_USER_TARGETS[@]}")
-    fi
-    
-    printf '%s\n' "${targets[@]}"
-}
-
 configure_x86_compat() {
     [[ "$(uname -m)" =~ x86_64|amd64|i386|i486|i586|i686 ]] || return 0
     [[ -n "${QEMU_X86_COMPAT_CFLAGS}" ]] || return 0
@@ -3454,6 +3426,205 @@ test_sharing_services() {
     return 0
 }
 
+# Download ISO from predefined URLs or custom URL
+download_iso() {
+    heading "Download ISO Image"
+    
+    ensure_dir "${ISO_DIR}"
+    
+    local iso_urls=(
+        "https://cdimage.debian.org/mirror/cdimage/archive/11.6.0/amd64/iso-dvd/debian-11.6.0-amd64-DVD-1.iso:Debian 11.6.0 amd64"
+        "https://cdimage.ubuntu.com/releases/22.04/release/ubuntu-22.04-desktop-amd64.iso:Ubuntu 22.04 Desktop"
+        "https://archlinux.org/iso/latest/archlinux-x86_64.iso:Arch Linux Latest"
+        "https://download.freebsd.org/ftp/releases/amd64/amd64/ISO-IMAGES/13.2/FreeBSD-13.2-RELEASE-amd64-disc1.iso:FreeBSD 13.2"
+        "https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.0/amd64cd.iso:NetBSD 10.0"
+        "https://download.opensuse.org/tumbleweed/iso/openSUSE-Tumbleweed-DVD-x86_64-Current.iso:openSUSE Tumbleweed"
+        "https://cdimage.ubuntu.com/releases/24.04/release/ubuntu-24.04-desktop-amd64.iso:Ubuntu 24.04 Desktop"
+        "https://cdimage.ubuntu.com/releases/jammy/release/ubuntu-22.04.4-desktop-amd64.iso:Ubuntu 22.04.4 Desktop"
+    )
+    
+    log "Predefined ISO URLs:"
+    log "-------------------"
+    for i in "${!iso_urls[@]}"; do
+        IFS=':' read -r url desc <<< "${iso_urls[$i]}"
+        log "  [$((i+1))] $desc"
+    done
+    
+    log ""
+    read -rp "Select ISO (number), enter custom URL, or press Enter to cancel: " url_choice
+    
+    if [[ -z "$url_choice" ]]; then
+        log "ISO download cancelled."
+        return 0
+    fi
+    
+    local iso_url=""
+    local iso_name=""
+    
+    if [[ "$url_choice" =~ ^[0-9]+$ ]] && [ "$url_choice" -ge 1 ] && [ "$url_choice" -le ${#iso_urls[@]} ]; then
+        IFS=':' read -r iso_url iso_name <<< "${iso_urls[$((url_choice-1))]}"
+    elif [[ "$url_choice" == http* || "$url_choice" == ftp* ]]; then
+        iso_url="$url_choice"
+        iso_name=$(basename "$url_choice")
+    else
+        warn "Invalid choice"
+        return 1
+    fi
+    
+    local output_file="${ISO_DIR}/${iso_name}"
+    
+    # Check if file already exists
+    if [[ -f "$output_file" ]]; then
+        read -rp "File already exists: ${output_file}. Overwrite? (y/n) [n]: " overwrite
+        overwrite="${overwrite:-n}"
+        if [[ "$overwrite" != "y" ]]; then
+            log "Download cancelled."
+            return 0
+        fi
+    fi
+    
+    log "Downloading: ${iso_url}"
+    log "Destination: ${output_file}"
+    
+    if command -v curl &> /dev/null; then
+        curl -L -o "$output_file" "$iso_url" -# || {
+            die "Download failed"
+        }
+    elif command -v wget &> /dev/null; then
+        wget -O "$output_file" "$iso_url" || {
+            die "Download failed"
+        }
+    else
+        die "Neither curl nor wget found. Please install one of them."
+    fi
+    
+    log "ISO downloaded successfully: ${output_file}"
+    return 0
+}
+
+# Detect available ISOs across multiple directories
+detect_available_isos() {
+    heading "Detecting Available ISOs"
+    
+    local search_dirs=(
+        "${ISO_DIR}"
+        "${VM_IMAGE_DIR}"
+        "${HOME}/Downloads"
+        "${SCRIPT_DIR}"
+    )
+    
+    local global_available_isos=()
+    local global_available_isos_paths=()
+    
+    for dir in "${search_dirs[@]}"; do
+        if [[ -d "$dir" ]]; then
+            log "Scanning: ${dir}"
+            while IFS= read -r -d "" file; do
+                if [[ "$file" == *.iso ]] || [[ "$file" == *.ISO ]] || [[ "$file" == *.dmg ]] || [[ "$file" == *.DMG ]]; then
+                    local filename=$(basename "$file")
+                    local size=$(du -h "$file" 2>/dev/null | cut -f1)
+                    local description="$filename ($size)"
+                    
+                    # Detect ISO type
+                    case "$filename" in
+                        *"Mac"*|*"mac"*|*"OSX"*|*"Snow Leopard"*|*"Leopard"*) 
+                            description="[Mac OS] $filename ($size)" ;;
+                        *"Windows"*|*"win"*|*"Win"*) 
+                            description="[Windows] $filename ($size)" ;;
+                        *"Linux"*|*"linux"*|*"Ubuntu"*|*"Debian"*|*"Fedora"*|*"Arch"*) 
+                            description="[Linux] $filename ($size)" ;;
+                        *"DOS"*|*"dos"*|*"MS-DOS"*) 
+                            description="[DOS] $filename ($size)" ;;
+                        *"FreeBSD"*|*"BSD"*) 
+                            description="[BSD] $filename ($size)" ;;
+                        *"Solaris"*|*"solaris"*) 
+                            description="[Solaris] $filename ($size)" ;;
+                        *"Haiku"*|*"haiku"*) 
+                            description="[Haiku] $filename ($size)" ;;
+                        *"Atari"*|*"atari"*) 
+                            description="[Atari] $filename ($size)" ;;
+                        *"Amiga"*|*"amiga"*) 
+                            description="[Amiga] $filename ($size)" ;;
+                    esac
+                    
+                    # Avoid duplicates
+                    local already_found=false
+                    for existing_path in "${global_available_isos_paths[@]}"; do
+                        if [[ "$existing_path" == "$file" ]]; then
+                            already_found=true
+                            break
+                        fi
+                    done
+                    
+                    if [[ "$already_found" == false ]]; then
+                        global_available_isos+=("$description")
+                        global_available_isos_paths+=("$file")
+                    fi
+                fi
+            done < <(find "$dir" -maxdepth 2 -type f \( -name "*.iso" -o -name "*.ISO" -o -name "*.dmg" -o -name "*.DMG" \) -print0 2>/dev/null)
+        fi
+    done
+    
+    if [[ ${#global_available_isos_paths[@]} -eq 0 ]]; then
+        log "No ISOs found in any directory."
+        return 1
+    else
+        log "Found ${#global_available_isos_paths[@]} ISO(s):"
+        for i in "${!global_available_isos_paths[@]}"; do
+            log "  [$((i+1))] ${global_available_isos[$i]}"
+        done
+        return 0
+    fi
+}
+
+# Detect available architectures from installed QEMU
+detect_available_architectures() {
+    heading "Detecting Available QEMU Architectures"
+    
+    log "Checking for installed QEMU system emulators..."
+    
+    local available_archs=()
+    local arch_descriptions=()
+    
+    # Check for various QEMU system emulators
+    local qemu_archs=(
+        "m68k:Motorola 68000 (Amiga, Atari ST, Mac 68k)"
+        "ppc:PowerPC 32-bit (MacOS 7.5-9.2.2)"
+        "ppc64:PowerPC 64-bit (Mac OS X)"
+        "i386:x86 32-bit (DOS, early Windows)"
+        "x86_64:x86 64-bit (Modern Linux, Windows)"
+        "sparc:SPARC 32-bit"
+        "sparc64:SPARC 64-bit"
+        "arm:ARM 32-bit"
+        "arm64:ARM 64-bit (Raspberry Pi, modern systems)"
+        "mips:MIPS architecture"
+        "mips64:MIPS 64-bit"
+        "riscv32:RISC-V 32-bit"
+        "riscv64:RISC-V 64-bit"
+        "sh4:SuperH SH-4"
+        "xtensa:Xtensa architecture"
+    )
+    
+    for arch_entry in "${qemu_archs[@]}"; do
+        IFS=':' read -r arch desc <<< "$arch_entry"
+        if command -v "qemu-system-${arch}" &> /dev/null; then
+            available_archs+=("$arch")
+            arch_descriptions+=("$desc")
+        fi
+    done
+    
+    if [[ ${#available_archs[@]} -eq 0 ]]; then
+        log "No QEMU system emulators found."
+        return 1
+    else
+        log "Available architectures (${#available_archs[@]}):"
+        for i in "${!available_archs[@]}"; do
+            log "  ${available_archs[$i]} - ${arch_descriptions[$i]}"
+        done
+        return 0
+    fi
+}
+
 # Export VM to UTM format
 export_utm() {
     local vm_name="$1"
@@ -4333,8 +4504,10 @@ show_main_menu() {
         echo "  [11] Convert disk image"
         echo "  [12] Resize disk image"
         echo "  [13] List available ISOs"
-        echo "  [14] Insert ISO into VM"
-        echo "  [15] Eject ISO from VM"
+        echo "  [14] Download ISO from URL"
+        echo "  [15] Detect ISOs in all directories"
+        echo "  [16] Insert ISO into VM"
+        echo "  [17] Eject ISO from VM"
         echo ""
         echo "🍎 UTM.app Integration:"
         echo "  [16] Create UTM VM configuration"
@@ -4402,26 +4575,28 @@ show_main_menu() {
             11) convert_disk_image ;;
             12) resize_disk_image ;;
             13) list_isos ;;
-            14) insert_iso_menu ;;
-            15) eject_iso_menu ;;
-            16) create_utm_vm ;;
-            17) export_utm_menu ;;
-            18) stop_vm_menu ;;
-            19) edit_vm_menu ;;
-            20) list_roms ;;
-            21) list_disks ;;
-            22) backup_configurations ;;
-            23) list_backups ;;
-            24) backup_restore_menu ;;
-            25) launch_macos_68k ;;
-            26) launch_macos_ppc ;;
-            27) launch_macos_ppc64 ;;
-            28) launch_haiku ;;
-            29) launch_linux ;;
-            30) launch_atari ;;
-            31) launch_amiga ;;
-            32) launch_solaris_x86 ;;
-            33) launch_solaris_sparc ;;
+            14) download_iso ;;
+            15) detect_available_isos ;;
+            16) insert_iso_menu ;;
+            17) eject_iso_menu ;;
+            18) create_utm_vm ;;
+            19) export_utm_menu ;;
+            20) stop_vm_menu ;;
+            21) edit_vm_menu ;;
+            22) list_roms ;;
+            23) list_disks ;;
+            24) backup_configurations ;;
+            25) list_backups ;;
+            26) backup_restore_menu ;;
+            27) launch_macos_68k ;;
+            28) launch_macos_ppc ;;
+            29) launch_macos_ppc64 ;;
+            30) launch_haiku ;;
+            31) launch_linux ;;
+            32) launch_atari ;;
+            33) launch_amiga ;;
+            34) launch_solaris_x86 ;;
+            35) launch_solaris_sparc ;;
             34) launch_windows_xp ;;
             35) launch_openstep ;;
             36) launch_custom ;;
@@ -4740,8 +4915,13 @@ Platform Presets:
 
 ISO Management:
   iso-list         List available ISOs
+  iso-download     Download ISO from URL
+  iso-detect      Detect ISOs in all directories
   iso-insert <vm>  Insert ISO into VM
   iso-eject <vm>  Eject ISO from VM
+
+Architecture Detection:
+  arch-detect      Detect available QEMU architectures
 
 UTM Integration:
   utm-create       Create UTM VM configuration
@@ -4972,6 +5152,9 @@ main() {
         disk-convert|convert-disk) convert_disk_image ;;
         disk-resize|resize-disk) resize_disk_image ;;
         iso-list|list-isos) list_isos ;;
+        iso-download|download-iso) download_iso ;;
+        iso-detect|detect-isos) detect_available_isos ;;
+        arch-detect|detect-architectures) detect_available_architectures ;;
         iso-insert|insert-iso) 
             [[ -n "${2:-}" ]] && insert_iso "$2" || insert_iso_menu ;;
         iso-eject|eject-iso) 
