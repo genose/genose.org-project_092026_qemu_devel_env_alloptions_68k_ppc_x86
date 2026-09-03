@@ -3790,6 +3790,7 @@ show_main_menu() {
         echo "  [46] Test Samba connection"
         echo "  [47] Test Netatalk connection"
         echo "  [48] Test SSH connection"
+        echo "  [49] Show QEMU command (debugging)"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -3846,6 +3847,7 @@ show_main_menu() {
             46) test_samba_connection localhost VM_Shares ;;
             47) test_netatalk_connection localhost VM_Shares ;;
             48) test_ssh_connection localhost 22 ;;
+            49) show_qemu_command_menu ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -4142,6 +4144,7 @@ Information:
   backup-config     Create backup of configurations
   list-backups      List available backups
   restore-config    Restore from backup
+  show-command      Show QEMU command for a VM (debugging)
   menu             Interactive menu (default)
   help             Show this help
 
@@ -4173,6 +4176,73 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Show QEMU command for debugging
+show_qemu_command() {
+    local vm_name="$1"
+    local config_file="${VM_DIR}/${vm_name}.conf"
+    
+    if [[ ! -f "${config_file}" ]]; then
+        die "VM configuration not found: ${config_file}"
+    fi
+    
+    heading "QEMU Command for VM: ${vm_name}"
+    
+    # Load configuration
+    source "${config_file}" || die "Failed to load configuration"
+    
+    # Determine QEMU binary
+    local qemu
+    qemu=$(qemu_bin_or_die "${QEMU_BIN:-qemu-system-${QEMU_ARCH:-x86_64}}")
+    
+    # Build QEMU command array (similar to launch_vm but only shows command)
+    local cmd=(
+        "${qemu}"
+        -machine "${MACHINE:-pc}"
+        -cpu "${CPU:-host}"
+        -m "${RAM_MB:-2048}"
+        -display "${DISPLAY_BACKEND:-${DEFAULT_DISPLAY}}"
+    )
+    
+    # Add disk
+    [[ -n "${HDD_IMAGE:-}" && -f "${HDD_IMAGE}" ]] && cmd+=(-hda "${HDD_IMAGE}")
+    
+    # Add CDROM if specified
+    [[ -n "${CDROM_IMAGE:-}" && -f "${CDROM_IMAGE}" ]] && cmd+=(-cdrom "${CDROM_IMAGE}")
+    
+    # Add network
+    cmd+=(-nic user,model="${NETWORK_MODEL:-e1000}")
+    
+    # Option C: GDB debugging support
+    if [[ "${ENABLE_GDB:-n}" == "y" ]]; then
+        local gdb_port="${GDB_PORT:-${DEFAULT_GDB_PORT}}"
+        cmd+=(-gdb "tcp::${gdb_port}" -S)
+    fi
+    
+    # Option C: SSH port forwarding
+    if [[ "${ENABLE_SSH:-n}" == "y" ]]; then
+        local ssh_port="${SSH_PORT:-${DEFAULT_SSH_PORT}}"
+        cmd+=(-netdev "user,id=sshnet0,hostfwd=tcp::${ssh_port}-:22")
+        cmd+=(-device "virtio-net-pci,netdev=sshnet0")
+    fi
+    
+    # Add other devices
+    cmd+=(-device usb-kbd -device usb-mouse -rtc base=localtime)
+    
+    log "QEMU Command:"
+    echo ""
+    echo "  ${cmd[*]}"
+    echo ""
+    log "You can copy and modify this command for custom usage"
+}
+
+# Show QEMU command menu
+show_qemu_command_menu() {
+    heading "Show QEMU Command"
+    list_vms
+    read -rp "Enter VM name to show command: " vm_name
+    [[ -n "$vm_name" ]] && show_qemu_command "$vm_name"
+}
+
 # Entry Point
 # ---------------------------------------------------------------------------
 
@@ -4261,6 +4331,9 @@ main() {
         list-backups) list_backups ;;
         restore-config|restore) 
             [[ -n "${2:-}" ]] && restore_configuration "$2" || backup_restore_menu ;;
+        show-command|show-qemu-command) 
+            [[ -n "${2:-}" ]] && show_qemu_command "$2" || die "Please specify VM name"
+            ;;
         
         # Disk/ISO management
         disk-create|create-disk) create_disk_image ;;
