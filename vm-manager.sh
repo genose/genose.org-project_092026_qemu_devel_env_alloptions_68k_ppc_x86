@@ -669,8 +669,61 @@ detect_dependencies() {
 }
 
 # ---------------------------------------------------------------------------
-# QEMU Build Functions (from build_qemu.sh)
+# Architecture Detection Functions (from build_qemu.sh)
 # ---------------------------------------------------------------------------
+
+# Check if host is x86 architecture
+host_is_x86() {
+    case "$(uname -m)" in
+        x86_64|amd64|i386|i486|i586|i686) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# List all QEMU softmmu targets
+list_all_softmmu_targets() {
+    local targets_dir="${QEMU_SRC_DIR}/configs/targets"
+    [[ -d "${targets_dir}" ]] || return 1
+
+    find "${targets_dir}" -maxdepth 1 -type f -name '*-softmmu.mak' \
+        -exec sh -c 'for file_path in "$@"; do basename "$file_path" .mak; done' sh {} + \
+        | sort
+}
+
+# Resolve QEMU targets based on host architecture
+resolve_qemu_targets() {
+    local targets=()
+
+    if host_is_x86; then
+        if mapfile -t targets < <(list_all_softmmu_targets) && [[ ${#targets[@]} -gt 0 ]]; then
+            log "x86 host detected — enabling all qemu-system-* targets."
+        else
+            warn "Could not enumerate all softmmu targets from ${QEMU_SRC_DIR}; falling back to retro defaults."
+            targets=("${QEMU_SOFTMMU_TARGETS[@]}")
+        fi
+    else
+        targets=("${QEMU_SOFTMMU_TARGETS[@]}")
+    fi
+
+    if [[ "$(uname -s)" == "Linux" ]]; then
+        targets+=("${QEMU_LINUX_USER_TARGETS[@]}")
+    fi
+
+    printf '%s\n' "${targets[@]}"
+}
+
+# Configure x86 compatibility flags for older macOS
+configure_x86_compat() {
+    host_is_x86 || return 0
+    [[ -n "${QEMU_X86_COMPAT_CFLAGS}" ]] || return 0
+
+    export CFLAGS="${CFLAGS:+${CFLAGS} }${QEMU_X86_COMPAT_CFLAGS}"
+    export CXXFLAGS="${CXXFLAGS:+${CXXFLAGS} }${QEMU_X86_COMPAT_CFLAGS}"
+    log "Using x86 compatibility flags: ${QEMU_X86_COMPAT_CFLAGS}"
+}
+
+# ---------------------------------------------------------------------------
+# QEMU Build Functions (from build_qemu.sh)
 
 list_all_softmmu_targets() {
     local targets_dir="${QEMU_SRC_DIR}/configs/targets"
