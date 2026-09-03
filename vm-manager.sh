@@ -85,6 +85,259 @@ die()     { printf "${C_RED}[${SCRIPT_NAME}] ERROR:${C_RESET} %s\n" "$*" >&2; ex
 heading() { printf "\n${C_CYAN}${C_BOLD}=== %s ===${C_RESET}\n\n" "$*"; }
 
 # ---------------------------------------------------------------------------
+# Exception Handling Framework (Bash)
+# ---------------------------------------------------------------------------
+
+# Global exception handler variables
+EXCEPTION_HANDLER_ENABLED=true
+EXCEPTION_MESSAGES=()
+EXCEPTION_CONTEXT=()
+
+# Exception types
+declare -A EXCEPTION_TYPES=(
+    [ERR_ERROR]=1
+    [ERR_WARNING]=2  
+    [ERR_VALIDATION]=3
+    [ERR_DEPENDENCY]=4
+    [ERR_CONFIGURATION]=5
+    [ERR_FILESYSTEM]=6
+    [ERR_NETWORK]=7
+    [ERR_PERMISSION]=8
+    [ERR_NOT_FOUND]=9
+    [ERR_ALREADY_EXISTS]=10
+)
+
+# Exception handler - can be overridden for specific use cases
+handle_exception() {
+    local exit_code="$1"
+    local message="$2"
+    local context="$3"
+    local exception_type="${4:-${EXCEPTION_TYPES[ERR_ERROR]}}"
+    
+    # Log the exception
+    case "$exception_type" in
+        ${EXCEPTION_TYPES[ERR_ERROR]})
+            die "${message}"
+            ;;
+        ${EXCEPTION_TYPES[ERR_WARNING]})
+            warn "${message}"
+            ;;
+        ${EXCEPTION_TYPES[ERR_VALIDATION]})
+            die "[VALIDATION] ${message}"
+            ;;
+        ${EXCEPTION_TYPES[ERR_DEPENDENCY]})
+            die "[DEPENDENCY] ${message}. Please install: ${context}"
+            ;;
+        ${EXCEPTION_TYPES[ERR_CONFIGURATION]})
+            die "[CONFIG] ${message}. Check: ${context}"
+            ;;
+        ${EXCEPTION_TYPES[ERR_FILESYSTEM]})
+            die "[FILESYSTEM] ${message}. Path: ${context}"
+            ;;
+        ${EXCEPTION_TYPES[ERR_NETWORK]})
+            die "[NETWORK] ${message}. URL: ${context}"
+            ;;
+        ${EXCEPTION_TYPES[ERR_PERMISSION]})
+            die "[PERMISSION] ${message}. Need: ${context}"
+            ;;
+        ${EXCEPTION_TYPES[ERR_NOT_FOUND]})
+            die "[NOT_FOUND] ${message}. Searched: ${context}"
+            ;;
+        ${EXCEPTION_TYPES[ERR_ALREADY_EXISTS]})
+            die "[EXISTS] ${message}. Path: ${context}"
+            ;;
+        *)
+            die "[EXCEPTION:${exception_type}] ${message}"
+            ;;
+    esac
+}
+
+# Throw an exception with type and context
+throw() {
+    local message="$1"
+    local context="${2:-}"
+    local exception_type="${3:-${EXCEPTION_TYPES[ERR_ERROR]}}"
+    
+    if ${EXCEPTION_HANDLER_ENABLED:-true}; then
+        handle_exception "$exception_type" "$message" "$context" "$exception_type"
+    else
+        die "$message"
+    fi
+}
+
+# Validation exception
+validate_or_throw() {
+    local condition="$1"
+    local message="$2"
+    local context="${3:-}"
+    
+    if ! eval "$condition"; then
+        throw "$message" "$context" "${EXCEPTION_TYPES[ERR_VALIDATION]}"
+    fi
+}
+
+# Dependency check exception
+dependency_or_throw() {
+    local command="$1"
+    local message="$2"
+    local install_hint="${3:-$command}"
+    
+    if ! command -v "$command" &>/dev/null; then
+        throw "$message" "$install_hint" "${EXCEPTION_TYPES[ERR_DEPENDENCY]}"
+    fi
+}
+
+# File exists check with exception
+file_exists_or_throw() {
+    local file_path="$1"
+    local message="$2"
+    
+    if [[ ! -e "$file_path" ]]; then
+        throw "$message" "$file_path" "${EXCEPTION_TYPES[ERR_NOT_FOUND]}"
+    fi
+}
+
+# Directory exists check with exception
+dir_exists_or_throw() {
+    local dir_path="$1"
+    local message="$2"
+    
+    if [[ ! -d "$dir_path" ]]; then
+        throw "$message" "$dir_path" "${EXCEPTION_TYPES[ERR_NOT_FOUND]}"
+    fi
+}
+
+# File writable check with exception
+writable_or_throw() {
+    local path="$1"
+    local message="$2"
+    
+    if [[ ! -w "$path" ]]; then
+        throw "$message" "$path" "${EXCEPTION_TYPES[ERR_PERMISSION]}"
+    fi
+}
+
+# Try/catch/finally simulation using functions
+# Usage:
+#   try_execute \
+#       command1 \
+#       command2 \
+#       "catch_handler" \
+#       "finally_handler"
+#
+# Or simpler pattern with error checking:
+#   if ! try_execute command1 command2; then
+#       catch_handler
+#   fi
+
+# Execute commands with error handling
+# Returns 0 on success, 1 on error
+# Sets LAST_EXCEPTION and LAST_EXCEPTION_CONTEXT on error
+LAST_EXCEPTION=""
+LAST_EXCEPTION_CONTEXT=""
+
+try_execute() {
+    local commands=("$@")
+    local last_command=""
+    local exit_code=0
+    
+    # Execute all commands except last two (catch and finally handlers)
+    local command_count=${#commands[@]}
+    local catch_handler=""
+    local finally_handler=""
+    
+    if [[ $command_count -ge 1 ]]; then
+        # Last two arguments are catch and finally handlers (if provided)
+        if [[ $command_count -ge 3 && "${commands[$((command_count-2))]}" == "catch" ]]; then
+            finally_handler="${commands[$((command_count-1))]}"
+            catch_handler="${commands[$((command_count-2))]}"
+            command_count=$((command_count - 2))
+        elif [[ $command_count -ge 2 && "${commands[$((command_count-1))]}" == "catch" ]]; then
+            catch_handler="${commands[$((command_count-1))]}"
+            command_count=$((command_count - 1))
+        fi
+        
+        # Execute commands
+        for ((i=0; i<command_count; i++)); do
+            last_command="${commands[$i]}"
+            if ! eval "${commands[$i]}"; then
+                exit_code=1
+                LAST_EXCEPTION="Command failed: ${last_command}"
+                LAST_EXCEPTION_CONTEXT="${BASH_SOURCE[1]}:${BASH_LINENO[0]}"
+                
+                # Execute catch handler if provided
+                if [[ -n "$catch_handler" && "$catch_handler" != "catch" ]]; then
+                    # Call catch handler with exception details
+                    "$catch_handler" "$LAST_EXCEPTION" "$LAST_EXCEPTION_CONTEXT"
+                fi
+                
+                # Execute finally handler if provided
+                if [[ -n "$finally_handler" && "$finally_handler" != "finally" ]]; then
+                    "$finally_handler"
+                fi
+                
+                return $exit_code
+            fi
+        done
+        
+        # Execute finally handler on success too
+        if [[ -n "$finally_handler" && "$finally_handler" != "finally" ]]; then
+            "$finally_handler"
+        fi
+    fi
+    
+    return 0
+}
+
+# Enable/disable exception handling globally
+enable_exceptions() {
+    EXCEPTION_HANDLER_ENABLED=true
+    TRY_CATCH_ENABLED=true
+    set -euo pipefail
+}
+
+disable_exceptions() {
+    EXCEPTION_HANDLER_ENABLED=false
+    TRY_CATCH_ENABLED=false
+    set +euo pipefail
+}
+
+# =============================================================================
+# EXCEPTION HANDLING USAGE EXAMPLES
+# =============================================================================
+#
+# 1. Basic exception throwing:
+#    throw "Something went wrong" "context info" "${EXCEPTION_TYPES[ERR_ERROR]}"
+#
+# 2. Validation with exception:
+#    validate_or_throw "[[ -f \"$file\" ]]" "File not found: $file"
+#
+# 3. Dependency check with exception:
+#    dependency_or_throw "qemu-img" "QEMU utilities not found"
+#
+# 4. File system checks:
+#    file_exists_or_throw "$config_file" "Configuration file missing"
+#    dir_exists_or_throw "$vm_dir" "VM directory not found"
+#    writable_or_throw "$output_file" "Output file not writable"
+#
+# 5. Try/catch/finally pattern:
+#    cleanup() { log "Cleaning up... "; }
+#    error_handler() { log "Error: $1"; }
+#    try_execute \
+#        "rm -rf $temp_dir" \
+#        "mkdir -p $output_dir" \
+#        "catch" error_handler \
+#        "finally" cleanup
+#
+# 6. Nested exception handling:
+#    try_execute \
+#        "validate_or_throw '[[ -n \"$name\" ]]' 'VM name cannot be empty'" \
+#        "dependency_or_throw 'qemu-system-$arch' 'QEMU $arch not available'" \
+#        "catch" handle_validation_error
+#
+# =============================================================================
+
+# ---------------------------------------------------------------------------
 # QEMU Targets Configuration
 # ---------------------------------------------------------------------------
 QEMU_SOFTMMU_TARGETS=(
@@ -1039,6 +1292,11 @@ edit_vm_option_c() {
 create_vm_config() {
     local vm_name="$1"
     local platform="$2"
+    
+    # Validate required parameters
+    validate_or_throw "[[ -n \"${vm_name}\" ]]" "VM name is required" "${EXCEPTION_TYPES[ERR_VALIDATION]}"
+    validate_or_throw "[[ -n \"${platform}\" ]]" "Platform is required" "${EXCEPTION_TYPES[ERR_VALIDATION]}"
+    
     # Enhanced bundled directory structure: ~/vm_assistant/vms/VM_NAME_PLATFORM/
     local vm_base_dir="${VM_DIR}/${vm_name}_${platform}"
     local config_dir="${vm_base_dir}/conf"
@@ -1046,21 +1304,24 @@ create_vm_config() {
     local scripts_dir="${vm_base_dir}/sh"
     local roms_dir="${vm_base_dir}/rom"
     
-    ensure_dir "${config_dir}"
-    ensure_dir "${disk_dir}"
-    ensure_dir "${scripts_dir}"
-    ensure_dir "${roms_dir}"
+    # Create directories with exception handling
+    for dir in "${config_dir}" "${disk_dir}" "${scripts_dir}" "${roms_dir}"; do
+        if ! ensure_dir "${dir}"; then
+            throw "Failed to create directory: ${dir}" "${dir}" "${EXCEPTION_TYPES[ERR_FILESYSTEM]}"
+        fi
+    done
     
     local config_file="${config_dir}/${vm_name}.conf"
     
-    # Copy template if available
+    # Copy template if available, with error handling
     if [[ -f "${VM_CONFIG_DIR}/${platform}.env" ]]; then
-        cp "${VM_CONFIG_DIR}/${platform}.env" "${config_file}"
+        if ! cp "${VM_CONFIG_DIR}/${platform}.env" "${config_file}" 2>/dev/null; then
+            throw "Failed to copy template: ${VM_CONFIG_DIR}/${platform}.env" "${config_file}" "${EXCEPTION_TYPES[ERR_FILESYSTEM]}"
+        fi
         log "Created VM config from template: ${config_file}"
     else
-        # Create basic config
-        cat > "${config_file}" <<EOF
-# VM Configuration: ${vm_name}
+        # Create basic config with error handling
+        local config_content="# VM Configuration: ${vm_name}
 # Platform: ${platform}
 QEMU_BIN=qemu-system-${platform}
 MACHINE=pc
@@ -1077,8 +1338,11 @@ ENABLE_SSH=n
 SSH_PORT=${DEFAULT_SSH_PORT}
 ENABLE_NETATALK=n
 NETATALK_SHARE_NAME=VM_${vm_name}
-SHARED_DIR=${DEFAULT_MACOS_SHARE_DIR}
-EOF
+SHARED_DIR=${DEFAULT_MACOS_SHARE_DIR}"
+        
+        if ! echo "${config_content}" > "${config_file}" 2>/dev/null; then
+            throw "Failed to write configuration file: ${config_file}" "${config_file}" "${EXCEPTION_TYPES[ERR_FILESYSTEM]}"
+        fi
         log "Created basic VM config: ${config_file}"
     fi
     
@@ -1094,27 +1358,42 @@ create_disk() {
     local disk_size="${3:-40G}"
     local disk_format="${4:-qcow2}"
     
-    if [[ -z "${platform}" ]]; then
-        die "Platform is required for create_disk"
-    fi
+    # Use exception framework for validation
+    validate_or_throw "[[ -n \"${platform}\" ]]" "Platform is required for create_disk" "${EXCEPTION_TYPES[ERR_VALIDATION]}"
     
     # Enhanced structure: VM_DIR/VM_NAME_PLATFORM/qcow2/
     local vm_dir="${VM_DIR}/${vm_name}_${platform}"
     local disk_dir="${vm_dir}/qcow2"
     local disk_path="${disk_dir}/${vm_name}.qcow2"
     
-    ensure_dir "${disk_dir}"
+    # Ensure directory exists with exception handling
+    if ! ensure_dir "${disk_dir}"; then
+        throw "Failed to create disk directory: ${disk_dir}" "${disk_dir}" "${EXCEPTION_TYPES[ERR_FILESYSTEM]}"
+    fi
     
+    # Check for qemu-img dependency
     local qemu_img
-    qemu_img=$(qemu_bin "qemu-img")
+    if ! qemu_img=$(qemu_bin "qemu-img" 2>/dev/null); then
+        dependency_or_throw "qemu-img" "qemu-img not found. Install QEMU utilities" "${EXCEPTION_TYPES[ERR_DEPENDENCY]}"
+    fi
     
+    # Check if disk already exists
     if [[ -f "${disk_path}" ]]; then
         warn "Disk already exists: ${disk_path}"
         return 0
     fi
     
+    # Create disk with exception handling
     log "Creating disk: ${disk_path} (${disk_size}, ${disk_format})"
-    "${qemu_img}" create -f "${disk_format}" "${disk_path}" "${disk_size}"
+    
+    if ! "${qemu_img}" create -f "${disk_format}" "${disk_path}" "${disk_size}" 2>/dev/null; then
+        # Clean up if disk creation failed
+        if [[ ! -f "${disk_path}" && -d "${disk_dir}" ]]; then
+            rmdir "${disk_dir}" 2>/dev/null || true
+        fi
+        throw "Failed to create disk image" "${disk_path}" "${EXCEPTION_TYPES[ERR_FILESYSTEM]}"
+    fi
+    
     log "Disk created successfully."
 }
 
