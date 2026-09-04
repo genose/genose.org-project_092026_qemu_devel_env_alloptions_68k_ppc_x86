@@ -6782,6 +6782,1659 @@ run_test_config_interactive() {
 }
 
 # ---------------------------------------------------------------------------
+# XDialog Management UI
+# ---------------------------------------------------------------------------
+
+# GUI VM creation using XDialog
+gui_create_vm() {
+    if ! is_interactive; then
+        warn "gui_create_vm function requires interactive mode"
+        return 1
+    fi
+    
+    if ! is_gui_mode; then
+        create_vm
+        return 0
+    fi
+    
+    heading "Create VM [GUI Mode]"
+    
+    # Select VM name
+    local vm_name
+    vm_name=$(gui_inputbox "Create VM" "Enter VM name:" "my-vm")
+    if [[ -z "$vm_name" ]]; then
+        warn "VM name is required"
+        return 1
+    fi
+    
+    # Select platform
+    local platform
+    platform=$(gui_inputbox "Platform Selection" "Select platform (macos-68k, macos-ppc, macos-ppc64, linux, haiku, etc.):" "macos-ppc")
+    
+    # Select architecture
+    local arch
+    arch=$(gui_inputbox "Architecture" "Select architecture (ppc, ppc64, x86_64, m68k, etc.):" "ppc")
+    
+    # Select RAM size
+    local ram
+    ram=$(gui_inputbox "RAM Size" "RAM size in MB (default: 256):" "256")
+    
+    # Select disk size
+    local disk_size
+    disk_size=$(gui_inputbox "Disk Size" "Disk size in GB (default: 10):" "10")
+    
+    # Select display type
+    local display_options=("cocoa" "sdl" "gtk" "spice" "vnc" "none")
+    local display
+    if command -v xdialog &>/dev/null; then
+        display=$(gui_inputbox "Display Backend" "Select display backend:" "${display_options[0]}")
+    else
+        display=$(ask "Display backend" "${display_options[0]}")
+    fi
+    
+    # Create VM with selected parameters
+    log "Creating VM with the following parameters:"
+    log "  Name: ${vm_name}"
+    log "  Platform: ${platform}"
+    log "  Architecture: ${arch}"
+    log "  RAM: ${ram}MB"
+    log "  Disk: ${disk_size}GB"
+    log "  Display: ${display}"
+    
+    # Call create_vm with parameters
+    create_vm "$vm_name" "$platform" "$arch" "$ram" "$disk_size" "$display"
+}
+
+# GUI VM management menu
+gui_manage_vms() {
+    if ! is_interactive; then
+        warn "gui_manage_vms function requires interactive mode"
+        return 1
+    fi
+    
+    if ! is_gui_mode; then
+        launch_vm_menu
+        return 0
+    fi
+    
+    heading "Manage VMs [GUI Mode]"
+    
+    while true; do
+        local options=(
+            "List VMs" "list_vms"
+            "Create VM" "gui_create_vm"
+            "Launch VM" "launch_vm_menu"
+            "Stop VM" "stop_vm_menu"
+            "Edit VM" "edit_vm_menu"
+            "Delete VM" "delete_vm_menu"
+            "Back" "return"
+        )
+        
+        local choice
+        if is_gui_mode; then
+            # This would need a proper GUI menu implementation
+            choice=$(gui_inputbox "VM Management" "Select action:" "List VMs")
+        else
+            list_vms
+            choice=$(ask "Select action" "")
+        fi
+        
+        case "$choice" in
+            "List VMs") list_vms ;;
+            "Create VM") gui_create_vm ;;
+            "Launch VM") launch_vm_menu ;;
+            "Stop VM") stop_vm_menu ;;
+            "Edit VM") edit_vm_menu ;;
+            "Delete VM") delete_vm_menu ;;
+            "Back"|"return") return 0 ;;
+            *) log "Invalid option: $choice" ;;
+        esac
+    done
+}
+
+# GUI debug session launcher
+gui_debug_vm() {
+    if ! is_interactive; then
+        warn "gui_debug_vm function requires interactive mode"
+        return 1
+    fi
+    
+    if ! is_gui_mode; then
+        debug_session_menu
+        return 0
+    fi
+    
+    heading "Debug VM [GUI Mode]"
+    
+    # List VMs
+    list_vms
+    
+    local vm_name
+    vm_name=$(gui_inputbox "Select VM" "Enter VM name to debug:" "")
+    if [[ -z "$vm_name" ]]; then
+        warn "VM name is required"
+        return 1
+    fi
+    
+    # Select debug options
+    local enable_gdb
+    enable_gdb=$(gui_yesno "Debug Options" "Enable GDB debugging?" "yes")
+    
+    local enable_ssh
+    enable_ssh=$(gui_yesno "SSH Options" "Enable SSH forwarding?" "yes")
+    
+    local enable_netatalk
+    enable_netatalk=$(gui_yesno "File Sharing" "Enable Netatalk (AFP) sharing?" "no")
+    
+    # Start debug session
+    if $enable_gdb; then
+        debug_start "$vm_name" "" "gdb"
+    else
+        debug_start "$vm_name"
+    fi
+}
+
+# XDialog-based main menu
+gui_main_menu() {
+    if ! is_interactive; then
+        warn "gui_main_menu function requires interactive mode"
+        return 1
+    fi
+    
+    if ! is_gui_mode; then
+        show_main_menu
+        return 0
+    fi
+    
+    heading "Main Menu [GUI Mode]"
+    
+    while true; do
+        # In GUI mode, we would show a graphical menu
+        # For now, we'll use the CLI menu but with GUI enhancements
+        
+        # Show a simplified menu for GUI mode
+        local options=(
+            "VM Management" "gui_manage_vms"
+            "Build Automation" "build_project_menu"
+            "Debugging" "gui_debug_vm"
+            "Testing" "run_test_config_interactive"
+            "GUI Applications" "launch_gui_application_interactive"
+            "Quit" "return"
+        )
+        
+        local choice
+        if is_gui_mode; then
+            choice=$(gui_inputbox "Main Menu" "Select category:" "VM Management")
+        else
+            choice=$(ask "Select category" "VM Management")
+        fi
+        
+        case "$choice" in
+            "VM Management") gui_manage_vms ;;
+            "Build Automation") build_project_menu ;;
+            "Debugging") gui_debug_vm ;;
+            "Testing") run_test_config_interactive ;;
+            "GUI Applications") launch_gui_application_interactive ;;
+            "Quit"|"return") return 0 ;;
+            *) log "Invalid option: $choice" ;;
+        esac
+    done
+}
+
+# Start XDialog-based UI
+gui_mode_start() {
+    heading "Starting GUI Mode"
+    
+    if ! detect_xdialog; then
+        warn "XDialog not available, falling back to CLI mode"
+        show_main_menu
+        return 0
+    fi
+    
+    enable_xdialog
+    
+    if is_gui_mode; then
+        log "GUI mode enabled"
+        gui_main_menu
+    else
+        warn "Failed to enable GUI mode"
+        show_main_menu
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Enhanced Deployment Features
+# ---------------------------------------------------------------------------
+
+# Deployment directory structure
+DEPLOY_DIR="${CONFIG_DIR}/deployments"
+DEPLOY_LOG_DIR="${VM_LOG_DIR}/deployments"
+DEPLOY_BACKUP_DIR="${CONFIG_DIR}/deployments/backups"
+
+# Ensure deployment directories exist
+ensure_deploy_dirs() {
+    ensure_dir "$DEPLOY_DIR"
+    ensure_dir "$DEPLOY_LOG_DIR"
+    ensure_dir "$DEPLOY_BACKUP_DIR"
+}
+
+# Incremental deployment - only deploy changed files
+incremental_deploy() {
+    local vm_name="$1"
+    local source_dir="$2"
+    local target_dir="$3"
+    local backup_first="$4"
+    local exclude_patterns="$5"
+    
+    heading "Incremental Deployment to VM: ${vm_name}"
+    
+    # Validate VM exists
+    if ! find_vm_config "$vm_name"; then
+        die "VM not found: ${vm_name}"
+    fi
+    
+    # Validate source directory
+    if [[ -z "$source_dir" ]]; then
+        source_dir="$PROJECTS_DIR"
+    fi
+    
+    if [[ ! -d "$source_dir" ]]; then
+        die "Source directory not found: ${source_dir}"
+    fi
+    
+    # Set default target directory
+    [[ -n "$target_dir" ]] || target_dir="/opt/deploy"
+    
+    log "Source directory: ${source_dir}"
+    log "Target directory: ${target_dir}"
+    log "Backup first: ${backup_first:-no}"
+    
+    ensure_deploy_dirs
+    
+    # Get VM IP
+    local vm_ip
+    if get_vm_ip "$vm_name"; then
+        vm_ip=$(get_vm_ip "$vm_name")
+    else
+        local config_file="$(find_vm_config_file "$vm_name")"
+        if [[ -f "$config_file" ]]; then
+            vm_ip=$(grep -E "^IP_ADDRESS|^GUEST_IP" "$config_file" | head -1 | cut -d'=' -f2)
+        fi
+    fi
+    
+    if [[ -z "$vm_ip" ]]; then
+        die "Could not determine VM IP address for: ${vm_name}"
+    fi
+    
+    # Check SSH connectivity
+    if ! ssh -o ConnectTimeout=5 "${vm_ip}" "echo SSH_OK" &>/dev/null; then
+        die "SSH connection to VM failed: ${vm_ip}"
+    fi
+    
+    # Backup existing files if requested
+    if is_yes "$backup_first"; then
+        local backup_dir="${DEPLOY_BACKUP_DIR}/${vm_name}/$(date +%Y%m%d-%H%M%S)"
+        ensure_dir "$backup_dir"
+        
+        log "Backing up existing files..."
+        if ssh "${vm_ip}" "mkdir -p ${backup_dir}" 2>/dev/null; then
+            # Copy existing files to backup
+            if ssh "${vm_ip}" "find ${target_dir} -type f -exec cp {} ${backup_dir} \;" 2>/dev/null; then
+                log "✅ Backup created: ${backup_dir}"
+            else
+                warn "⚠️  Backup created with some files skipped"
+            fi
+        else
+            warn "⚠️  Could not create backup directory on VM"
+        fi
+    fi
+    
+    # Find changed files using rsync dry-run or find with newer timestamp
+    local changed_files=()
+    local temp_file=$(mktemp)
+    
+    log "Finding changed files..."
+    
+    # Use rsync to find changed files if available
+    if command -v rsync &>/dev/null; then
+        # Get list of files that would be transferred
+        rsync -avn --exclude="${exclude_patterns:-*.log *.tmp}" "${source_dir}/" "${vm_ip}:${target_dir}/" | \
+            grep -E "^>f\+|^>\+|^<f\+|^<\+" | awk '{print $2}' > "$temp_file"
+    else
+        # Fallback to find command - deploy all files
+        find "$source_dir" -type f | grep -v "${exclude_patterns:-\.git|\.svn|\.tmp|\.log}" > "$temp_file"
+    fi
+    
+    local file_count=0
+    local deployed_count=0
+    
+    # Create target directory on VM
+    if ! ssh "${vm_ip}" "mkdir -p ${target_dir}" 2>/dev/null; then
+        die "Failed to create target directory on VM: ${target_dir}"
+    fi
+    
+    # Deploy changed files
+    while IFS= read -r file; do
+        if [[ -n "$file" ]]; then
+            local relative_path="${file#${source_dir}/}"
+            local target_path="${target_dir}/${relative_path}"
+            local target_parent_dir=$(dirname "$target_path")
+            
+            # Create parent directory on VM
+            ssh "${vm_ip}" "mkdir -p ${target_parent_dir}" 2>/dev/null
+            
+            # Copy file
+            if scp -q "$file" "${vm_ip}:${target_path}"; then
+                log "✓ Deployed: ${relative_path}"
+                deployed_count=$((deployed_count + 1))
+            else
+                warn "✗ Failed to deploy: ${relative_path}"
+            fi
+            
+            file_count=$((file_count + 1))
+        fi
+    done < "$temp_file"
+    
+    rm -f "$temp_file"
+    
+    if [[ $deployed_count -gt 0 ]]; then
+        log "✅ Incremental deployment completed: ${deployed_count}/${file_count} files deployed"
+    else
+        log "📭 No files needed deployment"
+    fi
+    
+    # Set permissions if needed
+    if [[ $deployed_count -gt 0 ]]; then
+        log "Setting permissions on deployed files..."
+        ssh "${vm_ip}" "find ${target_dir} -type f -exec chmod +x {} \;" 2>/dev/null
+        ssh "${vm_ip}" "find ${target_dir} -type d -exec chmod +x {} \;" 2>/dev/null
+    fi
+    
+    return 0
+}
+
+# Environment validation before deployment
+validate_environment() {
+    local vm_name="$1"
+    local requirements_file="$2"
+    
+    heading "Validating Environment: ${vm_name}"
+    
+    # Validate VM exists and is running
+    if ! find_vm_config "$vm_name"; then
+        die "VM not found: ${vm_name}"
+    fi
+    
+    if ! is_vm_running "$vm_name"; then
+        die "VM is not running: ${vm_name}"
+    fi
+    
+    # Get VM IP
+    local vm_ip
+    if get_vm_ip "$vm_name"; then
+        vm_ip=$(get_vm_ip "$vm_name")
+    else
+        local config_file="$(find_vm_config_file "$vm_name")"
+        if [[ -f "$config_file" ]]; then
+            vm_ip=$(grep -E "^IP_ADDRESS|^GUEST_IP" "$config_file" | head -1 | cut -d'=' -f2)
+        fi
+    fi
+    
+    if [[ -z "$vm_ip" ]]; then
+        die "Could not determine VM IP address for: ${vm_name}"
+    fi
+    
+    # Check SSH connectivity
+    if ! ssh -o ConnectTimeout=5 "${vm_ip}" "echo SSH_OK" &>/dev/null; then
+        die "❌ SSH connection failed: ${vm_ip}"
+        return 1
+    fi
+    
+    log "✅ SSH connectivity: OK"
+    
+    # Check for required commands
+    local required_commands=("ls" "mkdir" "chmod" "cp" "find")
+    local missing_commands=()
+    
+    for cmd in "${required_commands[@]}"; do
+        if ! ssh "${vm_ip}" "command -v $cmd" &>/dev/null; then
+            missing_commands+=("$cmd")
+        fi
+    done
+    
+    if [[ ${#missing_commands[@]} -gt 0 ]]; then
+        warn "❌ Missing commands on VM: ${missing_commands[*]}"
+        return 1
+    fi
+    
+    log "✅ Required commands: OK"
+    
+    # Check for custom requirements file
+    if [[ -n "$requirements_file" && -f "$requirements_file" ]]; then
+        log "Checking custom requirements..."
+        
+        while IFS= read -r requirement; do
+            # Skip empty lines and comments
+            [[ -z "$requirement" || "$requirement" == \#* ]] && continue
+            
+            if ! ssh "${vm_ip}" "$requirement" &>/dev/null; then
+                warn "❌ Requirement failed: $requirement"
+                return 1
+            fi
+            
+            log "✅ Requirement passed: $requirement"
+        done < "$requirements_file"
+        
+        log "✅ Custom requirements: OK"
+    fi
+    
+    # Check disk space
+    local disk_info
+    disk_info=$(ssh "${vm_ip}" "df -h / | tail -1" 2>/dev/null)
+    if [[ -n "$disk_info" ]]; then
+        log "✅ Disk space: $disk_info"
+    else
+        warn "⚠️  Could not check disk space"
+    fi
+    
+    # Check memory
+    local memory_info
+    memory_info=$(ssh "${vm_ip}" "free -h" 2>/dev/null)
+    if [[ -n "$memory_info" ]]; then
+        log "✅ Memory: $(echo "$memory_info" | head -1)"
+    else
+        warn "⚠️  Could not check memory"
+    fi
+    
+    log "✅ Environment validation passed for VM: ${vm_name}"
+    return 0
+}
+
+# Deployment rollback capability
+rollback_deployment() {
+    local vm_name="$1"
+    local backup_id="$2"
+    local target_dir="$3"
+    
+    heading "Rolling Back Deployment: ${vm_name}"
+    
+    # Validate VM exists
+    if ! find_vm_config "$vm_name"; then
+        die "VM not found: ${vm_name}"
+    fi
+    
+    # Find available backups
+    if [[ -z "$backup_id" ]]; then
+        log "Available backups:"
+        local backups=()
+        
+        if [[ -d "$DEPLOY_BACKUP_DIR/$vm_name" ]]; then
+            local backup_dirs=()
+            while IFS= read -r backup_dir; do
+                [[ -d "$backup_dir" ]] && backup_dirs+=("$backup_dir")
+            done < <(find "$DEPLOY_BACKUP_DIR/$vm_name" -type d -maxdepth 1 | sort -r)
+            
+            for i in "${!backup_dirs[@]}"; do
+                local dir_name=$(basename "${backup_dirs[$i]}")
+                local dir_size=$(du -sh "${backup_dirs[$i]}" 2>/dev/null | cut -f1)
+                echo "  [$i] ${dir_name} [${dir_size}]"
+                backups+=("$dir_name")
+            done
+            
+            if [[ ${#backups[@]} -eq 0 ]]; then
+                die "No backups found for VM: ${vm_name}"
+            fi
+        else
+            die "No backup directory found for VM: ${vm_name}"
+        fi
+        
+        # Let user select backup
+        local choice
+        choice=$(ask "Select backup to restore" "0")
+        backup_id="${backups[$choice]:-${backups[0]}}"
+    fi
+    
+    # Set default target directory
+    [[ -n "$target_dir" ]] || target_dir="/opt/deploy"
+    
+    log "Restoring backup: ${backup_id}"
+    log "Target directory: ${target_dir}"
+    
+    # Get VM IP
+    local vm_ip
+    if get_vm_ip "$vm_name"; then
+        vm_ip=$(get_vm_ip "$vm_name")
+    else
+        local config_file="$(find_vm_config_file "$vm_name")"
+        if [[ -f "$config_file" ]]; then
+            vm_ip=$(grep -E "^IP_ADDRESS|^GUEST_IP" "$config_file" | head -1 | cut -d'=' -f2)
+        fi
+    fi
+    
+    if [[ -z "$vm_ip" ]]; then
+        die "Could not determine VM IP address for: ${vm_name}"
+    fi
+    
+    # Check SSH connectivity
+    if ! ssh -o ConnectTimeout=5 "${vm_ip}" "echo SSH_OK" &>/dev/null; then
+        die "SSH connection to VM failed: ${vm_ip}"
+    fi
+    
+    local backup_source="${DEPLOY_BACKUP_DIR}/${vm_name}/${backup_id}"
+    
+    if [[ ! -d "$backup_source" ]]; then
+        die "Backup not found: ${backup_source}"
+    fi
+    
+    log "Rolling back from: ${backup_source}"
+    
+    # Remove current files
+    log "Removing current deployment..."
+    if ! ssh "${vm_ip}" "rm -rf ${target_dir}/*" 2>/dev/null; then
+        warn "⚠️  Could not remove all files from target directory"
+    fi
+    
+    # Create target directory
+    if ! ssh "${vm_ip}" "mkdir -p ${target_dir}" 2>/dev/null; then
+        die "Failed to create target directory: ${target_dir}"
+    fi
+    
+    # Restore from backup
+    log "Restoring files from backup..."
+    local deployed_count=0
+    local file_count=0
+    
+    while IFS= read -r file; do
+        if [[ -f "$file" ]]; then
+            local relative_path="${file#${backup_source}/}"
+            local target_path="${target_dir}/${relative_path}"
+            local target_parent_dir=$(dirname "$target_path")
+            
+            # Create parent directory on VM
+            ssh "${vm_ip}" "mkdir -p ${target_parent_dir}" 2>/dev/null
+            
+            # Copy file
+            if scp -q "$file" "${vm_ip}:${target_path}"; then
+                log "✓ Restored: ${relative_path}"
+                deployed_count=$((deployed_count + 1))
+            else
+                warn "✗ Failed to restore: ${relative_path}"
+            fi
+            
+            file_count=$((file_count + 1))
+        fi
+    done < <(find "$backup_source" -type f)
+    
+    # Set permissions
+    log "Setting permissions on restored files..."
+    ssh "${vm_ip}" "find ${target_dir} -type f -exec chmod +x {} \;" 2>/dev/null
+    ssh "${vm_ip}" "find ${target_dir} -type d -exec chmod +x {} \;" 2>/dev/null
+    
+    log "✅ Rollback completed: ${deployed_count} files restored"
+    
+    return 0
+}
+
+# List deployment history
+list_deployment_history() {
+    local vm_name="$1"
+    
+    heading "Deployment History for VM: ${vm_name}"
+    
+    ensure_deploy_dirs
+    
+    local history_file="${DEPLOY_DIR}/${vm_name}.deployments"
+    
+    if [[ ! -f "$history_file" ]]; then
+        log "No deployment history found for VM: ${vm_name}"
+        return 0
+    fi
+    
+    # Show deployment history
+    local line_num=1
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            echo "  [${line_num}] ${line}"
+            line_num=$((line_num + 1))
+        fi
+    done < "$history_file"
+    
+    return 0
+}
+
+# Log deployment to history
+log_deployment() {
+    local vm_name="$1"
+    local message="$2"
+    local timestamp="$3"
+    
+    [[ -n "$timestamp" ]] || timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+    
+    ensure_deploy_dirs
+    
+    local history_file="${DEPLOY_DIR}/${vm_name}.deployments"
+    
+    echo "[${timestamp}] ${message}" >> "$history_file"
+    
+    return 0
+}
+
+# Deployment validation and cleanup
+cleanup_deployment() {
+    local vm_name="$1"
+    local keep_backups="$2"
+    local target_dir="$3"
+    
+    heading "Cleaning Up Deployments for VM: ${vm_name}"
+    
+    ensure_deploy_dirs
+    
+    # Set default values
+    [[ -n "$keep_backups" ]] || keep_backups=5
+    [[ -n "$target_dir" ]] || target_dir="/opt/deploy"
+    
+    # Get VM IP if needed
+    local vm_ip=""
+    if [[ -n "$target_dir" && "$target_dir" != /* ]]; then
+        # If target_dir is relative, we need VM IP to construct full path
+        if get_vm_ip "$vm_name"; then
+            vm_ip=$(get_vm_ip "$vm_name")
+        else
+            local config_file="$(find_vm_config_file "$vm_name")"
+            if [[ -f "$config_file" ]]; then
+                vm_ip=$(grep -E "^IP_ADDRESS|^GUEST_IP" "$config_file" | head -1 | cut -d'=' -f2)
+            fi
+        fi
+    fi
+    
+    # Clean up old backups
+    if [[ -d "$DEPLOY_BACKUP_DIR/$vm_name" ]]; then
+        log "Cleaning up old backups..."
+        
+        # Find all backup directories sorted by modification time (oldest first)
+        local backup_dirs=()
+        while IFS= read -r backup_dir; do
+            [[ -d "$backup_dir" ]] && backup_dirs+=("$backup_dir")
+        done < <(find "$DEPLOY_BACKUP_DIR/$vm_name" -type d -maxdepth 1 -printf '%T+ %p\n' | sort | cut -d' ' -f2-)
+        
+        # Remove old backups if we have more than keep_backups
+        local backup_count=${#backup_dirs[@]}
+        if [[ $backup_count -gt $keep_backups ]]; then
+            local remove_count=$((backup_count - keep_backups))
+            for ((i=0; i<remove_count; i++)); do
+                local old_backup="${backup_dirs[$i]}"
+                log "Removing old backup: $(basename "$old_backup")"
+                rm -rf "$old_backup"
+            done
+            log "✅ Removed ${remove_count} old backups"
+        fi
+    fi
+    
+    # Clean up target directory on VM if specified
+    if [[ -n "$vm_ip" && -n "$target_dir" ]]; then
+        log "Cleaning up target directory on VM..."
+        
+        # Find temporary files
+        local temp_files=()
+        temp_files=$(ssh "${vm_ip}" "find ${target_dir} -name '*.tmp' -o -name '*.temp' -o -name '*.bak' -o -name '*.swp' 2>/dev/null" || true)
+        
+        if [[ -n "$temp_files" ]]; then
+            log "Removing temporary files..."
+            ssh "${vm_ip}" "find ${target_dir} \( -name '*.tmp' -o -name '*.temp' -o -name '*.bak' -o -name '*.swp' \) -delete" 2>/dev/null
+            log "✅ Temporary files cleaned"
+        fi
+        
+        # Find old log files (> 7 days)
+        ssh "${vm_ip}" "find ${target_dir} -name '*.log' -mtime +7 -delete" 2>/dev/null
+    fi
+    
+    log "✅ Deployment cleanup completed"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Development Project Management - Project Snapshots
+# ---------------------------------------------------------------------------
+
+# Directory for project snapshots
+PROJECT_SNAPSHOT_DIR="${PROJECTS_DIR}/snapshots"
+
+# Ensure project snapshot directory exists
+ensure_project_snapshot_dirs() {
+    ensure_dir "${PROJECTS_DIR}"
+    ensure_dir "${PROJECT_SNAPSHOT_DIR}"
+}
+
+# Create a project snapshot
+# Usage: create_project_snapshot <project_name> [snapshot_name] [description]
+create_project_snapshot() {
+    local project_name="$1"
+    local snapshot_name="$2"
+    local description="$3"
+    
+    heading "Creating Project Snapshot: ${project_name}"
+    
+    ensure_project_snapshot_dirs
+    
+    # Validate project exists
+    local project_dir="${PROJECTS_DIR}/${project_name}"
+    if [[ ! -d "$project_dir" ]]; then
+        die "Project not found: ${project_name}. Use list-projects to see available projects."
+    fi
+    
+    # Set default snapshot name if not provided
+    [[ -n "$snapshot_name" ]] || snapshot_name="${project_name}-$(date +%Y%m%d-%H%M%S)"
+    
+    # Set default description if not provided
+    [[ -n "$description" ]] || description="Automatic snapshot created on $(date)"
+    
+    local snapshot_dir="${PROJECT_SNAPSHOT_DIR}/${project_name}/${snapshot_name}"
+    
+    # Create snapshot directory
+    log "Creating snapshot directory: ${snapshot_dir}"
+    mkdir -p "${snapshot_dir}"
+    
+    # Create metadata file
+    local metadata_file="${snapshot_dir}/snapshot.meta"
+    cat > "${metadata_file}" << EOF
+# Project Snapshot Metadata
+PROJECT_NAME="${project_name}"
+SNAPSHOT_NAME="${snapshot_name}"
+CREATED_AT="$(date +%Y-%m-%d\ %H:%M:%S)"
+DESCRIPTION="${description}"
+SOURCE_DIR="${project_dir}"
+EOF
+    
+    # Create archive of project
+    local archive_file="${snapshot_dir}/project.tar.gz"
+    log "Archiving project to: ${archive_file}"
+    
+    if ! tar -czf "${archive_file}" -C "${PROJECTS_DIR}" "${project_name}" 2>/dev/null; then
+        die "Failed to create project archive"
+    fi
+    
+    # Save project configuration if it exists
+    local config_file="${project_dir}/project.conf"
+    if [[ -f "$config_file" ]]; then
+        cp "$config_file" "${snapshot_dir}/project.conf.bak"
+    fi
+    
+    # Save VM associations if any
+    local vm_configs=("${VM_DIR}"/*.conf)
+    for vm_config in "${vm_configs[@]}"; do
+        if [[ -f "$vm_config" ]]; then
+            local vm_name=$(basename "$vm_config" .conf)
+            if grep -q "${project_name}" "$vm_config" 2>/dev/null; then
+                cp "$vm_config" "${snapshot_dir}/vm_${vm_name}.conf"
+            fi
+        fi
+    done
+    
+    log "✅ Project snapshot created: ${snapshot_name}"
+    log "   Location: ${snapshot_dir}"
+    log "   Archive: ${archive_file}"
+    
+    return 0
+}
+
+# Restore a project snapshot
+# Usage: restore_project_snapshot <project_name> <snapshot_name> [restore_to]
+restore_project_snapshot() {
+    local project_name="$1"
+    local snapshot_name="$2"
+    local restore_to="$3"
+    
+    heading "Restoring Project Snapshot: ${project_name} from ${snapshot_name}"
+    
+    ensure_project_snapshot_dirs
+    
+    local snapshot_dir="${PROJECT_SNAPSHOT_DIR}/${project_name}/${snapshot_name}"
+    
+    if [[ ! -d "$snapshot_dir" ]]; then
+        die "Snapshot not found: ${snapshot_dir}"
+    fi
+    
+    # Read metadata
+    local metadata_file="${snapshot_dir}/snapshot.meta"
+    if [[ ! -f "$metadata_file" ]]; then
+        die "Invalid snapshot: missing metadata file"
+    fi
+    
+    # Set restore target
+    [[ -n "$restore_to" ]] || restore_to="${project_name}"
+    local restore_dir="${PROJECTS_DIR}/${restore_to}"
+    
+    # Check if target already exists
+    if [[ -d "$restore_dir" ]]; then
+        local backup_name="${restore_to}-backup-$(date +%Y%m%d-%H%M%S)"
+        log "Target project already exists. Backing up to: ${backup_name}"
+        mv "${restore_dir}" "${PROJECTS_DIR}/${backup_name}"
+    fi
+    
+    # Extract archive
+    local archive_file="${snapshot_dir}/project.tar.gz"
+    if [[ ! -f "$archive_file" ]]; then
+        die "Archive file not found: ${archive_file}"
+    fi
+    
+    log "Extracting project archive..."
+    if ! tar -xzf "$archive_file" -C "${PROJECTS_DIR}" 2>/dev/null; then
+        die "Failed to extract project archive"
+    fi
+    
+    # Restore configuration if backup exists
+    local config_backup="${snapshot_dir}/project.conf.bak"
+    if [[ -f "$config_backup" ]]; then
+        cp "$config_backup" "${restore_dir}/project.conf"
+    fi
+    
+    # Restore VM configurations if they exist
+    for vm_config in "${snapshot_dir}"/vm_*.conf; do
+        if [[ -f "$vm_config" ]]; then
+            local vm_name=$(basename "$vm_config" | sed 's/^vm_//;s/.conf$//')
+            cp "$vm_config" "${VM_DIR}/${vm_name}.conf"
+        fi
+    done
+    
+    log "✅ Project snapshot restored: ${snapshot_name}"
+    log "   Restored to: ${restore_dir}"
+    
+    return 0
+}
+
+# List project snapshots
+# Usage: list_project_snapshots [project_name]
+list_project_snapshots() {
+    local project_name="$1"
+    
+    heading "Project Snapshots"
+    
+    ensure_project_snapshot_dirs
+    
+    if [[ -n "$project_name" ]]; then
+        # List snapshots for specific project
+        local project_snapshot_dir="${PROJECT_SNAPSHOT_DIR}/${project_name}"
+        
+        if [[ ! -d "$project_snapshot_dir" ]]; then
+            log "No snapshots found for project: ${project_name}"
+            return 0
+        fi
+        
+        log "Snapshots for project: ${project_name}"
+        log "="
+        
+        local snapshots=()
+        while IFS= read -r snapshot_dir; do
+            [[ -d "$snapshot_dir" ]] && snapshots+=("$snapshot_dir")
+        done < <(find "$project_snapshot_dir" -type d -maxdepth 1 | sort -r)
+        
+        for i in "${!snapshots[@]}"; do
+            local snapshot_name=$(basename "${snapshots[$i]}")
+            local metadata_file="${snapshots[$i]}/snapshot.meta"
+            
+            if [[ -f "$metadata_file" ]]; then
+                local created_at=$(grep "^CREATED_AT=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+                local description=$(grep "^DESCRIPTION=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+                local size=$(du -sh "${snapshots[$i]}" 2>/dev/null | cut -f1)
+                
+                echo "  [${i}] ${snapshot_name} [${size}]"
+                echo "      Created: ${created_at}"
+                echo "      Description: ${description}"
+                echo ""
+            fi
+        done
+    else
+        # List snapshots for all projects
+        log "All Project Snapshots:"
+        log "="
+        
+        local project_dirs=()
+        while IFS= read -r project_dir; do
+            [[ -d "$project_dir" ]] && project_dirs+=("$project_dir")
+        done < <(find "$PROJECT_SNAPSHOT_DIR" -type d -maxdepth 1 | sort)
+        
+        for project_dir in "${project_dirs[@]}"; do
+            local project_name=$(basename "$project_dir")
+            local snapshot_count=$(find "$project_dir" -type d -maxdepth 1 | wc -l | tr -d ' ')
+            snapshot_count=$((snapshot_count - 1))  # Subtract the project directory itself
+            
+            log "📁 ${project_name}: ${snapshot_count} snapshots"
+            
+            # List latest 3 snapshots for each project
+            local snapshots=()
+            local snapshot_list
+            snapshot_list=$(find "$project_dir" -type d -maxdepth 1 | sort -r | head -4)
+            while IFS= read -r snapshot_dir; do
+                [[ -n "$snapshot_dir" && -d "$snapshot_dir" ]] && snapshots+=("$snapshot_dir")
+            done <<< "$snapshot_list"
+            
+            # Skip the project directory itself
+            for snapshot_dir in "${snapshots[@]:1}"; do
+                local snapshot_name
+                snapshot_name=$(basename "$snapshot_dir")
+                local created_at
+                created_at=$(grep "^CREATED_AT=" "${snapshot_dir}/snapshot.meta" 2>/dev/null | cut -d'=' -f2- | tr -d '"')
+                echo "    --- ${snapshot_name} [${created_at}]"
+            done
+            echo ""
+        done
+    fi
+    
+    return 0
+}
+
+# Delete a project snapshot
+# Usage: delete_project_snapshot <project_name> <snapshot_name>
+delete_project_snapshot() {
+    local project_name="$1"
+    local snapshot_name="$2"
+    
+    heading "Delete Project Snapshot"
+    
+    ensure_project_snapshot_dirs
+    
+    local snapshot_dir="${PROJECT_SNAPSHOT_DIR}/${project_name}/${snapshot_name}"
+    
+    if [[ ! -d "$snapshot_dir" ]]; then
+        die "Snapshot not found: ${snapshot_dir}"
+    fi
+    
+    # Confirm deletion
+    if ! confirm "Are you sure you want to delete snapshot '${snapshot_name}' for project '${project_name}'?"; then
+        log "Deletion cancelled"
+        return 0
+    fi
+    
+    log "Deleting snapshot: ${snapshot_dir}"
+    rm -rf "${snapshot_dir}"
+    
+    # Clean up empty project directory
+    local project_snapshot_dir="${PROJECT_SNAPSHOT_DIR}/${project_name}"
+    if [[ -d "$project_snapshot_dir" && -z "$(ls -A "$project_snapshot_dir")" ]]; then
+        rmdir "$project_snapshot_dir"
+    fi
+    
+    log "✅ Snapshot deleted: ${snapshot_name}"
+    
+    return 0
+}
+
+# Interactive project snapshot creation
+create_project_snapshot_interactive() {
+    if ! is_interactive; then
+        warn "create_project_snapshot_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Create Project Snapshot [Interactive]"
+    
+    list_projects
+    echo ""
+    
+    local project_name
+    project_name=$(ask "Enter project name to snapshot" "")
+    
+    if [[ -z "$project_name" ]]; then
+        die "Project name is required"
+    fi
+    
+    local project_dir="${PROJECTS_DIR}/${project_name}"
+    if [[ ! -d "$project_dir" ]]; then
+        die "Project not found: ${project_name}"
+    fi
+    
+    local snapshot_name
+    snapshot_name=$(ask "Enter snapshot name (leave blank for auto-generated)" "")
+    
+    local description
+    description=$(ask "Enter description for this snapshot" "Automatic snapshot")
+    
+    create_project_snapshot "$project_name" "$snapshot_name" "$description"
+}
+
+# Interactive project snapshot restore
+restore_project_snapshot_interactive() {
+    if ! is_interactive; then
+        warn "restore_project_snapshot_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Restore Project Snapshot [Interactive]"
+    
+    list_projects
+    echo ""
+    
+    local project_name
+    project_name=$(ask "Enter project name" "")
+    
+    if [[ -z "$project_name" ]]; then
+        die "Project name is required"
+    fi
+    
+    list_project_snapshots "$project_name"
+    echo ""
+    
+    local snapshot_name
+    snapshot_name=$(ask "Enter snapshot name to restore" "")
+    
+    if [[ -z "$snapshot_name" ]]; then
+        die "Snapshot name is required"
+    fi
+    
+    local restore_to
+    restore_to=$(ask "Restore to project name (leave blank for original)" "")
+    
+    restore_project_snapshot "$project_name" "$snapshot_name" "$restore_to"
+}
+
+# Interactive project snapshot deletion
+delete_project_snapshot_interactive() {
+    if ! is_interactive; then
+        warn "delete_project_snapshot_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Delete Project Snapshot [Interactive]"
+    
+    list_projects
+    echo ""
+    
+    local project_name
+    project_name=$(ask "Enter project name" "")
+    
+    if [[ -z "$project_name" ]]; then
+        die "Project name is required"
+    fi
+    
+    list_project_snapshots "$project_name"
+    echo ""
+    
+    local snapshot_name
+    snapshot_name=$(ask "Enter snapshot name to delete" "")
+    
+    if [[ -z "$snapshot_name" ]]; then
+        die "Snapshot name is required"
+    fi
+    
+    delete_project_snapshot "$project_name" "$snapshot_name"
+}
+
+# ---------------------------------------------------------------------------
+# Enhanced Debugging Workflows - Debug Session Recording
+# ---------------------------------------------------------------------------
+
+# Directory for debug session recordings
+DEBUG_SESSION_DIR="${CONFIG_DIR}/debug_sessions"
+
+# Ensure debug session directory exists
+ensure_debug_session_dirs() {
+    ensure_dir "${DEBUG_SESSION_DIR}"
+}
+
+# Start a debug session recording
+# Usage: start_debug_recording <session_name> [vm_name] [gdb_port] [description]
+start_debug_recording() {
+    local session_name="$1"
+    local vm_name="$2"
+    local gdb_port="$3"
+    local description="$4"
+    
+    heading "Starting Debug Session Recording: ${session_name}"
+    
+    ensure_debug_session_dirs
+    
+    # Set default values
+    [[ -n "$session_name" ]] || session_name="debug_session_$(date +%Y%m%d-%H%M%S)"
+    [[ -n "$gdb_port" ]] || gdb_port="1234"
+    [[ -n "$description" ]] || description="Debug session started on $(date)"
+    
+    local session_dir="${DEBUG_SESSION_DIR}/${session_name}"
+    local recording_file="${session_dir}/recording.log"
+    local metadata_file="${session_dir}/session.meta"
+    local commands_file="${session_dir}/commands.gdb"
+    
+    # Create session directory
+    log "Creating debug session directory: ${session_dir}"
+    mkdir -p "${session_dir}"
+    
+    # Save metadata
+    cat > "${metadata_file}" << EOF
+# Debug Session Metadata
+SESSION_NAME="${session_name}"
+VM_NAME="${vm_name:-unknown}"
+GDB_PORT="${gdb_port}"
+STARTED_AT="$(date +%Y-%m-%d\ %H:%M:%S)"
+STATUS="recording"
+DESCRIPTION="${description}"
+EOF
+    
+    # Start GDB with logging
+    log "Starting GDB recording..."
+    log "Session directory: ${session_dir}"
+    log "GDB port: ${gdb_port}"
+    
+    # Create GDB command script
+    cat > "${commands_file}" << EOF
+set logging file ${recording_file}
+set logging enabled on
+set logging overwrite off
+
+# Connect to VM
+target remote localhost:${gdb_port}
+
+# Enable full debugging output
+set debug remote 1
+set debug protocol 1
+
+# Continue execution
+continue
+EOF
+    
+    log "✅ Debug session recording started: ${session_name}"
+    log "   Recording file: ${recording_file}"
+    log "   GDB commands: ${commands_file}"
+    log ""
+    log "To connect GDB manually:"
+    log "  gdb-multiarch -x ${commands_file}"
+    
+    return 0
+}
+
+# Stop a debug session recording
+# Usage: stop_debug_recording <session_name>
+stop_debug_recording() {
+    local session_name="$1"
+    
+    heading "Stopping Debug Session Recording: ${session_name}"
+    
+    local session_dir="${DEBUG_SESSION_DIR}/${session_name}"
+    local metadata_file="${session_dir}/session.meta"
+    
+    if [[ ! -d "$session_dir" ]]; then
+        die "Debug session not found: ${session_name}"
+    fi
+    
+    if [[ ! -f "$metadata_file" ]]; then
+        die "Invalid debug session: missing metadata file"
+    fi
+    
+    # Update metadata
+    local end_time=$(date +"%Y-%m-%d %H:%M:%S")
+    local start_time=$(grep "^STARTED_AT=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+    
+    # Calculate duration
+    local start_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "$start_time" +%s 2>/dev/null || echo 0)
+    local end_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "$end_time" +%s 2>/dev/null || echo 0)
+    local duration=$((end_ts - start_ts))
+    
+    # Update metadata with end time and duration
+    sed -i.bak "s/^STATUS=.*/STATUS="stopped"/" "$metadata_file" 2>/dev/null
+    echo "ENDED_AT=\"${end_time}\"" >> "$metadata_file"
+    echo "DURATION_SECONDS=\"${duration}\"" >> "$metadata_file"
+    
+    log "✅ Debug session recording stopped: ${session_name}"
+    log "   Duration: ${duration} seconds"
+    log "   Started: ${start_time}"
+    log "   Ended: ${end_time}"
+    
+    return 0
+}
+
+# Replay a debug session recording
+# Usage: replay_debug_session <session_name>
+replay_debug_session() {
+    local session_name="$1"
+    
+    heading "Replaying Debug Session: ${session_name}"
+    
+    local session_dir="${DEBUG_SESSION_DIR}/${session_name}"
+    local metadata_file="${session_dir}/session.meta"
+    local recording_file="${session_dir}/recording.log"
+    
+    if [[ ! -d "$session_dir" ]]; then
+        die "Debug session not found: ${session_name}"
+    fi
+    
+    if [[ ! -f "$recording_file" ]]; then
+        die "Recording file not found: ${recording_file}"
+    fi
+    
+    # Display session information
+    log "Session: ${session_name}"
+    
+    if [[ -f "$metadata_file" ]]; then
+        local vm_name=$(grep "^VM_NAME=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        local gdb_port=$(grep "^GDB_PORT=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        local start_time=$(grep "^STARTED_AT=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        local end_time=$(grep "^ENDED_AT=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        local duration=$(grep "^DURATION_SECONDS=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        local description=$(grep "^DESCRIPTION=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        
+        log "VM: ${vm_name}"
+        log "GDB Port: ${gdb_port}"
+        log "Started: ${start_time}"
+        log "Ended: ${end_time}"
+        log "Duration: ${duration} seconds"
+        log "Description: ${description}"
+    fi
+    
+    log ""
+    log "Recording Contents:"
+    log "="
+    
+    # Display recording file
+    if [[ -f "$recording_file" ]]; then
+        head -50 "$recording_file"
+        echo ""
+        echo "... [truncated]"
+    fi
+    
+    return 0
+}
+
+# List all debug sessions
+# Usage: list_debug_sessions [status_filter]
+list_debug_sessions() {
+    local status_filter="$1"
+    
+    heading "Debug Sessions"
+    
+    ensure_debug_session_dirs
+    
+    local sessions=()
+    while IFS= read -r session_dir; do
+        [[ -d "$session_dir" ]] && sessions+=("$session_dir")
+    done < <(find "$DEBUG_SESSION_DIR" -type d -maxdepth 1 | sort -r)
+    
+    if [[ ${#sessions[@]} -eq 0 ]]; then
+        log "No debug sessions found"
+        return 0
+    fi
+    
+    local index=0
+    for session_dir in "${sessions[@]}"; do
+        local session_name=$(basename "$session_dir")
+        local metadata_file="${session_dir}/session.meta"
+        
+        if [[ ! -f "$metadata_file" ]]; then
+            continue
+        fi
+        
+        local status=$(grep "^STATUS=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        local vm_name=$(grep "^VM_NAME=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        local start_time=$(grep "^STARTED_AT=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        local duration=$(grep "^DURATION_SECONDS=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        local size=$(du -sh "$session_dir" 2>/dev/null | cut -f1)
+        
+        # Apply status filter if specified
+        if [[ -n "$status_filter" && "$status" != "$status_filter" ]]; then
+            continue
+        fi
+        
+        echo "  [${index}] ${session_name} [${status}] [${size}]"
+        echo "      VM: ${vm_name:-unknown}"
+        echo "      Started: ${start_time}"
+        if [[ -n "$duration" ]]; then
+            echo "      Duration: ${duration}s"
+        fi
+        echo ""
+        
+        index=$((index + 1))
+    done
+    
+    return 0
+}
+
+# Delete a debug session
+# Usage: delete_debug_session <session_name>
+delete_debug_session() {
+    local session_name="$1"
+    
+    heading "Delete Debug Session"
+    
+    local session_dir="${DEBUG_SESSION_DIR}/${session_name}"
+    
+    if [[ ! -d "$session_dir" ]]; then
+        die "Debug session not found: ${session_name}"
+    fi
+    
+    # Confirm deletion
+    if ! confirm "Are you sure you want to delete debug session '${session_name}'?"; then
+        log "Deletion cancelled"
+        return 0
+    fi
+    
+    log "Deleting debug session: ${session_dir}"
+    rm -rf "${session_dir}"
+    
+    log "✅ Debug session deleted: ${session_name}"
+    
+    return 0
+}
+
+# Interactive debug session recording start
+start_debug_recording_interactive() {
+    if ! is_interactive; then
+        warn "start_debug_recording_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Start Debug Session Recording [Interactive]"
+    
+    local session_name
+    session_name=$(ask "Enter session name (leave blank for auto-generated)" "")
+    
+    list_vms
+    local vm_name
+    vm_name=$(ask "Enter VM name" "")
+    
+    local gdb_port
+    gdb_port=$(ask "Enter GDB port" "1234")
+    
+    local description
+    description=$(ask "Enter description for this debug session" "Debug session")
+    
+    start_debug_recording "$session_name" "$vm_name" "$gdb_port" "$description"
+}
+
+# Interactive debug session replay
+replay_debug_session_interactive() {
+    if ! is_interactive; then
+        warn "replay_debug_session_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Replay Debug Session [Interactive]"
+    
+    list_debug_sessions
+    echo ""
+    
+    local session_name
+    session_name=$(ask "Enter session name to replay" "")
+    
+    if [[ -z "$session_name" ]]; then
+        die "Session name is required"
+    fi
+    
+    replay_debug_session "$session_name"
+}
+
+# ---------------------------------------------------------------------------
+# Enhanced Debugging Workflows - Breakpoint Presets
+# ---------------------------------------------------------------------------
+
+# Directory for breakpoint presets
+BREAKPOINT_PRESET_DIR="${CONFIG_DIR}/breakpoint_presets"
+
+# Ensure breakpoint preset directory exists
+ensure_breakpoint_preset_dirs() {
+    ensure_dir "${BREAKPOINT_PRESET_DIR}"
+}
+
+# Define a breakpoint preset
+# Usage: create_breakpoint_preset <preset_name> <description> <breakpoints_file>
+create_breakpoint_preset() {
+    local preset_name="$1"
+    local description="$2"
+    local breakpoints_file="$3"
+    
+    heading "Creating Breakpoint Preset: ${preset_name}"
+    
+    ensure_breakpoint_preset_dirs
+    
+    if [[ -z "$preset_name" ]]; then
+        die "Preset name is required"
+    fi
+    
+    local preset_dir="${BREAKPOINT_PRESET_DIR}/${preset_name}"
+    local preset_meta="${preset_dir}/preset.meta"
+    local preset_gdb="${preset_dir}/breakpoints.gdb"
+    
+    # Create preset directory
+    log "Creating breakpoint preset directory: ${preset_dir}"
+    mkdir -p "${preset_dir}"
+    
+    # Save metadata
+    [[ -n "$description" ]] || description="Breakpoint preset for ${preset_name}"
+    
+    cat > "${preset_meta}" << EOF
+# Breakpoint Preset Metadata
+PRESET_NAME="${preset_name}"
+DESCRIPTION="${description}"
+CREATED_AT="$(date +%Y-%m-%d\ %H:%M:%S)"
+ARCHITECTURE="universal"
+EOF
+    
+    # Process breakpoints file
+    if [[ -f "$breakpoints_file" ]]; then
+        cp "$breakpoints_file" "${preset_gdb}"
+    else
+        # Create empty GDB commands file
+        cat > "${preset_gdb}" << EOF
+# GDB Breakpoint Commands for ${preset_name}
+# Add breakpoints below
+# Example: break main
+# Example: break *0x00000400
+EOF
+    fi
+    
+    log "✅ Breakpoint preset created: ${preset_name}"
+    log "   Directory: ${preset_dir}"
+    log "   GDB commands: ${preset_gdb}"
+    
+    return 0
+}
+
+# Apply a breakpoint preset to a VM
+# Usage: apply_breakpoint_preset <preset_name> <vm_name> [gdb_port]
+apply_breakpoint_preset() {
+    local preset_name="$1"
+    local vm_name="$2"
+    local gdb_port="$3"
+    
+    heading "Applying Breakpoint Preset: ${preset_name} to VM: ${vm_name}"
+    
+    ensure_breakpoint_preset_dirs
+    
+    local preset_dir="${BREAKPOINT_PRESET_DIR}/${preset_name}"
+    local preset_gdb="${preset_dir}/breakpoints.gdb"
+    
+    if [[ ! -d "$preset_dir" ]]; then
+        die "Breakpoint preset not found: ${preset_name}"
+    fi
+    
+    if [[ ! -f "$preset_gdb" ]]; then
+        die "Breakpoint preset GDB file not found: ${preset_gdb}"
+    fi
+    
+    [[ -n "$gdb_port" ]] || gdb_port="1234"
+    
+    # Read VM IP if available
+    local vm_ip=""
+    if get_vm_ip "$vm_name"; then
+        vm_ip=$(get_vm_ip "$vm_name")
+    else
+        # Try to get from config
+        local config_file=$(find_vm_config_file "$vm_name")
+        if [[ -f "$config_file" ]]; then
+            vm_ip=$(grep -E "^IP_ADDRESS|^GUEST_IP" "$config_file" | head -1 | cut -d'=' -f2)
+        fi
+    fi
+    
+    log "Applying breakpoint preset to VM: ${vm_name} [IP: ${vm_ip:-not available}]"
+    log "GDB port: ${gdb_port}"
+    
+    # Create temporary GDB script with preset + connection
+    local temp_gdb_script=$(mktemp /tmp/apply_preset_XXXXXX.gdb)
+    
+    cat > "$temp_gdb_script" << EOF
+# Auto-generated GDB script for breakpoint preset: ${preset_name}
+# VM: ${vm_name}
+# Port: ${gdb_port}
+
+# Connect to VM
+target remote ${vm_ip:+$vm_ip:}$gdb_port
+
+# Load breakpoint preset commands
+source ${preset_gdb}
+
+# Continue execution
+continue
+EOF
+    
+    log "✅ Breakpoint preset applied"
+    log "   GDB script created: ${temp_gdb_script}"
+    log ""
+    log "To use this preset, run:"
+    log "  gdb-multiarch -x ${temp_gdb_script}"
+    log ""
+    log "Or manually with:"
+    log "  gdb-multiarch"
+    log "  [gdb] source ${preset_gdb}"
+    log "  [gdb] target remote ${vm_ip:+$vm_ip:}$gdb_port"
+    log "  [gdb] continue"
+    
+    return 0
+}
+
+# List available breakpoint presets
+# Usage: list_breakpoint_presets
+list_breakpoint_presets() {
+    heading "Breakpoint Presets"
+    
+    ensure_breakpoint_preset_dirs
+    
+    local presets=()
+    while IFS= read -r preset_dir; do
+        [[ -d "$preset_dir" ]] && presets+=("$preset_dir")
+    done < <(find "$BREAKPOINT_PRESET_DIR" -type d -maxdepth 1 | sort)
+    
+    if [[ ${#presets[@]} -eq 0 ]]; then
+        log "No breakpoint presets found"
+        return 0
+    fi
+    
+    log "Available Breakpoint Presets:"
+    log "="
+    
+    for i in "${!presets[@]}"; do
+        local preset_name=$(basename "${presets[$i]}")
+        local preset_meta="${presets[$i]}/preset.meta"
+        
+        if [[ -f "$preset_meta" ]]; then
+            local description=$(grep "^DESCRIPTION=" "$preset_meta" | cut -d'=' -f2- | tr -d '"')
+            local created_at=$(grep "^CREATED_AT=" "$preset_meta" | cut -d'=' -f2- | tr -d '"')
+            local architecture=$(grep "^ARCHITECTURE=" "$preset_meta" | cut -d'=' -f2- | tr -d '"')
+            local size=$(du -sh "${presets[$i]}" 2>/dev/null | cut -f1)
+            
+            echo "  [${i}] ${preset_name} [${architecture}] [${size}]"
+            echo "      Created: ${created_at}"
+            echo "      Description: ${description}"
+            
+            # Show first few lines of the preset
+            local preset_gdb="${presets[$i]}/breakpoints.gdb"
+            if [[ -f "$preset_gdb" ]]; then
+                echo "      Preview:"
+                head -3 "$preset_gdb" | sed 's/^/         /'
+            fi
+            echo ""
+        fi
+    done
+    
+    return 0
+}
+
+# Delete a breakpoint preset
+# Usage: delete_breakpoint_preset <preset_name>
+delete_breakpoint_preset() {
+    local preset_name="$1"
+    
+    heading "Delete Breakpoint Preset"
+    
+    ensure_breakpoint_preset_dirs
+    
+    local preset_dir="${BREAKPOINT_PRESET_DIR}/${preset_name}"
+    
+    if [[ ! -d "$preset_dir" ]]; then
+        die "Breakpoint preset not found: ${preset_name}"
+    fi
+    
+    # Confirm deletion
+    if ! confirm "Are you sure you want to delete breakpoint preset '${preset_name}'?"; then
+        log "Deletion cancelled"
+        return 0
+    fi
+    
+    log "Deleting breakpoint preset: ${preset_dir}"
+    rm -rf "${preset_dir}"
+    
+    log "✅ Breakpoint preset deleted: ${preset_name}"
+    
+    return 0
+}
+
+# Interactive breakpoint preset creation
+create_breakpoint_preset_interactive() {
+    if ! is_interactive; then
+        warn "create_breakpoint_preset_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Create Breakpoint Preset [Interactive]"
+    
+    local preset_name
+    preset_name=$(ask "Enter preset name" "")
+    
+    if [[ -z "$preset_name" ]]; then
+        die "Preset name is required"
+    fi
+    
+    local description
+    description=$(ask "Enter description" "Breakpoint preset")
+    
+    local architecture
+    architecture=$(ask "Enter target architecture (universal, 68k, ppc, x86, etc.)" "universal")
+    
+    # Create preset directory first
+    local preset_dir="${BREAKPOINT_PRESET_DIR}/${preset_name}"
+    mkdir -p "${preset_dir}"
+    
+    local preset_gdb="${preset_dir}/breakpoints.gdb"
+    
+    # Create GDB commands file
+    echo "# GDB Breakpoint Commands for ${preset_name}" > "$preset_gdb"
+    echo "# Architecture: ${architecture}" >> "$preset_gdb"
+    echo "# Generated: $(date)" >> "$preset_gdb"
+    echo "" >> "$preset_gdb"
+    
+    while true; do
+        local breakpoint
+        breakpoint=$(ask "Enter breakpoint command (or 'done' to finish)" "")
+        
+        if [[ "$breakpoint" == "done" || -z "$breakpoint" ]]; then
+            break
+        fi
+        
+        echo "${breakpoint}" >> "$preset_gdb"
+    done
+    
+    # Save metadata
+    local preset_meta="${preset_dir}/preset.meta"
+    cat > "${preset_meta}" << EOF
+# Breakpoint Preset Metadata
+PRESET_NAME="${preset_name}"
+DESCRIPTION="${description}"
+CREATED_AT="$(date +%Y-%m-%d\ %H:%M:%S)"
+ARCHITECTURE="${architecture}"
+EOF
+    
+    log "✅ Breakpoint preset created: ${preset_name}"
+    log "   File: ${preset_gdb}"
+    
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # Retro68 Toolchain Support
 # ---------------------------------------------------------------------------
 
@@ -10647,6 +12300,38 @@ show_main_menu() {
         echo "  [94] List test configurations"
         echo "  [95] Run test configuration"
         echo ""
+        echo "🎨 XDialog UI:"
+        echo "  [96] Start GUI mode"
+        echo "  [97] Create VM (GUI)"
+        echo "  [98] Manage VMs (GUI)"
+        echo "  [99] Debug VM (GUI)"
+        echo ""
+        echo "🚀 Enhanced Deployment:"
+        echo "  [100] Incremental deployment"
+        echo "  [101] Validate environment"
+        echo "  [102] Rollback deployment"
+        echo "  [103] List deployment history"
+        echo "  [104] Cleanup deployments"
+        echo ""
+        echo "💾 Development Project Management - Snapshots:"
+        echo "  [105] Create project snapshot"
+        echo "  [106] Restore project snapshot"
+        echo "  [107] List project snapshots"
+        echo "  [108] Delete project snapshot"
+        echo ""
+        echo "🐛 Debug Session Recording:"
+        echo "  [109] Start debug session recording"
+        echo "  [110] Stop debug session recording"
+        echo "  [111] Replay debug session"
+        echo "  [112] List debug sessions"
+        echo "  [113] Delete debug session"
+        echo ""
+        echo "🎯 Breakpoint Presets:"
+        echo "  [114] Create breakpoint preset"
+        echo "  [115] Apply breakpoint preset"
+        echo "  [116] List breakpoint presets"
+        echo "  [117] Delete breakpoint preset"
+        echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
         echo ""
@@ -10763,6 +12448,75 @@ show_main_menu() {
             93) create_test_config_interactive ;;
             94) list_test_configs ;;
             95) run_test_config_interactive ;;
+            96) gui_mode_start ;;
+            97) gui_create_vm ;;
+            98) gui_manage_vms ;;
+            99) gui_debug_vm ;;
+            100) 
+                local vm_name source_dir target_dir backup_first exclude
+                vm_name=$(ask "Enter VM name" "")
+                [[ -n "$vm_name" ]] && incremental_deploy "$vm_name" "$source_dir" "$target_dir" "$backup_first" "$exclude" || echo "VM name required"
+                ;;
+            101) 
+                local vm_name requirements_file
+                vm_name=$(ask "Enter VM name" "")
+                [[ -n "$vm_name" ]] && validate_environment "$vm_name" "$requirements_file" || echo "VM name required"
+                ;;
+            102) 
+                local vm_name backup_id target_dir
+                vm_name=$(ask "Enter VM name" "")
+                [[ -n "$vm_name" ]] && rollback_deployment "$vm_name" "$backup_id" "$target_dir" || echo "VM name required"
+                ;;
+            103) 
+                local vm_name
+                vm_name=$(ask "Enter VM name" "")
+                [[ -n "$vm_name" ]] && list_deployment_history "$vm_name" || echo "VM name required"
+                ;;
+            104) 
+                local vm_name keep_backups target_dir
+                vm_name=$(ask "Enter VM name" "")
+                [[ -n "$vm_name" ]] && cleanup_deployment "$vm_name" "$keep_backups" "$target_dir" || echo "VM name required"
+                ;;
+            # Development Project Management - Snapshots
+            105) create_project_snapshot_interactive ;;
+            106) restore_project_snapshot_interactive ;;
+            107) 
+                local project_name
+                project_name=$(ask "Enter project name (leave blank for all projects)" "")
+                [[ -n "$project_name" ]] && list_project_snapshots "$project_name" || list_project_snapshots
+                ;;
+            108) delete_project_snapshot_interactive ;;
+            
+            # Debug Session Recording
+            109) start_debug_recording_interactive ;;
+            110) 
+                local session_name
+                session_name=$(ask "Enter session name to stop" "")
+                [[ -n "$session_name" ]] && stop_debug_recording "$session_name" || echo "Session name required"
+                ;;
+            111) replay_debug_session_interactive ;;
+            112) list_debug_sessions ;;
+            113) 
+                local session_name
+                session_name=$(ask "Enter session name to delete" "")
+                [[ -n "$session_name" ]] && delete_debug_session "$session_name" || echo "Session name required"
+                ;;
+            
+            # Breakpoint Presets
+            114) create_breakpoint_preset_interactive ;;
+            115) 
+                local preset_name vm_name gdb_port
+                preset_name=$(ask "Enter preset name" "")
+                vm_name=$(ask "Enter VM name" "")
+                gdb_port=$(ask "Enter GDB port" "1234")
+                [[ -n "$preset_name" && -n "$vm_name" ]] && apply_breakpoint_preset "$preset_name" "$vm_name" "$gdb_port" || echo "Preset name and VM name required"
+                ;;
+            116) list_breakpoint_presets ;;
+            117) 
+                local preset_name
+                preset_name=$(ask "Enter preset name to delete" "")
+                [[ -n "$preset_name" ]] && delete_breakpoint_preset "$preset_name" || echo "Preset name required"
+                ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -11249,6 +13003,19 @@ Testing Framework:
   create-test    Create test configuration
   list-tests     List test configurations
   run-test       Run test configuration
+
+XDialog UI:
+  gui-mode       Start XDialog GUI mode
+  gui-create-vm  Create VM with GUI
+  gui-manage     Manage VMs with GUI
+  gui-debug     Debug VM with GUI
+
+Enhanced Deployment:
+  incremental-deploy  Incremental deployment to VM
+  validate-env       Validate VM environment before deployment
+  rollback           Rollback to previous deployment
+  deployment-history List deployment history
+  cleanup-deploy    Cleanup old deployments and backups
   cleanup-snapshots Cleanup old VM snapshots
   cleanup-disks    Find and remove unused disk images
   menu             Interactive menu (default)
@@ -11580,6 +13347,70 @@ main() {
         list-tests|tests-list) list_test_configs ;;
         run-test|test-run) 
             [[ -n "${2:-}" ]] && run_test_config "$2" "$3" || die "Usage: run-test <config_file> [vm_name]"
+            ;;
+        
+        # XDialog UI
+        gui-mode) gui_mode_start ;;
+        gui-create-vm) gui_create_vm ;;
+        gui-manage) gui_manage_vms ;;
+        gui-debug) gui_debug_vm ;;
+        
+        # Enhanced Deployment
+        incremental-deploy|deploy-incremental) 
+            [[ -n "${2:-}" ]] && incremental_deploy "$2" "$3" "$4" "$5" "$6" || die "Usage: incremental-deploy <vm_name> [source_dir] [target_dir] [backup_first] [exclude_patterns]"
+            ;;
+        validate-env|env-validate) 
+            [[ -n "${2:-}" ]] && validate_environment "$2" "$3" || die "Usage: validate-env <vm_name> [requirements_file]"
+            ;;
+        rollback|deploy-rollback) 
+            [[ -n "${2:-}" ]] && rollback_deployment "$2" "$3" "$4" || die "Usage: rollback <vm_name> [backup_id] [target_dir]"
+            ;;
+        deployment-history|history-deploy) 
+            [[ -n "${2:-}" ]] && list_deployment_history "$2" || die "Usage: deployment-history <vm_name>"
+            ;;
+        cleanup-deploy|deploy-cleanup) 
+            [[ -n "${2:-}" ]] && cleanup_deployment "$2" "$3" "$4" || die "Usage: cleanup-deploy <vm_name> [keep_backups] [target_dir]"
+            ;;
+        
+        # Development Project Management - Snapshots
+        project-snapshot|snapshot-project) 
+            [[ -n "${2:-}" && -n "${3:-}" ]] && create_project_snapshot "$2" "$3" "$4" || die "Usage: project-snapshot <project_name> [snapshot_name] [description]"
+            ;;
+        restore-snapshot|snapshot-restore) 
+            [[ -n "${2:-}" && -n "${3:-}" ]] && restore_project_snapshot "$2" "$3" "$4" || die "Usage: restore-snapshot <project_name> <snapshot_name> [restore_to]"
+            ;;
+        list-snapshots|snapshots-list) 
+            [[ -n "${2:-}" ]] && list_project_snapshots "$2" || list_project_snapshots
+            ;;
+        delete-snapshot|snapshot-delete) 
+            [[ -n "${2:-}" && -n "${3:-}" ]] && delete_project_snapshot "$2" "$3" || die "Usage: delete-snapshot <project_name> <snapshot_name>"
+            ;;
+        
+        # Debug Session Recording
+        debug-record|record-debug) 
+            [[ -n "${2:-}" ]] && start_debug_recording "$2" "$3" "$4" "$5" || die "Usage: debug-record <session_name> [vm_name] [gdb_port] [description]"
+            ;;
+        debug-stop|stop-debug) 
+            [[ -n "${2:-}" ]] && stop_debug_recording "$2" || die "Usage: debug-stop <session_name>"
+            ;;
+        debug-replay|replay-debug) 
+            [[ -n "${2:-}" ]] && replay_debug_session "$2" || die "Usage: debug-replay <session_name>"
+            ;;
+        list-sessions|sessions-list) list_debug_sessions ;;
+        delete-session|session-delete) 
+            [[ -n "${2:-}" ]] && delete_debug_session "$2" || die "Usage: delete-session <session_name>"
+            ;;
+        
+        # Breakpoint Presets
+        breakpoint-preset|preset-breakpoint) 
+            [[ -n "${2:-}" ]] && create_breakpoint_preset "$2" "$3" "$4" || die "Usage: breakpoint-preset <preset_name> [description] [breakpoints_file]"
+            ;;
+        apply-preset|preset-apply) 
+            [[ -n "${2:-}" && -n "${3:-}" ]] && apply_breakpoint_preset "$2" "$3" "$4" || die "Usage: apply-preset <preset_name> <vm_name> [gdb_port]"
+            ;;
+        list-presets|presets-list) list_breakpoint_presets ;;
+        delete-preset|preset-delete) 
+            [[ -n "${2:-}" ]] && delete_breakpoint_preset "$2" || die "Usage: delete-preset <preset_name>"
             ;;
         
         # Disk/ISO management
