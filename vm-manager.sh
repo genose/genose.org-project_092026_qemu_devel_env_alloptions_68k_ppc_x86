@@ -913,6 +913,418 @@ qemu_gdb_flags() {
     fi
 }
 
+# =============================================================================
+# Debugging Workflow Functions
+# =============================================================================
+
+# Start a debug session for a specific VM
+debug_start() {
+    local vm_name="$1"
+    local binary_path="$2"
+    local debug_port="$3"
+    
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "debug_start function requires interactive mode"
+        return 1
+    fi
+    
+    [[ -n "${vm_name}" ]] || die "VM name is required. Usage: debug_start <vm_name> [binary_path] [port]"
+    
+    heading "Starting Debug Session: ${vm_name}"
+    
+    # Check if VM is running
+    if ! is_vm_running "${vm_name}"; then
+        warn "VM '${vm_name}' is not running. Starting it first..."
+        launch_vm "${vm_name}" || die "Failed to start VM: ${vm_name}"
+        sleep 5  # Give VM time to start
+    fi
+    
+    # Get VM configuration
+    local config_file=""
+    find_vm_config "${vm_name}" config_file || die "Config not found for VM: ${vm_name}"
+    
+    # Extract GDB port from config or use default
+    local port="${debug_port:-${GDB_PORT:-${DEFAULT_GDB_PORT}}}"
+    
+    # If binary path provided, deploy it first
+    if [[ -n "${binary_path}" && -f "${binary_path}" ]]; then
+        log "Deploying binary to VM: ${binary_path}"
+        deploy_binary "${vm_name}" "${binary_path}" || warn "Failed to deploy binary"
+    fi
+    
+    # Display debug connection information
+    log ""
+    log "Debug Session Information:"
+    log "  VM: ${vm_name}"
+    log "  GDB Port: ${port}"
+    log "  Status: Ready for debug connection"
+    log ""
+    log "Connect with GDB:"
+    log "  gdb-multiarch -ex 'target remote localhost:${port}' ${binary_path:-<binary>}"
+    log ""
+    
+    # Check if auto-connect is requested
+    local auto_connect=$(ask "Auto-connect GDB? (y/n)" "n")
+    if is_yes "${auto_connect}"; then
+        debug_connect "${vm_name}" "${port}" "${binary_path}"
+    fi
+}
+
+# Connect GDB to a running VM
+debug_connect() {
+    local vm_name="$1"
+    local port="$2"
+    local binary_path="$3"
+    
+    [[ -n "${vm_name}" ]] || die "VM name is required. Usage: debug_connect <vm_name> [port] [binary_path]"
+    
+    port="${port:-${GDB_PORT:-${DEFAULT_GDB_PORT}}}"
+    
+    heading "Connecting GDB to VM: ${vm_name}"
+    log "Attempting GDB connection on port: ${port}"
+    
+    # Check if GDB is available
+    local gdb_bin="${GDB_BIN:-gdb-multiarch}"
+    if ! command -v "${gdb_bin}" &>/dev/null; then
+        # Try common GDB variants
+        for gdb_candidate in gdb-multiarch gdb gdb64; do
+            if command -v "${gdb_candidate}" &>/dev/null; then
+                gdb_bin="${gdb_candidate}"
+                break
+            fi
+        done
+    fi
+    
+    if ! command -v "${gdb_bin}" &>/dev/null; then
+        die "No GDB found. Please install gdb-multiarch or standard gdb."
+    fi
+    
+    log "Using GDB: ${gdb_bin}"
+    
+    # Build GDB command
+    local gdb_cmd=("${gdb_bin}")
+    
+    if [[ -n "${binary_path}" && -f "${binary_path}" ]]; then
+        gdb_cmd+=("${binary_path}")
+    fi
+    
+    # Add connection command
+    gdb_cmd+=(-ex "target remote localhost:${port}")
+    
+    log "Running: ${gdb_cmd[*]}"
+    log "Press Ctrl+C to exit GDB and return to menu"
+    
+    # Run GDB interactively
+    "${gdb_cmd[@]}"
+}
+
+# Deploy binary to a VM
+deploy_binary() {
+    local vm_name="$1"
+    local binary_path="$2"
+    local target_path="$3"
+    
+    [[ -n "${vm_name}" ]] || die "VM name is required"
+    [[ -n "${binary_path}" ]] || die "Binary path is required"
+    [[ -f "${binary_path}" ]] || die "Binary not found: ${binary_path}"
+    
+    heading "Deploying Binary to VM: ${vm_name}"
+    log "Source: ${binary_path}"
+    
+    # Find VM directory
+    local vm_dir=""
+    find_vm_directory "${vm_name}" vm_dir || die "VM directory not found: ${vm_name}"
+    
+    # Determine target path if not specified
+    if [[ -z "${target_path}" ]]; then
+        target_path="${vm_dir}/$(basename "${binary_path}")"
+    fi
+    
+    # Create target directory if needed
+    ensure_dir "$(dirname "${target_path}")"
+    
+    # Copy binary to VM
+    log "Copying to: ${target_path}"
+    if cp "${binary_path}" "${target_path}" 2>/dev/null; then
+        log "✅ Binary deployed successfully"
+        
+        # Set appropriate permissions
+        chmod +x "${target_path}" 2>/dev/null
+        log "✅ Binary made executable"
+        
+        return 0
+    else
+        # Try alternative methods if direct copy fails
+        if [[ -d "${vm_dir}" ]]; then
+            warn "Direct copy failed, trying alternative method..."
+            # Method: Use shared directory
+            if [[ -d "${VM_SHARED_DIR}" ]]; then
+                local shared_binary="${VM_SHARED_DIR}/$(basename "${binary_path}")"
+                cp "${binary_path}" "${shared_binary}"
+                chmod +x "${shared_binary}"
+                log "✅ Binary copied to shared directory: ${shared_binary}"
+                log "Access it from VM at: /path/to/shared/directory"
+                return 0
+            fi
+        fi
+        
+        die "Failed to deploy binary to VM: ${vm_name}"
+    fi
+}
+
+# List active debug sessions
+debug_list() {
+    heading "Active Debug Sessions"
+    
+    # Check for running VMs with GDB enabled
+    local active_vms=()
+    local vm_info=""
+    
+    for vm_dir in "${VM_DIR}"/**; do
+        [[ -d "${vm_dir}" ]] || continue
+        local vm_name=$(basename "${vm_dir}")
+        local config_file="${vm_dir}/conf/${vm_name}.conf"
+        
+        if [[ -f "${config_file}" ]]; then
+            local gdb_enabled=$(grep -i "ENABLE_GDB" "${config_file}" | cut -d'=' -f2 | tr -d '"' | head -1)
+            local gdb_port=$(grep -i "GDB_PORT" "${config_file}" | cut -d'=' -f2 | tr -d '"' | head -1)
+            
+            if [[ "${gdb_enabled}" == "yes" || "${gdb_enabled}" == "true" ]]; then
+                local pid=""
+                # Try to find QEMU process for this VM
+                if pgrep -f "${vm_name}" &>/dev/null; then
+                    pid=$(pgrep -f "${vm_name}" | head -1)
+                    vm_info+="  VM: ${vm_name} | Port: ${gdb_port:-${DEFAULT_GDB_PORT}} | PID: ${pid}\n"
+                    active_vms+=("${vm_name}")
+                else
+                    vm_info+="  VM: ${vm_name} | Port: ${gdb_port:-${DEFAULT_GDB_PORT}} | Status: Not running\n"
+                fi
+            fi
+        fi
+    done
+    
+    if [[ ${#active_vms[@]} -eq 0 ]]; then
+        log "No active debug sessions found"
+        log "Start a debug session with: debug-start <vm_name>"
+    else
+        echo -e "${vm_info}"
+        log "Active debug sessions: ${#active_vms[@]}"
+    fi
+}
+
+# Stop/Detach from debug session
+debug_detach() {
+    local vm_name="$1"
+    
+    [[ -n "${vm_name}" ]] || die "VM name is required. Usage: debug-detach <vm_name>"
+    
+    heading "Detaching from Debug Session: ${vm_name}"
+    
+    # Find and stop GDB process connected to this VM's port
+    local gdb_pids=()
+    local config_file=""
+    
+    find_vm_config "${vm_name}" config_file
+    if [[ -f "${config_file}" ]]; then
+        local gdb_port=$(grep -i "GDB_PORT" "${config_file}" | cut -d'=' -f2 | tr -d '"' | head -1)
+        gdb_port="${gdb_port:-${DEFAULT_GDB_PORT}}"
+        
+        # Find GDB processes connected to this port
+        gdb_pids=($(pgrep -f "tcp::${gdb_port}" 2>/dev/null || true))
+        gdb_pids+=($(pgrep -f "remote localhost:${gdb_port}" 2>/dev/null || true))
+        
+        if [[ ${#gdb_pids[@]} -gt 0 ]]; then
+            log "Found ${#gdb_pids[@]} GDB process(es) connected to port ${gdb_port}"
+            for pid in "${gdb_pids[@]}"; do
+                log "  Killing GDB process: ${pid}"
+                kill "${pid}" 2>/dev/null
+            done
+            log "✅ GDB detached from VM: ${vm_name}"
+        else
+            log "No active GDB connection found for VM: ${vm_name}"
+        fi
+    else
+        warn "Config file not found for VM: ${vm_name}"
+    fi
+}
+
+# Advanced debugging: Set breakpoints and start
+debug_with_breakpoints() {
+    local vm_name="$1"
+    local binary_path="$2"
+    local breakpoints="$3"
+    
+    [[ -n "${vm_name}" ]] || die "VM name is required"
+    [[ -n "${binary_path}" ]] || die "Binary path is required"
+    
+    heading "Debugging with Breakpoints: ${vm_name}"
+    
+    # Deploy binary first
+    deploy_binary "${vm_name}" "${binary_path}" || return 1
+    
+    # Start debug session
+    debug_start "${vm_name}" "${binary_path}" || return 1
+    
+    # If breakpoints provided, set them
+    if [[ -n "${breakpoints}" ]]; then
+        log "Setting breakpoints: ${breakpoints}"
+        # This would be handled in the GDB session
+        # For now, just display the breakpoints to set
+        log "Manual GDB commands to set breakpoints:"
+        IFS=',' read -ra bps <<< "${breakpoints}"
+        for bp in "${bps[@]}"; do
+            log "  (gdb) break ${bp}"
+        done
+        log "  (gdb) continue"
+    fi
+}
+
+# Debug session management menu
+debug_session_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "debug_session_menu function requires interactive mode"
+        return 1
+    fi
+    
+    while true; do
+        clear || echo ""
+        heading "Debug Session Management"
+        echo ""
+        echo "  [1] Start debug session"
+        echo "  [2] Connect GDB to running VM"
+        echo "  [3] List active debug sessions"
+        echo "  [4] Detach from debug session"
+        echo "  [5] Deploy binary to VM"
+        echo "  [6] Debug with breakpoints"
+        echo ""
+        echo "  [B] Back to main menu"
+        echo ""
+        
+        choice=$(ask "Select debug option" "")
+        
+        case "${choice}" in
+            1) 
+                vm_num=$(ask "VM number to debug (or name)" "")
+                [[ -n "${vm_num}" ]] && debug_start "${vm_num}"
+                ;;
+            2)
+                vm_num=$(ask "VM number to connect to" "")
+                [[ -n "${vm_num}" ]] && debug_connect "${vm_num}"
+                ;;
+            3) debug_list ;;
+            4)
+                vm_num=$(ask "VM number to detach from" "")
+                [[ -n "${vm_num}" ]] && debug_detach "${vm_num}"
+                ;;
+            5)
+                vm_num=$(ask "Target VM name" "")
+                binary=$(ask "Binary path to deploy" "")
+                [[ -n "${vm_num}" && -n "${binary}" ]] && deploy_binary "${vm_num}" "${binary}"
+                ;;
+            6)
+                vm_num=$(ask "VM name" "")
+                binary=$(ask "Binary path" "")
+                bps=$(ask "Breakpoints (comma-separated)" "")
+                [[ -n "${vm_num}" && -n "${binary}" ]] && debug_with_breakpoints "${vm_num}" "${binary}" "${bps}"
+                ;;
+            b|B) return 0 ;;
+            q|quit|exit) return 0 ;;
+            *) echo "Invalid option. Please try again." ;;
+        esac
+        
+        if is_interactive; then
+            read -rp "Press Enter to continue..." _
+        fi
+    done
+}
+
+# =============================================================================
+# End Debugging Workflow Functions
+
+# =============================================================================
+# Helper Functions for Debugging
+# =============================================================================
+
+# Find VM configuration file for a given VM name
+# Sets the config_file variable passed by reference
+find_vm_config() {
+    local vm_name="$1"
+    local -n config_file_ref="$2"
+    
+    [[ -n "${vm_name}" ]] || die "VM name is required"
+    
+    local config_file=""
+    config_file=$(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print -quit 2>/dev/null)
+    
+    if [[ -n "${config_file}" && -f "${config_file}" ]]; then
+        config_file_ref="${config_file}"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Find VM directory for a given VM name
+# Sets the vm_dir variable passed by reference
+find_vm_directory() {
+    local vm_name="$1"
+    local -n vm_dir_ref="$2"
+    
+    [[ -n "${vm_name}" ]] || die "VM name is required"
+    
+    # VMs are stored as: vms/VM_NAME_PLATFORM/
+    # We need to find the directory that contains the config file
+    local config_file=""
+    find_vm_config "${vm_name}" config_file
+    
+    if [[ -n "${config_file}" ]]; then
+        vm_dir_ref="$(dirname "$(dirname "${config_file}")")"
+        return 0
+    else
+        # Try direct directory search
+        local vm_dir=""
+        vm_dir=$(find "${VM_DIR}" -maxdepth 2 -type d -name "*${vm_name}*" -print -quit 2>/dev/null)
+        
+        if [[ -n "${vm_dir}" && -d "${vm_dir}" ]]; then
+            vm_dir_ref="${vm_dir}"
+            return 0
+        fi
+        
+        return 1
+    fi
+}
+
+# Check if a VM is currently running
+is_vm_running() {
+    local vm_name="$1"
+    
+    [[ -n "${vm_name}" ]] || return 1
+    
+    # Try to find QEMU process for this VM
+    if pgrep -f "${vm_name}" &>/dev/null; then
+        return 0
+    fi
+    
+    # Try to find by config file pattern
+    local config_file=""
+    find_vm_config "${vm_name}" config_file
+    
+    if [[ -n "${config_file}" ]]; then
+        # Extract VM name from config path
+        local vm_pattern=$(basename "${config_file}" .conf)
+        if pgrep -f "${vm_pattern}" &>/dev/null; then
+            return 0
+        fi
+    fi
+    
+    return 1
+}
+
+# =============================================================================
+# End Helper Functions for Debugging
+
 # Display/audio flags generator
 display_flags() {
     local -n _df_array="$1"
@@ -8197,6 +8609,9 @@ show_main_menu() {
         echo "  [80] Multi-VM orchestration"
         echo "  [83] VM Resource Monitoring"
         echo ""
+        echo "🐛 Debugging:"
+        echo "  [84] Debug session management"
+        echo ""
         echo "💾 Backup & Restore:"
         echo "  [27] Create configuration backup"
         echo "  [28] List available backups"
@@ -8342,6 +8757,7 @@ show_main_menu() {
             81) export_vm_menu ;;
             82) import_vm_menu ;;
             83) monitor_menu ;;
+            84) debug_session_menu ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -8702,6 +9118,14 @@ VM Resource Monitoring:
   monitor-menu      Interactive monitoring menu
   stats-vm <name>   Show VM resource statistics
 
+Debugging:
+  debug <name>       Start debug session for a VM
+  debug-connect      Connect GDB to running VM
+  debug-list        List active debug sessions
+  debug-detach      Detach from debug session
+  deploy <name>     Deploy binary to a VM
+  debug-menu       Interactive debug session menu
+
 VM Export/Import:
   export <name> <out>        Export VM to QCOW2 format
   export-qcow2 <name> <out> Export VM to QCOW2 format
@@ -8989,6 +9413,15 @@ main() {
         monitor-menu) monitor_menu ;;
         stats-vm|vm-stats) 
             [[ -n "${2:-}" ]] && stats_vm "$2" || die "Please specify VM name" ;;
+        
+        # Debugging
+        debug|debug-vm) 
+            [[ -n "${2:-}" ]] && debug_start "$2" "$3" "$4" || debug_session_menu ;;
+        debug-connect) debug_connect "$2" "$3" "$4" ;;
+        debug-list) debug_list ;;
+        debug-detach) debug_detach "$2" ;;
+        deploy|deploy-binary) deploy_binary "$2" "$3" "$4" ;;
+        debug-menu) debug_session_menu ;;
         
         # VM Export/Import
         export|export-vm) 
