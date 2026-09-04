@@ -6245,6 +6245,312 @@ EOF
     log "4. Choose the exported configuration"
 }
 
+# ---------------------------------------------------------------------------
+# VM Export/Import Functions (Various Formats)
+# ---------------------------------------------------------------------------
+
+# Export VM to QCOW2 format (native QEMU format)
+export_vm_qcow2() {
+    local vm_name="$1"
+    local output_path="$2"
+    
+    heading "Exporting VM to QCOW2 format: ${vm_name}"
+    
+    # Find VM directory
+    local vm_dir=""
+    while IFS= read -r -d '' dir; do
+        if [[ -f "${dir}/${vm_name}.conf" ]]; then
+            vm_dir="${dir}"
+            break
+        fi
+    done < <(find "${CONFIG_DIR}" -type d -print0 2>/dev/null)
+    
+    [[ -d "${vm_dir}" ]] || die "VM directory not found: ${vm_name}"
+    
+    # Default output path
+    [[ -z "${output_path}" ]] && output_path="${vm_dir}/../${vm_name}.qcow2"
+    
+    # Find all disk images for this VM
+    local disk_files=()
+    while IFS= read -r -d '' disk_file; do
+        [[ "${disk_file}" == *.qcow2 || "${disk_file}" == *.qcow || "${disk_file}" == *.img ]] && disk_files+=("${disk_file}")
+    done < <(find "${vm_dir}/qcow2" -type f -print0 2>/dev/null)
+    
+    if [[ ${#disk_files[@]} -eq 0 ]]; then
+        die "No disk images found in ${vm_dir}/qcow2"
+    fi
+    
+    # For simplicity, export the first disk (can be enhanced to handle multiple)
+    local source_disk="${disk_files[0]}"
+    
+    if [[ -f "${source_disk}" ]]; then
+        log "Converting ${source_disk} to ${output_path}"
+        qemu-img convert -f qcow2 -O qcow2 "${source_disk}" "${output_path}" || {
+            die "Failed to convert disk image"
+        }
+        log "✅ VM exported to QCOW2: ${output_path}"
+        return 0
+    else
+        die "Source disk not found: ${source_disk}"
+    fi
+}
+
+# Export VM to VMDK format (VMware compatible)
+export_vm_vmdk() {
+    local vm_name="$1"
+    local output_path="$2"
+    
+    heading "Exporting VM to VMDK format: ${vm_name}"
+    
+    # Find VM directory
+    local vm_dir=""
+    while IFS= read -r -d '' dir; do
+        if [[ -f "${dir}/${vm_name}.conf" ]]; then
+            vm_dir="${dir}"
+            break
+        fi
+    done < <(find "${CONFIG_DIR}" -type d -print0 2>/dev/null)
+    
+    [[ -d "${vm_dir}" ]] || die "VM directory not found: ${vm_name}"
+    
+    # Default output path
+    [[ -z "${output_path}" ]] && output_path="${vm_dir}/../${vm_name}.vmdk"
+    
+    # Find all disk images for this VM
+    local disk_files=()
+    while IFS= read -r -d '' disk_file; do
+        [[ "${disk_file}" == *.qcow2 || "${disk_file}" == *.qcow || "${disk_file}" == *.img ]] && disk_files+=("${disk_file}")
+    done < <(find "${vm_dir}/qcow2" -type f -print0 2>/dev/null)
+    
+    if [[ ${#disk_files[@]} -eq 0 ]]; then
+        die "No disk images found in ${vm_dir}/qcow2"
+    fi
+    
+    # For simplicity, export the first disk
+    local source_disk="${disk_files[0]}"
+    
+    log "Converting ${source_disk} to VMDK: ${output_path}"
+    qemu-img convert -O vmdk "${source_disk}" "${output_path}" || {
+        die "Failed to convert to VMDK format"
+    }
+    log "✅ VM exported to VMDK: ${output_path}"
+    log "Note: VMDK may need to be fixed with: vmware-vdiskmanager -r source.vmdk fixed.vmdk"
+    return 0
+}
+
+# Export VM to VDI format (VirtualBox compatible)
+export_vm_vdi() {
+    local vm_name="$1"
+    local output_path="$2"
+    
+    heading "Exporting VM to VDI format: ${vm_name}"
+    
+    # Find VM directory
+    local vm_dir=""
+    while IFS= read -r -d '' dir; do
+        if [[ -f "${dir}/${vm_name}.conf" ]]; then
+            vm_dir="${dir}"
+            break
+        fi
+    done < <(find "${CONFIG_DIR}" -type d -print0 2>/dev/null)
+    
+    [[ -d "${vm_dir}" ]] || die "VM directory not found: ${vm_name}"
+    
+    # Default output path
+    [[ -z "${output_path}" ]] && output_path="${vm_dir}/../${vm_name}.vdi"
+    
+    # Find all disk images for this VM
+    local disk_files=()
+    while IFS= read -r -d '' disk_file; do
+        [[ "${disk_file}" == *.qcow2 || "${disk_file}" == *.qcow || "${disk_file}" == *.img ]] && disk_files+=("${disk_file}")
+    done < <(find "${vm_dir}/qcow2" -type f -print0 2>/dev/null)
+    
+    if [[ ${#disk_files[@]} -eq 0 ]]; then
+        die "No disk images found in ${vm_dir}/qcow2"
+    fi
+    
+    # For simplicity, export the first disk
+    local source_disk="${disk_files[0]}"
+    
+    log "Converting ${source_disk} to VDI: ${output_path}"
+    qemu-img convert -O vdi "${source_disk}" "${output_path}" || {
+        die "Failed to convert to VDI format"
+    }
+    log "✅ VM exported to VDI: ${output_path}"
+    return 0
+}
+
+# Export VM to RAW format
+export_vm_raw() {
+    local vm_name="$1"
+    local output_path="$2"
+    
+    heading "Exporting VM to RAW format: ${vm_name}"
+    
+    # Find VM directory
+    local vm_dir=""
+    while IFS= read -r -d '' dir; do
+        if [[ -f "${dir}/${vm_name}.conf" ]]; then
+            vm_dir="${dir}"
+            break
+        fi
+    done < <(find "${CONFIG_DIR}" -type d -print0 2>/dev/null)
+    
+    [[ -d "${vm_dir}" ]] || die "VM directory not found: ${vm_name}"
+    
+    # Default output path
+    [[ -z "${output_path}" ]] && output_path="${vm_dir}/../${vm_name}.raw"
+    
+    # Find all disk images for this VM
+    local disk_files=()
+    while IFS= read -r -d '' disk_file; do
+        [[ "${disk_file}" == *.qcow2 || "${disk_file}" == *.qcow || "${disk_file}" == *.img ]] && disk_files+=("${disk_file}")
+    done < <(find "${vm_dir}/qcow2" -type f -print0 2>/dev/null)
+    
+    if [[ ${#disk_files[@]} -eq 0 ]]; then
+        die "No disk images found in ${vm_dir}/qcow2"
+    fi
+    
+    # For simplicity, export the first disk
+    local source_disk="${disk_files[0]}"
+    
+    log "Converting ${source_disk} to RAW: ${output_path}"
+    qemu-img convert -O raw "${source_disk}" "${output_path}" || {
+        die "Failed to convert to RAW format"
+    }
+    log "✅ VM exported to RAW: ${output_path}"
+    log "Warning: RAW format can be very large and doesn't support snapshots"
+    return 0
+}
+
+# Export VM menu (interactive)
+export_vm_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "export_vm_menu function requires interactive mode"
+        return 1
+    fi
+    
+    list_vms || return 1
+    local vm_num
+    vm_num=$(ask "Select VM number to export" "")
+    
+    if [[ -n "$vm_num" && "$vm_num" =~ ^[0-9]+$ ]]; then
+        local vm_confs=()
+        while IFS= read -r -d '' vm_conf; do
+            vm_confs+=("$vm_conf")
+        done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
+        
+        if [[ $vm_num -ge 1 && $vm_num -le ${#vm_confs[@]} ]]; then
+            local selected_vm=$(basename "${vm_confs[$((vm_num-1))]}" .conf)
+            
+            echo ""
+            echo "Export Format Options:"
+            echo "  [1] QCOW2 (QEMU native, recommended)"
+            echo "  [2] VMDK (VMware compatible)"
+            echo "  [3] VDI (VirtualBox compatible)"
+            echo "  [4] RAW (Uncompressed, universal)"
+            echo ""
+            
+            local format_choice
+            format_choice=$(ask "Select export format" "1")
+            
+            case "${format_choice}" in
+                1) export_vm_qcow2 "${selected_vm}" ;;
+                2) export_vm_vmdk "${selected_vm}" ;;
+                3) export_vm_vdi "${selected_vm}" ;;
+                4) export_vm_raw "${selected_vm}" ;;
+                *) warn "Invalid format selection" ;;
+            esac
+        fi
+    fi
+}
+
+# Import VM from foreign format
+import_vm() {
+    local input_file="$1"
+    local vm_name="$2"
+    local format="$3"
+    
+    heading "Importing VM from: ${input_file}"
+    
+    [[ -f "${input_file}" ]] || die "Input file not found: ${input_file}"
+    
+    # Determine format if not specified
+    if [[ -z "${format}" ]]; then
+        case "${input_file}" in
+            *.qcow2|*.qcow) format="qcow2" ;;
+            *.vmdk) format="vmdk" ;;
+            *.vdi) format="vdi" ;;
+            *.raw) format="raw" ;;
+            *.img) format="raw" ;;
+            *) die "Unable to determine format from filename: ${input_file}" ;;
+        esac
+    fi
+    
+    # Default VM name from filename if not specified
+    if [[ -z "${vm_name}" ]]; then
+        vm_name=$(basename "${input_file}" | sed 's/\.[^.]*$//')
+    fi
+    
+    # Create VM directory structure
+    local vm_dir="${VM_DIR}/${vm_name}"
+    local qcow2_dir="${vm_dir}/qcow2"
+    local conf_dir="${vm_dir}/conf"
+    
+    ensure_dir "${qcow2_dir}"
+    ensure_dir "${conf_dir}"
+    
+    # Convert to QCOW2 format (native for vm-manager.sh)
+    local output_disk="${qcow2_dir}/${vm_name}-disk1.qcow2"
+    
+    log "Converting ${input_file} to QCOW2 format..."
+    qemu-img convert -O qcow2 "${input_file}" "${output_disk}" || {
+        die "Failed to convert disk image"
+    }
+    
+    # Create basic configuration file
+    local config_file="${conf_dir}/${vm_name}.conf"
+    
+    cat > "${config_file}" << EOF
+# VM Configuration: ${vm_name}
+# Imported from ${format} format on $(date)
+VM_NAME="${vm_name}"
+QEMU_ARCH="x86_64"  # Set appropriate architecture
+MACHINE="pc"        # Set appropriate machine type
+CPU="host"          # Set appropriate CPU
+RAM_MB="2048"       # Set appropriate RAM
+HDD_IMAGE="${output_disk}"
+# Add other configuration options as needed
+EOF
+    
+    log "✅ VM imported successfully: ${vm_name}"
+    log "Configuration: ${config_file}"
+    log "Disk image: ${output_disk}"
+    log ""
+    log "Note: You may need to edit the configuration file to set appropriate settings"
+    return 0
+}
+
+# Import VM menu (interactive)
+import_vm_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "import_vm_menu function requires interactive mode"
+        return 1
+    fi
+    
+    local input_file
+    input_file=$(ask "Enter path to disk image file to import" "")
+    
+    [[ -f "${input_file}" ]] || die "File not found: ${input_file}"
+    
+    local vm_name
+    vm_name=$(ask "Enter VM name (leave empty to use filename)" "")
+    
+    import_vm "${input_file}" "${vm_name}"
+}
+
 # Create UTM VM configuration
 create_utm_vm() {
     # This function requires interactive mode
@@ -7638,7 +7944,11 @@ show_main_menu() {
         echo "  [19] Create UTM VM configuration"
         echo "  [20] Export VM to UTM format"
         echo ""
-        echo "🔧 Advanced VM Management:"
+        echo "📥 Export/Import VMs:"
+        echo "  [81] Export VM to other format"
+        echo "  [82] Import VM from disk image"
+        echo ""
+        echo "🔧 Advanced VM Management:"}
         echo "  [21] Stop a running VM"
         echo "  [22] Edit VM configuration"
         echo "  [23] Clone VM"
@@ -7744,12 +8054,14 @@ show_main_menu() {
             29) backup_restore_menu ;;
             30) cleanup_all_snapshots ;;
             31) cleanup_unused_disks ;;
-            32) launch_macos_68k ;;
-            33) launch_macos_ppc ;;
-            34) launch_macos_ppc64 ;;
-            35) launch_macos_10_6_ppc ;;
-            36) create_and_launch_macos_10_6_ppc ;;
-            37) debug_macos_10_6_ppc ;;
+            81) export_vm_menu ;;
+            82) import_vm_menu ;;
+            34) launch_macos_68k ;;
+            35) launch_macos_ppc ;;
+            36) launch_macos_ppc64 ;;
+            37) launch_macos_10_6_ppc ;;
+            38) create_and_launch_macos_10_6_ppc ;;
+            39) debug_macos_10_6_ppc ;;
             38) launch_haiku ;;
             39) launch_linux ;;
             40) launch_atari ;;
@@ -7759,6 +8071,8 @@ show_main_menu() {
             44) launch_windows_xp ;;
             45) launch_openstep ;;
             46) launch_custom ;;
+            81) export_vm_menu ;;
+            82) import_vm_menu ;;
             69) check_retro68 ;;
             70) install_retro68 ;;
             71) setup_retro68_environment ;;
@@ -8142,6 +8456,16 @@ Multi-VM Orchestration:
   suspend-all       Suspend all running VMs
   orchestration     Interactive orchestration menu
 
+VM Export/Import:
+  export <name> <out>        Export VM to QCOW2 format
+  export-qcow2 <name> <out> Export VM to QCOW2 format
+  export-vmdk <name> <out>  Export VM to VMDK (VMware) format
+  export-vdi <name> <out>   Export VM to VDI (VirtualBox) format
+  export-raw <name> <out>   Export VM to RAW format
+  import <file> <name>      Import VM from disk image file
+  export-menu              Interactive export menu
+  import-menu              Interactive import menu
+
 Platform Presets:
   macos-68k        Launch MacOS 68k VM
   macos-ppc        Launch MacOS PPC VM (G3/G4)
@@ -8410,6 +8734,20 @@ main() {
         status-all) status_all_vms ;;
         suspend-all) suspend_all_vms ;;
         orchestration|orchestrate) orchestration_menu ;;
+        
+        # VM Export/Import
+        export|export-vm) 
+            [[ -n "${2:-}" && -n "${3:-}" ]] && export_vm_qcow2 "$2" "$3" || export_vm_menu ;;
+        export-qcow2) 
+            [[ -n "${2:-}" ]] && export_vm_qcow2 "$2" "$3" || die "Please specify VM name" ;;
+        export-vmdk) 
+            [[ -n "${2:-}" ]] && export_vm_vmdk "$2" "$3" || die "Please specify VM name" ;;
+        export-vdi) 
+            [[ -n "${2:-}" ]] && export_vm_vdi "$2" "$3" || die "Please specify VM name" ;;
+        export-raw) 
+            [[ -n "${2:-}" ]] && export_vm_raw "$2" "$3" || die "Please specify VM name" ;;
+        import|import-vm) 
+            [[ -n "${2:-}" ]] && import_vm "$2" "$3" "$4" || import_vm_menu ;;
         
         # Platform presets
         macos-68k) launch_macos_68k ;;
