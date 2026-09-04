@@ -1380,7 +1380,13 @@ configure_qemu() {
         --prefix="${QEMU_INSTALL_PREFIX}" \
         --target-list="${target_list}" \
         "${EXTRA_CONFIG_FLAGS[@]}" \
-        2>&1 | tee configure.log
+        2>&1 | tee configure.log || {
+            warn "Some optional features were not found; retrying with minimal flags..."
+            "${QEMU_SRC_DIR}/configure" \
+                --prefix="${QEMU_INSTALL_PREFIX}" \
+                --target-list="${target_list}" \
+                2>&1 | tee configure.log
+        }
 }
 
 build_qemu() {
