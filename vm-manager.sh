@@ -2692,6 +2692,464 @@ launch_macos_ppc64() {
     "${cmd[@]}" 2>&1 | tee "${VM_LOG_DIR}/macos-ppc64-$(date +%Y%m%d-%H%M%S).log"
 }
 
+# Launch MacOS 10.6 Snow Leopard PPC with comprehensive options
+launch_macos_10_6_ppc() {
+    heading "MacOS X 10.6 Snow Leopard (PPC)"
+    log "Optimized configuration for Mac OS X 10.6 with dual display and debugging"
+    log "Machine: QEMU mac99 (PowerPC 970fx)"
+    log "Note: You need Mac OS X 10.6 Snow Leopard retail DVD ISO"
+    log "Reference config: $(config_path "macos-ppc64")"
+    
+    local qemu
+    qemu=$(qemu_bin_or_die "qemu-system-ppc64")
+
+    # Pre-configured settings for MacOS 10.6
+    local ram
+    ram=$(ask_ram_size "RAM size (MiB) - recommended 2048M for 10.6" "2048")
+    
+    local cpu="970fx"  # Best CPU for MacOS 10.6
+    log "Using CPU: ${cpu} (recommended for MacOS 10.6)"
+    
+    # SMP configuration - MacOS 10.6 supports multi-core
+    local smp_sockets=2
+    local smp_cores=1
+    local smp_threads=1
+    local smp_flags="${smp_sockets},sockets=${smp_sockets},cores=${smp_cores},threads=${smp_threads}"
+    log "Using SMP: ${smp_flags}"
+    
+    local disk
+    disk=$(pick_image "macos-106-ppc")
+    
+    local cdrom
+    cdrom=$(pick_cdrom "macos-106-ppc")
+    
+    # Display configuration - dual screen by default
+    local display="${DEFAULT_DISPLAY}"
+    if [[ "${display}" == "none" ]]; then
+        display=$(ask "Display backend (cocoa/gtk/vnc/spice)" "cocoa")
+    fi
+    log "Using display backend: ${display}"
+    
+    # Dual display configuration
+    local extra_displays="secondary-vga,vgamem_mb=32"
+    log "Configuring dual display: primary + secondary VGA"
+    
+    # Network configuration
+    local network_model="sungem"
+    local port_forwards=""
+    
+    # Add SSH port forwarding for debugging
+    port_forwards=$(ask "Additional port forwards (comma-separated host:guest, e.g., 2222:22)" "")
+    
+    # Add GDB bridge port forwarding
+    local gdb_port="${DEFAULT_GDB_BRIDGE_PORT}"
+    local gdb_forward="tcp:${gdb_port}::${gdb_port}"
+    local combined_forwards
+    combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
+    
+    # ROM/firmware configuration
+    local firmware_path=""
+    firmware_path=$(ask "Path to Mac ROM file (optional, leave blank for OpenBIOS)" "")
+    local firmware_mode="auto"
+    
+    # Display flags
+    local -a dflags; display_flags dflags "${display}" "${qemu}"
+    
+    # Network flags
+    local -a netflags; append_user_network netflags "${network_model}" "${combined_forwards}"
+    
+    # Debug flags
+    local -a dbgflags; qemu_gdb_flags dbgflags
+    
+    # Build QEMU command
+    local cmd=(
+        "${qemu}"
+        -machine mac99,via=pmu
+        -m "${ram}"
+        -cpu "${cpu}"
+        -smp "${smp_flags}"
+        "${dflags[@]}"
+        -device VGA,vgamem_mb=64
+        -device usb-kbd
+        -device usb-mouse
+        "${netflags[@]}"
+        -rtc base=localtime
+        "${dbgflags[@]}"
+    )
+
+    # Add dual display devices
+    append_extra_display_devices cmd "${extra_displays}"
+    
+    # Add firmware if specified
+    append_firmware_attachment cmd "${firmware_path}" "${firmware_mode}" "Mac ROM"
+    
+    # Add disk and CDROM
+    if [[ -n "${disk}" ]]; then
+        cmd+=(-hda "${disk}")
+    fi
+    if [[ -n "${cdrom}" ]]; then
+        cmd+=(-cdrom "${cdrom}" -boot d)
+    fi
+    
+    # Additional optimizations for MacOS 10.6
+    cmd+=(
+        -device ide-hd,bus=ide.0,unit=0
+        -device ide-cd,bus=ide.1,unit=0
+    )
+
+    log "MacOS 10.6 PPC Configuration:"
+    log "  CPU: ${cpu}"
+    log "  RAM: ${ram} MB"
+    log "  SMP: ${smp_flags}"
+    log "  Display: ${display} + dual VGA"
+    log "  Network: ${network_model} with port forwarding"
+    log "  Debug: GDB enabled on port ${gdb_port}"
+    log "  Disk: ${disk:-none}"
+    log "  CDROM: ${cdrom:-none}"
+    log ""
+    
+    log "Running: ${cmd[*]}"
+    mkdir -p "${VM_LOG_DIR}"
+    "${cmd[@]}" 2>&1 | tee "${VM_LOG_DIR}/macos-106-ppc-$(date +%Y%m%d-%H%M%S).log"
+}
+
+# Create and launch MacOS 10.6 PPC VM with comprehensive options
+create_and_launch_macos_10_6_ppc() {
+    heading "Create and Launch MacOS X 10.6 Snow Leopard (PPC)"
+    log "This will create a fully configured VM for MacOS 10.6 with dual display and debugging"
+    
+    local vm_name
+    vm_name=$(ask "VM name for MacOS 10.6 PPC" "macos-106-ppc")
+    [[ -z "${vm_name}" ]] && { warn "VM name cannot be empty"; return 1; }
+    
+    local platform="ppc64"
+    local vm_dir="${VM_DIR}/${vm_name}_${platform}"
+    
+    # Check if VM already exists
+    if [[ -d "${vm_dir}" ]]; then
+        local overwrite
+        overwrite=$(ask "VM directory already exists. Overwrite? (y/n)" "n")
+        if [[ "${overwrite}" != "y" ]]; then
+            warn "VM creation cancelled"
+            return 1
+        fi
+        log "Removing existing VM..."
+        rm -rf "${vm_dir}"
+    fi
+    
+    # Create directory structure
+    ensure_dir "${vm_dir}/conf"
+    ensure_dir "${vm_dir}/qcow2"
+    ensure_dir "${vm_dir}/sh"
+    ensure_dir "${vm_dir}/rom"
+    ensure_dir "${vm_dir}/snapshots"
+    
+    log "Created directory structure: ${vm_dir}"
+    
+    # Configuration parameters
+    local ram="2048"
+    local cpu="970fx"
+    local smp_sockets=2
+    local smp_cores=1
+    local display_backend="${DEFAULT_DISPLAY}"
+    [[ "${display_backend}" == "none" ]] && display_backend="cocoa"
+    
+    # Disk configuration
+    local disk_size="40G"
+    local disk_path="${vm_dir}/qcow2/${vm_name}.qcow2"
+    local iso_path=""
+    
+    # Ask for ISO path
+    local iso_list=()
+    while IFS= read -r -d '' iso_file; do
+        iso_list+=("${iso_file}")
+    done < <(find "${ISO_DIR}" -name "*Mac*10.6*" -o -name "*Snow*Leopard*" | grep -i ".iso" | head -5 | xargs -0 find 2>/dev/null)
+    
+    if [[ ${#iso_list[@]} -gt 0 ]]; then
+        echo "Available MacOS 10.6 ISOs:"
+        local i=1
+        for iso in "${iso_list[@]}"; do
+            echo "  [$i] $(basename "${iso}")"
+            ((i++)) || true
+        done
+        
+        local iso_choice
+        iso_choice=$(ask "Select ISO (1-${#iso_list[@]}) or enter path" "1")
+        
+        if [[ "${iso_choice}" =~ ^[0-9]+$ && ${iso_choice} -ge 1 && ${iso_choice} -le ${#iso_list[@]} ]]; then
+            iso_path="${iso_list[$((iso_choice-1))]}"
+        else
+            iso_path=$(ask "Enter path to MacOS 10.6 ISO" "")
+        fi
+    else
+        iso_path=$(ask "Enter path to MacOS 10.6 Snow Leopard ISO" "")
+    fi
+    
+    # Create disk image if it doesn't exist
+    if [[ ! -f "${disk_path}" ]]; then
+        log "Creating disk image: ${disk_path} (${disk_size})"
+        if ! qemu-img create -f qcow2 "${disk_path}" "${disk_size}" 2>/dev/null; then
+            warn "Failed to create disk image"
+            return 1
+        fi
+        log "✓ Disk image created"
+    else
+        log "Using existing disk image: ${disk_path}"
+    fi
+    
+    # Create configuration file
+    local config_file="${vm_dir}/conf/${vm_name}.conf"
+    cat > "${config_file}" << EOF
+# MacOS X 10.6 Snow Leopard (PPC64) Configuration
+# VM: ${vm_name}
+# Platform: ${platform}
+# Created: $(date)
+
+# QEMU binary
+QEMU_BIN=qemu-system-ppc64
+
+# Machine/CPU
+MACHINE=mac99,via=pmu
+CPU=${cpu}
+RAM_MB=${ram}
+SMP_SOCKETS=${smp_sockets}
+SMP_CORES=${smp_cores}
+SMP_THREADS=1
+
+# Display
+DISPLAY_BACKEND=${display_backend}
+DUAL_DISPLAY=yes
+EXTRA_DISPLAYS=secondary-vga,vgamem_mb=32
+
+# Storage
+HDD_IMAGE=${disk_path}
+CDROM_IMAGE=${iso_path}
+BOOT_ORDER=d
+
+# Network
+NETWORK_MODEL=sungem
+NETWORK_TYPE=user
+
+# Debug
+ENABLE_GDB=yes
+GDB_PORT=${DEFAULT_GDB_PORT}
+GDB_BRIDGE_PORT=${DEFAULT_GDB_BRIDGE_PORT}
+
+# Host Integration
+SHARED_DIR=${VM_SHARED_DIR}
+AUDIO_BACKEND=sdl
+
+# ROM/Firmware
+FIRMWARE_PATH=
+FIRMWARE_MODE=auto
+EOF
+    
+    log "✓ Configuration file created: ${config_file}"
+    
+    # Create launch script
+    local launch_script="${vm_dir}/sh/launch-${vm_name}.sh"
+    cat > "${launch_script}" << 'EOF'
+#!/bin/bash
+# Launch script for MacOS 10.6 PPC VM
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CONFIG_DIR="${SCRIPT_DIR}"
+
+# Source configuration
+CONFIG_FILE="${CONFIG_DIR}/conf/$(basename "${CONFIG_DIR}").conf"
+if [[ -f "${CONFIG_FILE}" ]]; then
+    source "${CONFIG_FILE}"
+fi
+
+# Build QEMU command
+QEMU="${QEMU_BIN:-qemu-system-ppc64}"
+CMD=(
+    "${QEMU}"
+    -machine "${MACHINE:-mac99,via=pmu}"
+    -m "${RAM_MB:-2048}"
+    -cpu "${CPU:-970fx}"
+    -smp "${SMP_SOCKETS:-2},sockets=${SMP_SOCKETS:-2},cores=${SMP_CORES:-1},threads=${SMP_THREADS:-1}"
+    -display "${DISPLAY_BACKEND:-cocoa}"
+    -device VGA,vgamem_mb=64
+    -device secondary-vga,vgamem_mb=32
+    -device usb-kbd
+    -device usb-mouse
+    -nic user,model="${NETWORK_MODEL:-sungem}"
+    -rtc base=localtime
+    -gdb tcp::"${GDB_BRIDGE_PORT:-2346}"
+)
+
+if [[ -n "${FIRMWARE_PATH}" ]]; then
+    CMD+=(-bios "${FIRMWARE_PATH}")
+fi
+
+if [[ -n "${HDD_IMAGE}" ]]; then
+    CMD+=(-hda "${HDD_IMAGE}")
+fi
+
+if [[ -n "${CDROM_IMAGE}" ]]; then
+    CMD+=(-cdrom "${CDROM_IMAGE}")
+fi
+
+# Port forwarding
+CMD+=(-device e1000,netdev=net0 -netdev user,id=net0,hostfwd=tcp::2222-:22,hostfwd=tcp::2345-:2345,hostfwd=tcp::2346-:2346)
+
+echo "Launching: ${CMD[*]}"
+exec "${CMD[@]}"
+EOF
+    
+    chmod +x "${launch_script}"
+    log "✓ Launch script created: ${launch_script}"
+    
+    log "✅ MacOS 10.6 PPC VM created successfully!"
+    log "VM Directory: ${vm_dir}"
+    log "Configuration: ${config_file}"
+    log "Launch Script: ${launch_script}"
+    log ""
+    log "To launch manually:"
+    log "  cd ${vm_dir}/sh"
+    log "  ./launch-${vm_name}.sh"
+    log ""
+    log "To launch with this script:"
+    log "  ${SCRIPT_NAME} launch ${vm_name}"
+    
+    # Ask if user wants to launch now
+    local launch_now
+    launch_now=$(ask "Launch VM now? (y/n)" "y")
+    if [[ "${launch_now}" == "y" ]]; then
+        launch_vm "${vm_name}"
+    fi
+    
+    return 0
+}
+
+# Debug MacOS 10.6 PPC VM
+# This function launches the VM with enhanced debugging options
+debug_macos_10_6_ppc() {
+    local vm_name="${1:-macos-106-ppc}"
+    
+    heading "Debug MacOS X 10.6 Snow Leopard (PPC)"
+    log "Launching VM with enhanced debugging for MacOS 10.6"
+    
+    # Check if VM exists
+    local config_file=""
+    while IFS= read -r -d '' file; do
+        if [[ "$(basename "$file" .conf)" == "${vm_name}" ]]; then
+            config_file="$file"
+            break
+        fi
+    done < <(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print0 2>/dev/null)
+    
+    if [[ -z "${config_file}" ]]; then
+        warn "VM configuration not found: ${vm_name}"
+        local create_option
+        create_option=$(ask "Create VM now? (y/n)" "y")
+        if [[ "${create_option}" == "y" ]]; then
+            create_and_launch_macos_10_6_ppc
+            return $?
+        else
+            return 1
+        fi
+    fi
+    
+    # Load configuration
+    source "${config_file}" 2>/dev/null || {
+        warn "Failed to load configuration: ${config_file}"
+        return 1
+    }
+    
+    local qemu="${QEMU_BIN:-qemu-system-ppc64}"
+    
+    # Display debug information
+    log "Debug Configuration for MacOS 10.6 PPC:"
+    log "  VM Name: ${vm_name}"
+    log "  QEMU Binary: ${qemu}"
+    log "  Machine: ${MACHINE:-mac99,via=pmu}"
+    log "  CPU: ${CPU:-970fx}"
+    log "  RAM: ${RAM_MB:-2048} MB"
+    log "  Display: ${DISPLAY_BACKEND:-cocoa}"
+    log "  HDD: ${HDD_IMAGE:-none}"
+    log "  CDROM: ${CDROM_IMAGE:-none}"
+    log ""
+    
+    # Enhanced debugging configuration
+    log "Debug Options:"
+    log "  GDB Port: ${GDB_PORT:-1234}"
+    log "  GDB Bridge Port: ${GDB_BRIDGE_PORT:-2346}"
+    
+    # Additional debug ports
+    local ssh_port="2222"
+    local afp_port="548"
+    local tls_port="8443"
+    
+    log "  SSH Port: ${ssh_port}"
+    log "  AFP Port: ${afp_port}"
+    log "  TLS Proxy Port: ${tls_port}"
+    log ""
+    
+    # Network configuration with enhanced port forwarding
+    local network_model="${NETWORK_MODEL:-sungem}"
+    local port_forwards="tcp:${ssh_port}:22,tcp:${afp_port}:548,tcp:${tls_port}:8443,tcp:${GDB_BRIDGE_PORT:-2346}:2346"
+    
+    # Display configuration
+    local -a dflags; display_flags dflags "${DISPLAY_BACKEND:-cocoa}" "${qemu}"
+    
+    # Network flags with enhanced port forwarding
+    local -a netflags; append_user_network netflags "${network_model}" "${port_forwards}"
+    
+    # Debug flags
+    local -a dbgflags; qemu_gdb_flags dbgflags
+    
+    # Build enhanced debug command
+    local cmd=(
+        "${qemu}"
+        -machine "${MACHINE:-mac99,via=pmu}"
+        -m "${RAM_MB:-2048}"
+        -cpu "${CPU:-970fx}"
+        -smp "${SMP_SOCKETS:-2},sockets=${SMP_SOCKETS:-2},cores=${SMP_CORES:-1},threads=${SMP_THREADS:-1}"
+        "${dflags[@]}"
+        -device VGA,vgamem_mb=64
+        -device secondary-vga,vgamem_mb=32  # Dual display
+        -device usb-kbd
+        -device usb-mouse
+        "${netflags[@]}"
+        -rtc base=localtime
+        "${dbgflags[@]}"
+        -serial stdio  # Serial console for debugging
+        -monitor telnet:127.0.0.1:5555,server,nowait  # QEMU monitor
+    )
+    
+    # Add firmware if specified
+    if [[ -n "${FIRMWARE_PATH:-}" ]]; then
+        append_firmware_attachment cmd "${FIRMWARE_PATH}" "${FIRMWARE_MODE:-auto}" "Mac ROM"
+    fi
+    
+    # Add disk and CDROM
+    if [[ -n "${HDD_IMAGE:-}" ]]; then
+        cmd+=(-hda "${HDD_IMAGE}")
+    fi
+    if [[ -n "${CDROM_IMAGE:-}" ]]; then
+        cmd+=(-cdrom "${CDROM_IMAGE}" -boot d)
+    fi
+    
+    log "Debug Command:"
+    log "  ${cmd[*]}"
+    log ""
+    log "Debug Access Points:"
+    log "  GDB: tcp::${GDB_BRIDGE_PORT:-2346}"
+    log "  QEMU Monitor: telnet://127.0.0.1:5555"
+    log "  Serial Console: stdio (current terminal)"
+    log "  SSH: localhost:${ssh_port} -> guest:22"
+    log "  AFP: localhost:${afp_port} -> guest:548"
+    log "  TLS Proxy: localhost:${tls_port} -> guest:8443"
+    log ""
+    log "Connect GDB with:"
+    log "  gdb-multiarch -ex 'target remote localhost:${GDB_BRIDGE_PORT:-2346}'"
+    log ""
+    
+    mkdir -p "${VM_LOG_DIR}"
+    "${cmd[@]}" 2>&1 | tee "${VM_LOG_DIR}/debug-${vm_name}-$(date +%Y%m%d-%H%M%S).log"
+}
+
 launch_haiku() {
     heading "HaikuOS (x86 / x86_64)"
     log "Download Haiku nightlies or releases from https://www.haiku-os.org/get-haiku"
@@ -4222,6 +4680,325 @@ backup_restore_menu() {
     else
         log "No backup selected"
     fi
+}
+
+# Cleanup old snapshots for a specific VM
+cleanup_vm_snapshots() {
+    local vm_name="$1"
+    local max_age_days="${2:-30}"  # Default: 30 days
+    
+    heading "Cleaning up old snapshots for VM: ${vm_name}"
+    
+    # Find the VM directory and snapshots
+    local vm_dir=""
+    local snapshot_dir=""
+    
+    while IFS= read -r -d '' file; do
+        if [[ "$(basename "$file" .conf)" == "${vm_name}" ]]; then
+            vm_dir=$(dirname "$(dirname "${file}")")
+            snapshot_dir="${vm_dir}/snapshots"
+            break
+        fi
+    done < <(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print0 2>/dev/null)
+    
+    [[ -f "${file}" ]] || die "VM config not found: ${vm_name}"
+    
+    if [[ ! -d "${snapshot_dir}" ]]; then
+        log "No snapshots directory found for VM: ${vm_name}"
+        return 0
+    fi
+    
+    local snapshot_count=0
+    local deleted_count=0
+    local cutoff_date
+    cutoff_date=$(date -d "${max_age_days} days ago" +%s 2>/dev/null || date -v-${max_age_days}d +%s 2>/dev/null)
+    local now
+    now=$(date +%s)
+    
+    log "Scanning snapshots in: ${snapshot_dir}"
+    log "Deleting snapshots older than ${max_age_days} days..."
+    
+    # Find and delete old snapshot files
+    while IFS= read -r -d '' snapshot_file; do
+        [[ -f "${snapshot_file}" ]] || continue
+        
+        local file_date
+        file_date=$(stat -f "%m" "${snapshot_file}" 2>/dev/null || stat -c "%Y" "${snapshot_file}" 2>/dev/null)
+        
+        if [[ -n "${file_date}" && ${file_date} -lt ${cutoff_date} ]]; then
+            local snapshot_name=$(basename "${snapshot_file}")
+            if rm "${snapshot_file}"; then
+                log "✓ Deleted old snapshot: ${snapshot_name}"
+                deleted_count=$((deleted_count + 1))
+            else
+                warn "✗ Failed to delete: ${snapshot_name}"
+            fi
+        fi
+        
+        snapshot_count=$((snapshot_count + 1))
+    done < <(find "${snapshot_dir}" -type f \( -name "*.conf" -o -name "*.qcow2" \) -print0 2>/dev/null)
+    
+    log "Snapshot cleanup complete for ${vm_name}: ${deleted_count} of ${snapshot_count} snapshots deleted"
+    
+    return 0
+}
+
+# Cleanup all VM snapshots
+cleanup_all_snapshots() {
+    local max_age_days="${1:-30}"
+    local all_vms=()
+    
+    heading "Cleaning up all VM snapshots (older than ${max_age_days} days)"
+    
+    # Find all VM config files
+    while IFS= read -r -d '' file; do
+        all_vms+=("$(basename "$file" .conf)")
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null)
+    
+    if [[ ${#all_vms[@]} -eq 0 ]]; then
+        log "No VMs found"
+        return 0
+    fi
+    
+    log "Found ${#all_vms[@]} VMs to check"
+    
+    local total_deleted=0
+    for vm in "${all_vms[@]}"; do
+        log "Cleaning up snapshots for: ${vm}"
+        if cleanup_vm_snapshots "${vm}" "${max_age_days}"; then
+            : # Success
+        else
+            warn "Failed to cleanup snapshots for: ${vm}"
+        fi
+    done
+    
+    log "✅ All VM snapshot cleanup complete"
+    return 0
+}
+
+# Find and remove unused disk images
+cleanup_unused_disks() {
+    local dry_run="${1:-true}"  # Default to dry run for safety
+    
+    heading "Finding Unused Disk Images"
+    
+    if [[ "${dry_run}" == "true" ]]; then
+        log "DRY RUN: No disks will actually be deleted"
+        log "Add --force to actually delete unused disks"
+    fi
+    
+    # Find all disk images
+    local all_disks=()
+    while IFS= read -r -d '' disk; do
+        all_disks+=("${disk}")
+    done < <(find "${VM_IMAGE_DIR}" -name "*.qcow2" -print0 2>/dev/null)
+    
+    if [[ ${#all_disks[@]} -eq 0 ]]; then
+        log "No disk images found in ${VM_IMAGE_DIR}"
+        return 0
+    fi
+    
+    log "Found ${#all_disks[@]} disk images"
+    
+    # Find all disks referenced in VM configurations
+    local used_disks=()
+    while IFS= read -r -d '' config_file; do
+        while IFS= read -r line; do
+            [[ "${line}" =~ HDD_IMAGE=|CDROM_IMAGE= ]] || continue
+            local disk_path="${line#*=}"
+            disk_path=$(trim "${disk_path}")
+            disk_path=$(echo "${disk_path}" | sed 's/^"//;s/"$//')
+            used_disks+=("${disk_path}")
+        done < "${config_file}"
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null)
+    
+    log "Found ${#used_disks[@]} disk references in VM configurations"
+    
+    # Find unused disks
+    local unused_disks=()
+    local deleted_count=0
+    
+    for disk in "${all_disks[@]}"; do
+        local is_used=false
+        for used_disk in "${used_disks[@]}"; do
+            if [[ "${disk}" == "${used_disk}" ]]; then
+                is_used=true
+                break
+            fi
+        done
+        
+        if [[ "${is_used}" == "false" ]]; then
+            unused_disks+=("${disk}")
+            if [[ "${dry_run}" == "false" ]]; then
+                if rm "${disk}"; then
+                    log "✓ Deleted unused disk: $(basename "${disk}")"
+                    deleted_count=$((deleted_count + 1))
+                else
+                    warn "✗ Failed to delete: $(basename "${disk}")"
+                fi
+            else
+                warn "  DRY RUN: Would delete unused disk: $(basename "${disk}")"
+            fi
+        fi
+    done
+    
+    if [[ "${dry_run}" == "true" ]]; then
+        log "DRY RUN: Would delete ${#unused_disks[@]} unused disks"
+        log "To actually delete them, run: ${SCRIPT_NAME} cleanup-disks --force"
+    else
+        log "✅ Deleted ${deleted_count} unused disk images"
+    fi
+    
+    return 0
+}
+
+# Cleanup temporary files and cache
+cleanup_temp_files() {
+    heading "Cleaning up Temporary Files and Cache"
+    
+    local cleanup_paths=(
+        "${VM_SHARED_DIR}/.DS_Store"
+        "${VM_SHARED_DIR}/.*~"
+        "${VM_SHARED_DIR}/*.tmp"
+        "${VM_SHARED_DIR}/*.temp"
+        "${CONFIG_DIR}/.DS_Store"
+        "${VM_LOG_DIR}/*.log.*"
+    )
+    
+    local total_deleted=0
+    
+    for pattern in "${cleanup_paths[@]}"; do
+        while IFS= read -r -d '' file; do
+            if [[ "${dry_run:-false}" == "true" ]]; then
+                log "  DRY RUN: Would delete: ${file}"
+            else
+                if rm -f "${file}"; then
+                    log "✓ Deleted: ${file}"
+                    total_deleted=$((total_deleted + 1))
+                else
+                    warn "✗ Failed to delete: ${file}"
+                fi
+            fi
+        done < <(find $(dirname "${pattern}") -name "$(basename "${pattern}")" -print0 2>/dev/null)
+    done
+    
+    # Clean up .bak files (backup files from sed -i)
+    if find "${VM_DIR}" -name "*.bak" -print0 2>/dev/null | grep -q .; then
+        local bak_files
+        while IFS= read -r -d '' file; do
+            if [[ "${dry_run:-false}" == "true" ]]; then
+                log "  DRY RUN: Would delete backup: ${file}"
+            else
+                if rm -f "${file}"; then
+                    log "✓ Deleted backup: ${file}"
+                    total_deleted=$((total_deleted + 1))
+                else
+                    warn "✗ Failed to delete backup: ${file}"
+                fi
+            fi
+        done < <(find "${VM_DIR}" -name "*.bak" -print0 2>/dev/null)
+    fi
+    
+    log "✅ Temporary file cleanup complete: ${total_deleted} files deleted"
+    return 0
+}
+
+# Cleanup menu
+cleanup_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "cleanup_menu function requires interactive mode"
+        return 1
+    fi
+    
+    while true; do
+        clear || echo ""
+        heading "Cleanup & Maintenance Menu"
+        
+        echo "Cleanup Options:"
+        echo "  [1] Cleanup old snapshots for a specific VM"
+        echo "  [2] Cleanup old snapshots for all VMs"
+        echo "  [3] Find and remove unused disk images (DRY RUN)"
+        echo "  [4] Remove unused disk images (ACTUAL DELETE)"
+        echo "  [5] Cleanup temporary files"
+        echo "  [6] Run all cleanup operations (DRY RUN)"
+        echo ""
+        echo "  [B] Back to main menu"
+        echo ""
+        
+        choice=$(ask "Select cleanup option" "")
+        
+        case "${choice,,}" in
+            1)
+                list_vms || continue
+                local vm_num
+                vm_num=$(ask "Select VM number to cleanup snapshots" "")
+                
+                # Get VM name from selection
+                local vm_confs=()
+                while IFS= read -r -d '' vm_conf; do
+                    vm_confs+=("${vm_conf}")
+                done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
+                
+                local i=0
+                local selected_vm=""
+                for vm_conf in "${vm_confs[@]}"; do
+                    [[ -f "${vm_conf}" ]] && {
+                        if [[ $i -eq $vm_num ]]; then
+                            selected_vm=$(basename "${vm_conf}" .conf)
+                            break
+                        fi
+                        ((i++)) || true
+                    }
+                done
+                
+                if [[ -n "${selected_vm}" ]]; then
+                    local max_age
+                    max_age=$(ask "Maximum snapshot age in days (default: 30)" "30")
+                    cleanup_vm_snapshots "${selected_vm}" "${max_age}"
+                else
+                    warn "Invalid VM selection"
+                fi
+                ;;
+            2)
+                local max_age
+                max_age=$(ask "Maximum snapshot age in days (default: 30)" "30")
+                cleanup_all_snapshots "${max_age}"
+                ;;
+            3)
+                cleanup_unused_disks true  # Dry run
+                ;;
+            4)
+                local confirm
+                confirm=$(ask "Are you sure you want to DELETE unused disk images? (y/n)" "n")
+                if [[ "${confirm}" == "y" ]]; then
+                    cleanup_unused_disks false  # Actual delete
+                else
+                    log "Cleanup cancelled"
+                fi
+                ;;
+            5)
+                cleanup_temp_files
+                ;;
+            6)
+                log "Running all cleanup operations (DRY RUN)..."
+                cleanup_all_snapshots
+                cleanup_unused_disks true
+                cleanup_temp_files
+                log "All cleanup operations complete (DRY RUN)"
+                ;;
+            b|back)
+                return 0
+                ;;
+            *)
+                warn "Invalid option. Please try again."
+                ;;
+        esac
+        
+        if is_interactive; then
+            read -rp "Press Enter to continue..." _
+        fi
+    done
 }
 
 # ---------------------------------------------------------------------------
@@ -6355,45 +7132,51 @@ show_main_menu() {
         echo "  [27] Create configuration backup"
         echo "  [28] List available backups"
         echo "  [29] Restore from backup"
+        echo "  [30] Cleanup old snapshots"
+        echo "  [31] Find unused disk images"
         echo ""
         echo "🚀 Quick Launch (Platform Presets):"
-        echo "  [30] MacOS 68k (System 7-8.1)"
-        echo "  [31] MacOS PPC (7.5.2-9.2.2, G3/G4)"
-        echo "  [32] MacOS PPC64 (Mac OS X, G5)"
-        echo "  [33] HaikuOS"
-        echo "  [34] Linux (generic)"
-        echo "  [35] Atari ST/TT/Falcon (68k)"
-        echo "  [36] Commodore Amiga (68k/AROS)"
-        echo "  [37] Solaris x86"
-        echo "  [38] Solaris SPARC"
-        echo "  [39] Windows XP"
-        echo "  [40] OpenStep x86"
-        echo "  [41] Custom QEMU (any architecture)"
+        echo "  [32] MacOS 68k (System 7-8.1)"
+        echo "  [33] MacOS PPC (7.5.2-9.2.2, G3/G4)"
+        echo "  [34] MacOS PPC64 (Mac OS X, G5)"
+        echo "  [35] MacOS 10.6 PPC (Snow Leopard with dual display)"
+        echo "  [36] Create MacOS 10.6 PPC VM with all options"
+        echo "  [37] Debug MacOS 10.6 PPC VM"
+        echo "  [38] HaikuOS"
+        echo "  [39] Linux (generic)"
+        echo "  [40] Atari ST/TT/Falcon (68k)"
+        echo "  [41] Commodore Amiga (68k/AROS)"
+        echo "  [42] Solaris x86"
+        echo "  [43] Solaris SPARC"
+        echo "  [44] Windows XP"
+        echo "  [45] OpenStep x86"
+        echo "  [46] Custom QEMU (any architecture)"
         echo ""
         echo "📖 Information:"
-        echo "  [42] Show QEMU version"
-        echo "  [43] Show available architectures"
-        echo "  [44] Show VM configurations"
+        echo "  [47] Show QEMU version"
+        echo "  [48] Show available architectures"
+        echo "  [49] Show VM configurations"
         echo ""
         echo "🔍 Diagnostics:"
-        echo "  [45] Test sharing services (Samba/Netatalk)"
-        echo "  [46] Configure Netatalk (AFP) file sharing"
-        echo "  [47] Configure Samba file sharing"
-        echo "  [48] Verify all dependencies"
-        echo "  [49] Configure XQuartz for X11 display"
-        echo "  [50] Configure RAMDISK for sharing"
-        echo "  [51] Test Samba connection"
-        echo "  [52] Test Netatalk connection"
-        echo "  [53] Test SSH connection"
-        echo "  [54] Test GDB connection"
-        echo "  [55] Show QEMU command (debugging)"
-        echo "  [56] VM Snapshot Management"
-        echo "  [57] Check MacPorts installation"
-        echo "  [58] Check Homebrew installation"
-        echo "  [59] Update package manager"
-        echo "  [60] Install VM dependencies"
-        echo "  [61] Test local share directory"
-        echo "  [62] List all shares and directories"
+        echo "  [50] Test sharing services (Samba/Netatalk)"
+        echo "  [51] Configure Netatalk (AFP) file sharing"
+        echo "  [52] Configure Samba file sharing"
+        echo "  [53] Verify all dependencies"
+        echo "  [54] Configure XQuartz for X11 display"
+        echo "  [55] Configure RAMDISK for sharing"
+        echo "  [56] Test Samba connection"
+        echo "  [57] Test Netatalk connection"
+        echo "  [58] Test SSH connection"
+        echo "  [59] Test GDB connection"
+        echo "  [60] Show QEMU command (debugging)"
+        echo "  [61] VM Snapshot Management"
+        echo "  [62] Check MacPorts installation"
+        echo "  [63] Check Homebrew installation"
+        echo "  [64] Update package manager"
+        echo "  [65] Install VM dependencies"
+        echo "  [66] Test local share directory"
+        echo "  [67] List all shares and directories"
+        echo "  [68] Cleanup menu"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -6431,21 +7214,24 @@ show_main_menu() {
             26) backup_configurations ;;
             27) list_backups ;;
             28) backup_restore_menu ;;
-            30) launch_macos_68k ;;
-            31) launch_macos_ppc ;;
-            32) launch_macos_ppc64 ;;
-            33) launch_haiku ;;
-            34) launch_linux ;;
-            35) launch_atari ;;
-            36) launch_amiga ;;
-            37) launch_solaris_x86 ;;
-            38) launch_solaris_sparc ;;
-            39) launch_windows_xp ;;
-            40) launch_openstep ;;
-            41) launch_custom ;;
-            42) show_qemu_version ;;
-            43) show_architectures ;;
-            44) show_vm_configs ;;
+            32) launch_macos_68k ;;
+            33) launch_macos_ppc ;;
+            34) launch_macos_ppc64 ;;
+            35) launch_macos_10_6_ppc ;;
+            36) create_and_launch_macos_10_6_ppc ;;
+            37) debug_macos_10_6_ppc ;;
+            38) launch_haiku ;;
+            39) launch_linux ;;
+            40) launch_atari ;;
+            41) launch_amiga ;;
+            42) launch_solaris_x86 ;;
+            43) launch_solaris_sparc ;;
+            44) launch_windows_xp ;;
+            45) launch_openstep ;;
+            46) launch_custom ;;
+            47) show_qemu_version ;;
+            48) show_architectures ;;
+            49) show_vm_configs ;;
             45) test_sharing_services ;;
             46) configure_netatalk ;;
             47) configure_samba ;;
@@ -6814,6 +7600,9 @@ Platform Presets:
   macos-68k        Launch MacOS 68k VM
   macos-ppc        Launch MacOS PPC VM (G3/G4)
   macos-ppc64      Launch MacOS PPC VM (G5)
+  macos-106        Launch MacOS 10.6 PPC VM with dual display and debugging
+  create-macos-106 Create MacOS 10.6 PPC VM with all options
+  debug-macos-106  Debug MacOS 10.6 PPC VM with enhanced debugging
   haiku            Launch HaikuOS VM
   linux            Launch Linux VM
   atari            Launch Atari ST/TT/Falcon VM
@@ -6878,6 +7667,9 @@ Information:
   install-deps      Install VM dependencies using package manager
   test-local-share  Test local share directory functionality
   list-shares      List all configured shares and directories
+  cleanup          Cleanup old snapshots and unused files (interactive menu)
+  cleanup-snapshots Cleanup old VM snapshots
+  cleanup-disks    Find and remove unused disk images
   menu             Interactive menu (default)
   help             Show this help
 
@@ -7061,6 +7853,9 @@ main() {
         macos-68k) launch_macos_68k ;;
         macos-ppc) launch_macos_ppc ;;
         macos-ppc64) launch_macos_ppc64 ;;
+        macos-106|macos-10.6|snow-leopard) launch_macos_10_6_ppc ;;
+        create-macos-106|create-snow-leopard) create_and_launch_macos_10_6_ppc ;;
+        debug-macos-106|debug-snow-leopard) debug_macos_10_6_ppc ;;
         haiku) launch_haiku ;;
         linux) launch_linux ;;
         atari) launch_atari ;;
@@ -7106,6 +7901,10 @@ main() {
         install-deps|install-dependencies) install_vm_dependencies ;;
         test-local-share) test_local_share ;;
         list-shares) list_shares ;;
+        cleanup|cleanup-all) cleanup_menu ;;
+        cleanup-snapshots) 
+            [[ -n "${2:-}" ]] && cleanup_vm_snapshots "$2" "${3:-30}" || cleanup_all_snapshots ;;
+        cleanup-disks) cleanup_unused_disks "${2:-true}" ;;
         
         # Disk/ISO management
         disk-create|create-disk) create_disk_image ;;
