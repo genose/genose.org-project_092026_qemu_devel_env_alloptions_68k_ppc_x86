@@ -5519,6 +5519,264 @@ resize_disk_image() {
     log "Resize complete."
 }
 
+# Create a new environment configuration file (.env template)
+create_env_config() {
+    local config_name=""
+    local config_file=""
+    
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "create_env_config function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Create Environment Configuration"
+    
+    config_name=$(ask "Configuration name (e.g., my-custom-env)" "")
+    [[ -z "${config_name}" ]] && { warn "Configuration name cannot be empty"; return 1; }
+    
+    # Remove .env extension if provided
+    config_name="${config_name%.env}"
+    config_file="${VM_CONFIG_DIR}/${config_name}.env"
+    
+    # Check if config already exists
+    if [[ -f "${config_file}" ]]; then
+        local overwrite
+        overwrite=$(ask "Configuration file already exists. Overwrite? (y/n)" "n")
+        if [[ "${overwrite}" != "y" ]]; then
+            warn "Configuration creation cancelled"
+            return 1
+        fi
+    fi
+    
+    ensure_dir "${VM_CONFIG_DIR}"
+    
+    log "Creating environment configuration: ${config_file}"
+    
+    # Platform selection
+    echo "Select platform:"
+    echo "  [1] 68k (Motorola 68000)"
+    echo "  [2] PPC (PowerPC 32-bit)"
+    echo "  [3] PPC64 (PowerPC 64-bit)"
+    echo "  [4] x86 (32-bit)"
+    echo "  [5] x86_64 (64-bit)"
+    echo "  [6] ARM"
+    echo "  [7] ARM64"
+    echo "  [8] SPARC"
+    echo "  [9] SPARC64"
+    echo "  [10] Custom"
+    echo ""
+    
+    local platform_choice
+    platform_choice=$(ask "Platform" "1")
+    
+    local qemu_bin=""
+    local machine=""
+    local cpu=""
+    local default_ram=""
+    local network_model=""
+    local display_backend=""
+    local boot_order="c"
+    local arch_desc=""
+    
+    case "${platform_choice}" in
+        1) # 68k
+            qemu_bin="qemu-system-m68k"
+            machine="q800"
+            cpu="m68040"
+            default_ram="64"
+            network_model="dp83932"
+            display_backend="gtk"
+            arch_desc="68k (Motorola 68000)"
+            ;;
+        2) # PPC
+            qemu_bin="qemu-system-ppc"
+            machine="mac99,via=pmu"
+            cpu="7455"
+            default_ram="256"
+            network_model="sungem"
+            display_backend="sdl"
+            arch_desc="PPC (PowerPC 32-bit)"
+            ;;
+        3) # PPC64
+            qemu_bin="qemu-system-ppc64"
+            machine="mac99,via=pmu"
+            cpu="970fx"
+            default_ram="1024"
+            network_model="sungem"
+            display_backend="sdl"
+            arch_desc="PPC64 (PowerPC 64-bit)"
+            boot_order="d"  # Boot from CDROM for Mac OS X install
+            ;;
+        4) # x86
+            qemu_bin="qemu-system-i386"
+            machine="pc"
+            cpu="pentium3"
+            default_ram="512"
+            network_model="e1000"
+            display_backend="gtk"
+            arch_desc="x86 (32-bit)"
+            ;;
+        5) # x86_64
+            qemu_bin="qemu-system-x86_64"
+            machine="q35"
+            cpu="host"
+            default_ram="2048"
+            network_model="e1000"
+            display_backend="cocoa"
+            arch_desc="x86_64 (64-bit)"
+            ;;
+        6) # ARM
+            qemu_bin="qemu-system-arm"
+            machine="virt"
+            cpu="cortex-a15"
+            default_ram="512"
+            network_model="virtio-net-pci"
+            display_backend="gtk"
+            arch_desc="ARM"
+            ;;
+        7) # ARM64
+            qemu_bin="qemu-system-aarch64"
+            machine="virt"
+            cpu="cortex-a72"
+            default_ram="2048"
+            network_model="virtio-net-pci"
+            display_backend="gtk"
+            arch_desc="ARM64"
+            ;;
+        8) # SPARC
+            qemu_bin="qemu-system-sparc"
+            machine="sun4m"
+            cpu="TI-UltraSparc-IIi"
+            default_ram="512"
+            network_model="lance"
+            display_backend="gtk"
+            arch_desc="SPARC"
+            ;;
+        9) # SPARC64
+            qemu_bin="qemu-system-sparc64"
+            machine="sun4u"
+            cpu="TI-UltraSparc-IIIi"
+            default_ram="1024"
+            network_model="sungem"
+            display_backend="gtk"
+            arch_desc="SPARC64"
+            ;;
+        10) # Custom
+            qemu_bin=$(ask "QEMU binary (e.g., qemu-system-x86_64)" "qemu-system-x86_64")
+            machine=$(ask "Machine type" "pc")
+            cpu=$(ask "CPU model" "host")
+            default_ram=$(ask "Default RAM (MB)" "1024")
+            network_model=$(ask "Network model" "e1000")
+            display_backend=$(ask "Display backend" "cocoa")
+            arch_desc="Custom"
+            ;;
+        *)
+            warn "Invalid platform selection"
+            return 1
+            ;;
+    esac
+    
+    # Additional configuration options
+    local ram_mb
+    ram_mb=$(ask "RAM size (MB)" "${default_ram}")
+    
+    local smp_sockets=1
+    local smp_cores=1
+    local smp_threads=1
+    
+    if [[ "${platform_choice}" =~ ^[23]$ ]]; then  # PPC platforms support SMP
+        smp_sockets=$(ask "SMP sockets (for multi-processor)" "1")
+        smp_cores=$(ask "SMP cores per socket" "1")
+    fi
+    
+    # Disk configuration
+    local hdd_image=""
+    hdd_image=$(ask "Default HDD image path" "${VM_IMAGE_DIR}/${config_name}.qcow2")
+    
+    local cdrom_image=""
+    cdrom_image=$(ask "Default CDROM/ISO path (leave empty if none)" "")
+    
+    # Network configuration
+    local network_type="user"
+    network_type=$(ask "Network type (user/none/tap)" "${network_type}")
+    
+    # Audio configuration
+    local audio_backend=""
+    audio_backend=$(ask "Audio backend (sdl/coreaudio/none)" "sdl")
+    
+    # Display configuration
+    local dual_display="no"
+    dual_display=$(ask "Enable dual display? (y/n)" "n")
+    [[ "${dual_display}" == "y" ]] && dual_display="yes" || dual_display="no"
+    
+    # Shared directory
+    local shared_dir="${VM_SHARED_DIR}"
+    shared_dir=$(ask "Shared directory path" "${shared_dir}")
+    
+    # Create the configuration file
+    cat > "${config_file}" << EOF
+# =============================================================================
+# ${config_name}.env - ${arch_desc} Environment Configuration
+# Created: $(date)
+# =============================================================================
+
+# --- QEMU binary ---
+QEMU_BIN=${qemu_bin}
+
+# --- Machine / CPU ---
+MACHINE=${machine}
+CPU=${cpu}
+RAM_MB=${ram_mb}
+
+# --- SMP / Multi-processor ---
+SMP_SOCKETS=${smp_sockets}
+SMP_CORES=${smp_cores}
+SMP_THREADS=${smp_threads}
+
+# --- Disk images ---
+HDD_IMAGE=${hdd_image}
+CDROM_IMAGE=${cdrom_image}
+
+# --- Display ---
+DISPLAY_BACKEND=${display_backend}
+DUAL_DISPLAY=${dual_display}
+
+# --- Network ---
+NETWORK_MODEL=${network_model}
+NETWORK_TYPE=${network_type}
+
+# --- Host integration ---
+SHARED_DIR=${shared_dir}
+
+# --- Audio ---
+AUDIO_BACKEND=${audio_backend}
+
+# --- Boot order ---
+BOOT_ORDER=${boot_order}
+
+# --- Additional QEMU arguments ---
+QEMU_ARGS=
+
+# =============================================================================
+# Example launch command:
+# ${SCRIPT_NAME} launch ${config_name}
+# =============================================================================
+EOF
+    
+    log "✅ Environment configuration created: ${config_file}"
+    log "You can now create VMs using this configuration with: ${SCRIPT_NAME} create"
+    
+    # Ask if user wants to edit the file manually
+    local edit_now
+    edit_now=$(ask "Edit configuration file now? (y/n)" "n")
+    if [[ "${edit_now}" == "y" ]]; then
+        ${EDITOR:-nano} "${config_file}"
+    fi
+    
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 # Main Menu System
 # ---------------------------------------------------------------------------
@@ -5566,45 +5824,46 @@ show_main_menu() {
         echo "🔧 Advanced VM Management:"
         echo "  [21] Stop a running VM"
         echo "  [22] Edit VM configuration"
-        echo "  [23] List ROM files"
-        echo "  [24] List disk images"
+        echo "  [23] Create environment configuration"
+        echo "  [24] List ROM files"
+        echo "  [25] List disk images"
         echo ""
         echo "💾 Backup & Restore:"
-        echo "  [25] Create configuration backup"
-        echo "  [26] List available backups"
-        echo "  [27] Restore from backup"
+        echo "  [26] Create configuration backup"
+        echo "  [27] List available backups"
+        echo "  [28] Restore from backup"
         echo ""
         echo "🚀 Quick Launch (Platform Presets):"
-        echo "  [28] MacOS 68k (System 7-8.1)"
-        echo "  [29] MacOS PPC (7.5.2-9.2.2, G3/G4)"
-        echo "  [30] MacOS PPC64 (Mac OS X, G5)"
-        echo "  [31] HaikuOS"
-        echo "  [32] Linux (generic)"
-        echo "  [33] Atari ST/TT/Falcon (68k)"
-        echo "  [34] Commodore Amiga (68k/AROS)"
-        echo "  [35] Solaris x86"
-        echo "  [36] Solaris SPARC"
-        echo "  [37] Windows XP"
-        echo "  [38] OpenStep x86"
-        echo "  [39] Custom QEMU (any architecture)"
+        echo "  [29] MacOS 68k (System 7-8.1)"
+        echo "  [30] MacOS PPC (7.5.2-9.2.2, G3/G4)"
+        echo "  [31] MacOS PPC64 (Mac OS X, G5)"
+        echo "  [32] HaikuOS"
+        echo "  [33] Linux (generic)"
+        echo "  [34] Atari ST/TT/Falcon (68k)"
+        echo "  [35] Commodore Amiga (68k/AROS)"
+        echo "  [36] Solaris x86"
+        echo "  [37] Solaris SPARC"
+        echo "  [38] Windows XP"
+        echo "  [39] OpenStep x86"
+        echo "  [40] Custom QEMU (any architecture)"
         echo ""
         echo "📖 Information:"
-        echo "  [40] Show QEMU version"
-        echo "  [41] Show available architectures"
-        echo "  [42] Show VM configurations"
+        echo "  [41] Show QEMU version"
+        echo "  [42] Show available architectures"
+        echo "  [43] Show VM configurations"
         echo ""
         echo "🔍 Diagnostics:"
-        echo "  [43] Test sharing services (Samba/Netatalk)"
-        echo "  [44] Configure Netatalk (AFP) file sharing"
-        echo "  [45] Configure Samba file sharing"
-        echo "  [46] Verify all dependencies"
-        echo "  [47] Configure XQuartz for X11 display"
-        echo "  [48] Configure RAMDISK for sharing"
-        echo "  [49] Test Samba connection"
-        echo "  [50] Test Netatalk connection"
-        echo "  [51] Test SSH connection"
-        echo "  [52] Show QEMU command (debugging)"
-        echo "  [53] VM Snapshot Management"
+        echo "  [44] Test sharing services (Samba/Netatalk)"
+        echo "  [45] Configure Netatalk (AFP) file sharing"
+        echo "  [46] Configure Samba file sharing"
+        echo "  [47] Verify all dependencies"
+        echo "  [48] Configure XQuartz for X11 display"
+        echo "  [49] Configure RAMDISK for sharing"
+        echo "  [50] Test Samba connection"
+        echo "  [51] Test Netatalk connection"
+        echo "  [52] Test SSH connection"
+        echo "  [53] Show QEMU command (debugging)"
+        echo "  [54] VM Snapshot Management"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -5635,37 +5894,38 @@ show_main_menu() {
             20) export_utm_menu ;;
             21) stop_vm_menu ;;
             22) edit_vm_menu ;;
-            23) list_roms ;;
-            24) list_disks ;;
-            25) backup_configurations ;;
-            26) list_backups ;;
-            27) backup_restore_menu ;;
-            28) launch_macos_68k ;;
-            29) launch_macos_ppc ;;
-            30) launch_macos_ppc64 ;;
-            31) launch_haiku ;;
-            32) launch_linux ;;
-            33) launch_atari ;;
-            34) launch_amiga ;;
-            35) launch_solaris_x86 ;;
-            36) launch_solaris_sparc ;;
-            37) launch_windows_xp ;;
-            38) launch_openstep ;;
-            39) launch_custom ;;
-            40) show_qemu_version ;;
-            41) show_architectures ;;
-            42) show_vm_configs ;;
-            43) test_sharing_services ;;
-            44) configure_netatalk ;;
-            45) configure_samba ;;
-            46) verify_dependencies ;;
-            47) configure_xquartz ;;
-            48) configure_ramdisk ;;
-            49) test_samba_connection localhost VM_Shares ;;
-            50) test_netatalk_connection localhost VM_Shares ;;
-            51) test_ssh_connection localhost 22 ;;
-            52) show_qemu_command_menu ;;
-            53) snapshot_menu ;;
+            23) create_env_config ;;
+            24) list_roms ;;
+            25) list_disks ;;
+            26) backup_configurations ;;
+            27) list_backups ;;
+            28) backup_restore_menu ;;
+            29) launch_macos_68k ;;
+            30) launch_macos_ppc ;;
+            31) launch_macos_ppc64 ;;
+            32) launch_haiku ;;
+            33) launch_linux ;;
+            34) launch_atari ;;
+            35) launch_amiga ;;
+            36) launch_solaris_x86 ;;
+            37) launch_solaris_sparc ;;
+            38) launch_windows_xp ;;
+            39) launch_openstep ;;
+            40) launch_custom ;;
+            41) show_qemu_version ;;
+            42) show_architectures ;;
+            43) show_vm_configs ;;
+            44) test_sharing_services ;;
+            45) configure_netatalk ;;
+            46) configure_samba ;;
+            47) verify_dependencies ;;
+            48) configure_xquartz ;;
+            49) configure_ramdisk ;;
+            50) test_samba_connection localhost VM_Shares ;;
+            51) test_netatalk_connection localhost VM_Shares ;;
+            52) test_ssh_connection localhost 22 ;;
+            53) show_qemu_command_menu ;;
+            54) snapshot_menu ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -6043,6 +6303,7 @@ UTM Integration:
 Advanced VM Management:
   stop             Stop a running VM
   edit             Edit VM configuration
+  create-env-config Create environment configuration (.env file)
   list-roms        List available ROM files
   list-disks       List available disk images
 
@@ -6265,6 +6526,7 @@ main() {
             [[ -n "${2:-}" ]] && stop_vm "$2" || stop_vm_menu ;;
         edit|edit-vm) 
             [[ -n "${2:-}" ]] && edit_vm "$2" || edit_vm_menu ;;
+        create-env-config|env-config) create_env_config ;;
         list-roms|roms) list_roms ;;
         list-disks|disks) list_disks ;;
         
