@@ -7690,7 +7690,7 @@ list_disks() {
     return 0
 }
 
-# Edit VM configuration
+# Edit existing VM
 edit_vm() {
     local vm_name="$1"
     local config_file=""
@@ -8189,7 +8189,7 @@ show_main_menu() {
         echo ""
         echo "🔧 Advanced VM Management:"}
         echo "  [21] Stop a running VM"
-        echo "  [22] Edit VM configuration"
+        echo "  [22] Edit existing VM"
         echo "  [23] Clone VM"
         echo "  [24] Create environment configuration"
         echo "  [25] List ROM files"
@@ -8589,7 +8589,7 @@ stop_vm_menu() {
     return 1
 }
 
-# Menu for editing VM configuration
+# Menu for editing existing VM
 edit_vm_menu() {
     # This function requires interactive mode
     if ! is_interactive; then
@@ -8755,7 +8755,7 @@ Retro68 Development Tools:
 
 Advanced VM Management:
   stop             Stop a running VM
-  edit             Edit VM configuration
+  edit             Edit existing VM
   create-env-config Create environment configuration (.env file)
   list-roms        List available ROM files
   list-disks       List available disk images
