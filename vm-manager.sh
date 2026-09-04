@@ -1315,7 +1315,7 @@ edit_vm_option_c() {
     local share_dir=""
     if [[ "$enable_netatalk" == "y" ]]; then
         netatalk_share_name=$(ask "Netatalk share name" "${NETATALK_SHARE_NAME:-VM_Share}")
-        share_dir=$(ask "Share directory path" "${SHARED_DIR:-${DEFAULT_MACOS_SHARE_DIR}}")
+        share_dir=$(ask "Share directory path" "${VM_SHARED_DIR:-${DEFAULT_MACOS_SHARE_DIR}}")
     fi
     
     # Update configuration file
@@ -1326,7 +1326,7 @@ edit_vm_option_c() {
         "SSH_PORT=${ssh_port}"
         "ENABLE_NETATALK=${enable_netatalk}"
         "NETATALK_SHARE_NAME=${netatalk_share_name}"
-        "SHARED_DIR=${share_dir}"
+        "VM_SHARED_DIR=${share_dir}"
     )
     
     for update in "${updates[@]}"; do
@@ -1392,7 +1392,7 @@ ENABLE_SSH=n
 SSH_PORT=${DEFAULT_SSH_PORT}
 ENABLE_NETATALK=n
 NETATALK_SHARE_NAME=VM_${vm_name}
-SHARED_DIR=${DEFAULT_MACOS_SHARE_DIR}"
+VM_SHARED_DIR=${DEFAULT_MACOS_SHARE_DIR}"
         
         if ! echo "${config_content}" > "${config_file}" 2>/dev/null; then
             throw "Failed to write configuration file: ${config_file}" "${config_file}" "${EXCEPTION_TYPES[ERR_FILESYSTEM]}"
@@ -4132,6 +4132,405 @@ detect_available_isos() {
     fi
 }
 
+# Detect available ROM files across all directories
+detect_available_roms() {
+    heading "Detecting Available ROM Files"
+    
+    local search_dirs=(
+        "${ROM_DIR}"
+        "${CONFIG_DIR}"
+        "${SCRIPT_DIR}/roms"
+        "${HOME}/vm_assistant/roms"
+        "/usr/local/share/qemu"
+        "/opt/local/share/qemu"
+    )
+    
+    local global_available_roms=()
+    local global_available_roms_paths=()
+    
+    for dir in "${search_dirs[@]}"; do
+        if [[ -d "$dir" ]]; then
+            log "Scanning: ${dir}"
+            while IFS= read -r -d "" file; do
+                case "$file" in
+                    *.rom|*.ROM|*.bin|*.BIN)
+                        local filename=$(basename "$file")
+                        local size=$(du -h "$file" 2>/dev/null | cut -f1)
+                        local description="$filename ($size)"
+                        
+                        # Detect ROM type by filename
+                        case "$filename" in
+                            *mac99*|*Mac99*|*mac.*|*Mac.*) 
+                                description="[Mac] $filename ($size)" ;;
+                            *ppc*|*PPC*|*powerpc*) 
+                                description="[PPC] $filename ($size)" ;;
+                            *68k*|*m68k*|*M68K*) 
+                                description="[68k] $filename ($size)" ;;
+                            *vga*|*VGA*|*video*) 
+                                description="[VGA] $filename ($size)" ;;
+                            *bios*|*BIOS*|*efi*|*EFI*) 
+                                description="[BIOS] $filename ($size)" ;;
+                            *pflash*|*PFLASH*) 
+                                description="[PFLASH] $filename ($size)" ;;
+                            *openbios*|*OpenBIOS*) 
+                                description="[OpenBIOS] $filename ($size)" ;;
+                            *sgabios*|*SGABIOS*) 
+                                description="[SeaBIOS] $filename ($size)" ;;
+                            *vgabios*|*VGABIOS*) 
+                                description="[VGABIOS] $filename ($size)" ;;
+                            *)
+                                description="[Unknown] $filename ($size)" ;;
+                        esac
+                        
+                        global_available_roms+=("$description")
+                        global_available_roms_paths+=("$file")
+                        ;;
+                esac
+            done < <(find "$dir" -type f \( -name "*.rom" -o -name "*.ROM" -o -name "*.bin" -o -name "*.BIN" \) -print0 2>/dev/null)
+        fi
+    done
+    
+    if [[ ${#global_available_roms_paths[@]} -eq 0 ]]; then
+        warn "No ROM files found in any of the scanned directories"
+        log "Try placing ROM files in: ${ROM_DIR}"
+        return 1
+    else
+        log "Found ${#global_available_roms_paths[@]} ROM file(s):"
+        for i in "${!global_available_roms_paths[@]}"; do
+            log "  [$((i+1))] ${global_available_roms[$i]}"
+        done
+        return 0
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Snapshot Management Functions
+# ---------------------------------------------------------------------------
+
+# Create a snapshot of a VM
+create_vm_snapshot() {
+    local vm_name="$1"
+    local snapshot_name="$2"
+    
+    heading "Creating Snapshot for VM: ${vm_name}"
+    
+    # Find the VM directory
+    local vm_dir=""
+    local config_file=""
+    while IFS= read -r -d '' file; do
+        if [[ "$(basename "$file" .conf)" == "${vm_name}" ]]; then
+            config_file="$file"
+            vm_dir=$(dirname "$(dirname "${config_file}")")
+            break
+        fi
+    done < <(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print0 2>/dev/null)
+    
+    [[ -f "${config_file}" ]] || die "VM not found: ${vm_name}"
+    
+    # Create snapshot directory if it doesn't exist
+    local snapshot_dir="${vm_dir}/snapshots"
+    ensure_dir "${snapshot_dir}"
+    
+    # Generate timestamp
+    local timestamp=$(date +%Y%m%d-%H%M%S)
+    local snapshot_prefix="${snapshot_name:-snapshot-${timestamp}}"
+    local snapshot_base="${snapshot_dir}/${snapshot_prefix}"
+    
+    # Snapshot configuration
+    if [[ -f "${config_file}" ]]; then
+        cp "${config_file}" "${snapshot_base}.conf"
+        log "Configuration snapshot: ${snapshot_base}.conf"
+    fi
+    
+    # Snapshot disk images (qcow2 format supports snapshots)
+    local disk_dir="${vm_dir}/qcow2"
+    if [[ -d "${disk_dir}" ]]; then
+        for disk in "${disk_dir}"/*.qcow2; do
+            [[ -f "${disk}" ]] || continue
+            local disk_name=$(basename "${disk}")
+            local snapshot_disk="${snapshot_base}-${disk_name}"
+            
+            log "Creating snapshot of ${disk_name}..."
+            if qemu-img snapshot -c "${snapshot_prefix}" "${disk}" 2>/dev/null; then
+                log "✓ Internal snapshot created for ${disk_name}"
+            else
+                # Fallback: create copy
+                cp "${disk}" "${snapshot_disk}"
+                log "✓ Disk copy snapshot: ${snapshot_disk}"
+            fi
+        done
+    fi
+    
+    log "✅ Snapshot '${snapshot_prefix}' created for VM '${vm_name}'"
+    return 0
+}
+
+# List snapshots for a VM
+list_vm_snapshots() {
+    local vm_name="$1"
+    
+    heading "Listing Snapshots for VM: ${vm_name}"
+    
+    # Find the VM directory
+    local vm_dir=""
+    local config_file=""
+    while IFS= read -r -d '' file; do
+        if [[ "$(basename "$file" .conf)" == "${vm_name}" ]]; then
+            config_file="$file"
+            vm_dir=$(dirname "$(dirname "${config_file}")")
+            break
+        fi
+    done < <(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print0 2>/dev/null)
+    
+    [[ -f "${config_file}" ]] || die "VM not found: ${vm_name}"
+    
+    local snapshot_dir="${vm_dir}/snapshots"
+    
+    if [[ ! -d "${snapshot_dir}" ]]; then
+        log "No snapshots found for VM: ${vm_name}"
+        return 0
+    fi
+    
+    # List configuration snapshots
+    local conf_snapshots=()
+    while IFS= read -r -d '' conf_file; do
+        [[ "${conf_file}" == *.conf ]] && conf_snapshots+=("${conf_file}")
+    done < <(find "${snapshot_dir}" -name "*.conf" -print0 2>/dev/null | sort -z)
+    
+    # List disk snapshots
+    local disk_snapshots=()
+    while IFS= read -r -d '' disk_file; do
+        [[ "${disk_file}" == *.qcow2 ]] && disk_snapshots+=("${disk_file}")
+    done < <(find "${snapshot_dir}" -name "*.qcow2" -print0 2>/dev/null | sort -z)
+    
+    if [[ ${#conf_snapshots[@]} -eq 0 && ${#disk_snapshots[@]} -eq 0 ]]; then
+        log "No snapshots found for VM: ${vm_name}"
+        return 0
+    fi
+    
+    echo "Configuration Snapshots:"
+    for conf in "${conf_snapshots[@]}"; do
+        local name=$(basename "${conf}" .conf)
+        local size=$(du -h "${conf}" 2>/dev/null | cut -f1)
+        log "  - ${name} (config, ${size})"
+    done
+    
+    echo "Disk Snapshots:"
+    for disk in "${disk_snapshots[@]}"; do
+        local name=$(basename "${disk}")
+        local size=$(du -h "${disk}" 2>/dev/null | cut -f1)
+        log "  - ${name} (disk, ${size})"
+    done
+    
+    return 0
+}
+
+# Restore a VM snapshot
+restore_vm_snapshot() {
+    local vm_name="$1"
+    local snapshot_name="$2"
+    
+    heading "Restoring Snapshot: ${snapshot_name} for VM: ${vm_name}"
+    
+    # Find the VM directory
+    local vm_dir=""
+    local config_file=""
+    while IFS= read -r -d '' file; do
+        if [[ "$(basename "$file" .conf)" == "${vm_name}" ]]; then
+            config_file="$file"
+            vm_dir=$(dirname "$(dirname "${config_file}")")
+            break
+        fi
+    done < <(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print0 2>/dev/null)
+    
+    [[ -f "${config_file}" ]] || die "VM not found: ${vm_name}"
+    
+    local snapshot_dir="${vm_dir}/snapshots"
+    local snapshot_conf="${snapshot_dir}/${snapshot_name}.conf"
+    
+    if [[ ! -f "${snapshot_conf}" ]]; then
+        die "Snapshot not found: ${snapshot_name}.conf"
+    fi
+    
+    # Confirm restoration
+    if is_interactive; then
+        local confirm=$(ask "Restore snapshot '${snapshot_name}'? This will overwrite current VM configuration." "no")
+        if [[ "${confirm}" != "yes" && "${confirm}" != "y" ]]; then
+            log "Snapshot restoration cancelled."
+            return 0
+        fi
+    fi
+    
+    # Backup current configuration
+    local backup_dir="${vm_dir}/backups"
+    ensure_dir "${backup_dir}"
+    local backup_timestamp=$(date +%Y%m%d-%H%M%S)
+    cp "${config_file}" "${backup_dir}/$(basename "${config_file}" .conf)-${backup_timestamp}.conf"
+    log "Current configuration backed up to: ${backup_dir}/"
+    
+    # Restore configuration
+    cp "${snapshot_conf}" "${config_file}"
+    log "✓ Configuration restored from snapshot"
+    
+    # Restore disk snapshots (if they exist)
+    local disk_dir="${vm_dir}/qcow2"
+    ensure_dir "${disk_dir}"
+    
+    local snapshot_disk_pattern="${snapshot_dir}/${snapshot_name}-*.qcow2"
+    for snapshot_disk in ${snapshot_disk_pattern}; do
+        [[ -f "${snapshot_disk}" ]] || continue
+        local disk_name=$(basename "${snapshot_disk}" | sed "s/${snapshot_name}-//")
+        local target_disk="${disk_dir}/${disk_name}"
+        
+        cp "${snapshot_disk}" "${target_disk}"
+        log "✓ Disk restored: ${disk_name}"
+    done
+    
+    log "✅ Snapshot '${snapshot_name}' restored for VM '${vm_name}'"
+    return 0
+}
+
+# Delete a VM snapshot
+delete_vm_snapshot() {
+    local vm_name="$1"
+    local snapshot_name="$2"
+    
+    heading "Deleting Snapshot: ${snapshot_name} for VM: ${vm_name}"
+    
+    # Find the VM directory
+    local vm_dir=""
+    local config_file=""
+    while IFS= read -r -d '' file; do
+        if [[ "$(basename "$file" .conf)" == "${vm_name}" ]]; then
+            config_file="$file"
+            vm_dir=$(dirname "$(dirname "${config_file}")")
+            break
+        fi
+    done < <(find "${VM_DIR}" -path "*/conf/${vm_name}.conf" -print0 2>/dev/null)
+    
+    [[ -f "${config_file}" ]] || die "VM not found: ${vm_name}"
+    
+    local snapshot_dir="${vm_dir}/snapshots"
+    local snapshot_conf="${snapshot_dir}/${snapshot_name}.conf"
+    
+    if [[ ! -f "${snapshot_conf}" ]]; then
+        die "Snapshot not found: ${snapshot_name}.conf"
+    fi
+    
+    # Confirm deletion
+    if is_interactive; then
+        local confirm=$(ask "Delete snapshot '${snapshot_name}'?" "no")
+        if [[ "${confirm}" != "yes" && "${confirm}" != "y" ]]; then
+            log "Snapshot deletion cancelled."
+            return 0
+        fi
+    fi
+    
+    # Delete configuration snapshot
+    rm -f "${snapshot_conf}"
+    log "Configuration snapshot deleted: ${snapshot_conf}"
+    
+    # Delete disk snapshots
+    local snapshot_disk_pattern="${snapshot_dir}/${snapshot_name}-*.qcow2"
+    for snapshot_disk in ${snapshot_disk_pattern}; do
+        [[ -f "${snapshot_disk}" ]] || continue
+        rm -f "${snapshot_disk}"
+        log "Disk snapshot deleted: ${snapshot_disk}"
+    done
+    
+    log "✅ Snapshot '${snapshot_name}' deleted for VM '${vm_name}'"
+    return 0
+}
+
+# Snapshot management menu
+snapshot_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "snapshot_menu function requires interactive mode"
+        return 1
+    fi
+    
+    heading "VM Snapshot Management"
+    list_vms
+    vm_num=$(ask "Select VM number for snapshot management" "")
+    
+    # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
+    local vm_confs=()
+    while IFS= read -r -d '' vm_conf; do
+        vm_confs+=("$vm_conf")
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
+    
+    local i=0
+    local vm_name=""
+    for vm_conf in "${vm_confs[@]}"; do
+        [[ -f "${vm_conf}" ]] && {
+            if [[ $i -eq $vm_num ]]; then
+                vm_name=$(basename "${vm_conf}" .conf)
+                break
+            fi
+            ((i++)) || true
+        }
+    done
+    
+    if [[ -z "$vm_name" ]]; then
+        warn "Invalid VM selection"
+        return 1
+    fi
+    
+    # Snapshot submenu
+    while true; do
+        clear || echo ""
+        heading "Snapshot Management for VM: ${vm_name}"
+        echo ""
+        echo "  [1] Create snapshot"
+        echo "  [2] List snapshots"
+        echo "  [3] Restore snapshot"
+        echo "  [4] Delete snapshot"
+        echo "  [B] Back to main menu"
+        echo ""
+        
+        choice=$(ask "Select snapshot operation" "")
+        
+        case "${choice,,}" in
+            1|create)
+                snapshot_name=$(ask "Enter snapshot name (or press Enter for timestamp-based name)" "")
+                create_vm_snapshot "${vm_name}" "${snapshot_name}"
+                ;;
+            2|list)
+                list_vm_snapshots "${vm_name}"
+                ;;
+            3|restore)
+                list_vm_snapshots "${vm_name}"
+                snapshot_name=$(ask "Enter snapshot name to restore" "")
+                if [[ -n "${snapshot_name}" ]]; then
+                    restore_vm_snapshot "${vm_name}" "${snapshot_name}"
+                else
+                    warn "No snapshot name provided"
+                fi
+                ;;
+            4|delete)
+                list_vm_snapshots "${vm_name}"
+                snapshot_name=$(ask "Enter snapshot name to delete" "")
+                if [[ -n "${snapshot_name}" ]]; then
+                    delete_vm_snapshot "${vm_name}" "${snapshot_name}"
+                else
+                    warn "No snapshot name provided"
+                fi
+                ;;
+            b|back)
+                return 0
+                ;;
+            *)
+                warn "Invalid option. Please try again."
+                ;;
+        esac
+        
+        if is_interactive; then
+            read -rp "Press Enter to continue..." _
+        fi
+    done
+}
+
 # Detect available architectures from installed QEMU
 detect_available_architectures() {
     heading "Detecting Available QEMU Architectures"
@@ -5156,54 +5555,56 @@ show_main_menu() {
         echo "  [13] List available ISOs"
         echo "  [14] Download ISO from URL"
         echo "  [15] Detect ISOs in all directories"
-        echo "  [16] Insert ISO into VM"
-        echo "  [17] Eject ISO from VM"
+        echo "  [16] Detect ROMs in all directories"
+        echo "  [17] Insert ISO into VM"
+        echo "  [18] Eject ISO from VM"
         echo ""
         echo "🍎 UTM.app Integration:"
-        echo "  [18] Create UTM VM configuration"
-        echo "  [19] Export VM to UTM format"
+        echo "  [19] Create UTM VM configuration"
+        echo "  [20] Export VM to UTM format"
         echo ""
         echo "🔧 Advanced VM Management:"
-        echo "  [20] Stop a running VM"
-        echo "  [21] Edit VM configuration"
-        echo "  [22] List ROM files"
-        echo "  [23] List disk images"
+        echo "  [21] Stop a running VM"
+        echo "  [22] Edit VM configuration"
+        echo "  [23] List ROM files"
+        echo "  [24] List disk images"
         echo ""
         echo "💾 Backup & Restore:"
-        echo "  [24] Create configuration backup"
-        echo "  [25] List available backups"
-        echo "  [26] Restore from backup"
+        echo "  [25] Create configuration backup"
+        echo "  [26] List available backups"
+        echo "  [27] Restore from backup"
         echo ""
         echo "🚀 Quick Launch (Platform Presets):"
-        echo "  [27] MacOS 68k (System 7-8.1)"
-        echo "  [28] MacOS PPC (7.5.2-9.2.2, G3/G4)"
-        echo "  [29] MacOS PPC64 (Mac OS X, G5)"
-        echo "  [30] HaikuOS"
-        echo "  [31] Linux (generic)"
-        echo "  [32] Atari ST/TT/Falcon (68k)"
-        echo "  [33] Commodore Amiga (68k/AROS)"
-        echo "  [34] Solaris x86"
-        echo "  [35] Solaris SPARC"
-        echo "  [36] Windows XP"
-        echo "  [37] OpenStep x86"
-        echo "  [38] Custom QEMU (any architecture)"
+        echo "  [28] MacOS 68k (System 7-8.1)"
+        echo "  [29] MacOS PPC (7.5.2-9.2.2, G3/G4)"
+        echo "  [30] MacOS PPC64 (Mac OS X, G5)"
+        echo "  [31] HaikuOS"
+        echo "  [32] Linux (generic)"
+        echo "  [33] Atari ST/TT/Falcon (68k)"
+        echo "  [34] Commodore Amiga (68k/AROS)"
+        echo "  [35] Solaris x86"
+        echo "  [36] Solaris SPARC"
+        echo "  [37] Windows XP"
+        echo "  [38] OpenStep x86"
+        echo "  [39] Custom QEMU (any architecture)"
         echo ""
         echo "📖 Information:"
-        echo "  [39] Show QEMU version"
-        echo "  [40] Show available architectures"
-        echo "  [41] Show VM configurations"
+        echo "  [40] Show QEMU version"
+        echo "  [41] Show available architectures"
+        echo "  [42] Show VM configurations"
         echo ""
         echo "🔍 Diagnostics:"
-        echo "  [42] Test sharing services (Samba/Netatalk)"
-        echo "  [43] Configure Netatalk (AFP) file sharing"
-        echo "  [44] Configure Samba file sharing"
-        echo "  [45] Verify all dependencies"
-        echo "  [46] Configure XQuartz for X11 display"
-        echo "  [47] Configure RAMDISK for sharing"
-        echo "  [48] Test Samba connection"
-        echo "  [49] Test Netatalk connection"
-        echo "  [50] Test SSH connection"
-        echo "  [51] Show QEMU command (debugging)"
+        echo "  [43] Test sharing services (Samba/Netatalk)"
+        echo "  [44] Configure Netatalk (AFP) file sharing"
+        echo "  [45] Configure Samba file sharing"
+        echo "  [46] Verify all dependencies"
+        echo "  [47] Configure XQuartz for X11 display"
+        echo "  [48] Configure RAMDISK for sharing"
+        echo "  [49] Test Samba connection"
+        echo "  [50] Test Netatalk connection"
+        echo "  [51] Test SSH connection"
+        echo "  [52] Show QEMU command (debugging)"
+        echo "  [53] VM Snapshot Management"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -5227,42 +5628,44 @@ show_main_menu() {
             13) list_isos ;;
             14) download_iso ;;
             15) detect_available_isos ;;
-            16) insert_iso_menu ;;
-            17) eject_iso_menu ;;
-            18) create_utm_vm ;;
-            19) export_utm_menu ;;
-            20) stop_vm_menu ;;
-            21) edit_vm_menu ;;
-            22) list_roms ;;
-            23) list_disks ;;
-            24) backup_configurations ;;
-            25) list_backups ;;
-            26) backup_restore_menu ;;
-            27) launch_macos_68k ;;
-            28) launch_macos_ppc ;;
-            29) launch_macos_ppc64 ;;
-            30) launch_haiku ;;
-            31) launch_linux ;;
-            32) launch_atari ;;
-            33) launch_amiga ;;
-            34) launch_solaris_x86 ;;
-            35) launch_solaris_sparc ;;
-            36) launch_windows_xp ;;
-            37) launch_openstep ;;
-            38) launch_custom ;;
-            39) show_qemu_version ;;
-            40) show_architectures ;;
-            41) show_vm_configs ;;
-            42) test_sharing_services ;;
-            43) configure_netatalk ;;
-            44) configure_samba ;;
-            45) verify_dependencies ;;
-            46) configure_xquartz ;;
-            47) configure_ramdisk ;;
-            48) test_samba_connection localhost VM_Shares ;;
-            49) test_netatalk_connection localhost VM_Shares ;;
-            50) test_ssh_connection localhost 22 ;;
-            51) show_qemu_command_menu ;;
+            16) detect_available_roms ;;
+            17) insert_iso_menu ;;
+            18) eject_iso_menu ;;
+            19) create_utm_vm ;;
+            20) export_utm_menu ;;
+            21) stop_vm_menu ;;
+            22) edit_vm_menu ;;
+            23) list_roms ;;
+            24) list_disks ;;
+            25) backup_configurations ;;
+            26) list_backups ;;
+            27) backup_restore_menu ;;
+            28) launch_macos_68k ;;
+            29) launch_macos_ppc ;;
+            30) launch_macos_ppc64 ;;
+            31) launch_haiku ;;
+            32) launch_linux ;;
+            33) launch_atari ;;
+            34) launch_amiga ;;
+            35) launch_solaris_x86 ;;
+            36) launch_solaris_sparc ;;
+            37) launch_windows_xp ;;
+            38) launch_openstep ;;
+            39) launch_custom ;;
+            40) show_qemu_version ;;
+            41) show_architectures ;;
+            42) show_vm_configs ;;
+            43) test_sharing_services ;;
+            44) configure_netatalk ;;
+            45) configure_samba ;;
+            46) verify_dependencies ;;
+            47) configure_xquartz ;;
+            48) configure_ramdisk ;;
+            49) test_samba_connection localhost VM_Shares ;;
+            50) test_netatalk_connection localhost VM_Shares ;;
+            51) test_ssh_connection localhost 22 ;;
+            52) show_qemu_command_menu ;;
+            53) snapshot_menu ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -5626,6 +6029,7 @@ ISO Management:
   iso-list         List available ISOs
   iso-download     Download ISO from URL
   iso-detect      Detect ISOs in all directories
+  rom-detect      Detect ROMs in all directories
   iso-insert <vm>  Insert ISO into VM
   iso-eject <vm>  Eject ISO from VM
 
@@ -5666,6 +6070,7 @@ Information:
   list-backups      List available backups
   restore-config    Restore from backup
   show-command      Show QEMU command for a VM (debugging)
+  snapshot          VM Snapshot Management
   menu             Interactive menu (default)
   help             Show this help
 
@@ -5890,6 +6295,7 @@ main() {
         iso-list|list-isos) list_isos ;;
         iso-download|download-iso) download_iso ;;
         iso-detect|detect-isos) detect_available_isos ;;
+        rom-detect|detect-roms) detect_available_roms ;;
         arch-detect|detect-architectures) detect_available_architectures ;;
         iso-insert|insert-iso) 
             [[ -n "${2:-}" ]] && insert_iso "$2" || insert_iso_menu ;;
@@ -5905,6 +6311,7 @@ main() {
         qemu-version|version) show_qemu_version ;;
         architectures|archs) show_architectures ;;
         vm-configs|configs) show_vm_configs ;;
+        snapshot|snapshot-menu) snapshot_menu ;;
         
         # Help
         help|--help|-h) show_usage ;;
