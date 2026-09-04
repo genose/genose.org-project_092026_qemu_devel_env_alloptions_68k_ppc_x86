@@ -5216,11 +5216,11 @@ list_detected_toolchains() {
         echo "  ${toolchain}:"
         for binary in $binaries; do
             if command -v "$binary" &>/dev/null; then
-                echo "    ✓ ${binary} ($(command -v "$binary"))"
+                echo "    ✓ ${binary} [$(command -v "$binary")]"
             elif [[ -n "${TOOLCHAIN_DIRS[$toolchain]:-}" ]] && [[ -x "${TOOLCHAIN_DIRS[$toolchain]}/bin/${binary}" ]]; then
-                echo "    ✓ ${binary} (${TOOLCHAIN_DIRS[$toolchain]}/bin/${binary})"
+                echo "    ✓ ${binary} [${TOOLCHAIN_DIRS[$toolchain]}/bin/${binary}]"
             else
-                echo "    ✗ ${binary} (not found)"
+                echo "    ✗ ${binary} [not found]"
             fi
         done
     done
@@ -5373,6 +5373,800 @@ configure_toolchain() {
             fi
             ;;
     esac
+}
+
+# ---------------------------------------------------------------------------
+# Build Automation Workflow
+# ---------------------------------------------------------------------------
+
+# Build project directory
+PROJECTS_DIR="${CONFIG_DIR}/projects"
+BUILD_LOG_DIR="${VM_LOG_DIR}/builds"
+
+# Create projects directory
+ensure_projects_dir() {
+    ensure_dir "$PROJECTS_DIR"
+    ensure_dir "$BUILD_LOG_DIR"
+}
+
+# Build project using detected toolchain
+build_project() {
+    local project_name="$1"
+    local project_path="$2"
+    local target_arch="$3"
+    local toolchain="$4"
+    local output_dir="$5"
+    
+    ensure_projects_dir
+    
+    if [[ -z "$project_path" ]]; then
+        # Try to find project in projects directory
+        project_path="${PROJECTS_DIR}/${project_name}"
+        if [[ ! -d "$project_path" ]]; then
+            die "Project not found: ${project_name}. Specify path or create project first."
+        fi
+    fi
+    
+    if [[ ! -d "$project_path" ]]; then
+        die "Project directory not found: ${project_path}"
+    fi
+    
+    # Ensure output directory exists
+    [[ -n "$output_dir" ]] || output_dir="${project_path}/build"
+    ensure_dir "$output_dir"
+    
+    heading "Building Project: ${project_name}"
+    log "Project path: ${project_path}"
+    log "Target architecture: ${target_arch:-unknown}"
+    log "Output directory: ${output_dir}"
+    
+    # Determine toolchain to use
+    if [[ -n "$toolchain" ]]; then
+        if ! has_toolchain "$toolchain"; then
+            log "Toolchain ${toolchain} not detected, trying to detect available toolchains..."
+            detect_cross_compilation_toolchains
+            
+            if ! has_toolchain "$toolchain"; then
+                die "Specified toolchain not available: ${toolchain}"
+            fi
+        fi
+    else
+        # Auto-select toolchain based on target architecture
+        log "Auto-selecting toolchain for ${target_arch}..."
+        toolchain=$(select_toolchain_for_arch "${target_arch}")
+        if [[ -z "$toolchain" ]]; then
+            log "No specific toolchain found for ${target_arch}, using system compiler"
+            toolchain="system"
+        fi
+    fi
+    
+    # Setup toolchain environment
+    if [[ "$toolchain" != "system" ]]; then
+        setup_toolchain_environment "$toolchain"
+    fi
+    
+    # Check for Makefile
+    if [[ -f "${project_path}/Makefile" ]]; then
+        log "Building with Makefile..."
+        local build_cmd="make"
+        local target=""
+        
+        # Check for architecture-specific targets
+        case "${target_arch}" in
+            "68k"|"m68k") target="68k" ;;
+            "ppc") target="ppc" ;;
+            "arm") target="arm" ;;
+            "x86"|"x86_64") target="x86" ;;
+        esac
+        
+        if [[ -n "$target" ]]; then
+            build_cmd="make ${target}"
+        fi
+        
+        # Execute build with logging
+        local log_file="${BUILD_LOG_DIR}/${project_name}-$(date +%Y%m%d-%H%M%S).log"
+        log "Build log: ${log_file}"
+        
+        if (cd "$project_path" && ${build_cmd} 2>&1 | tee "$log_file"); then
+            log "✅ Build successful"
+            return 0
+        else
+            warn "❌ Build failed. Check log: ${log_file}"
+            return 1
+        fi
+    fi
+    
+    warn "No Makefile found in project directory: ${project_path}"
+    return 1
+}
+
+# Select appropriate toolchain for target architecture
+select_toolchain_for_arch() {
+    local target_arch="$1"
+    
+    case "${target_arch}" in
+        "68k"|"m68k"|"mac68k")
+            if has_toolchain "retro68"; then
+                echo "retro68"
+            fi
+            ;;
+        "ppc"|"powerpc")
+            if has_toolchain "powerpc"; then
+                echo "powerpc"
+            fi
+            ;;
+        "arm"|"arm64")
+            if has_toolchain "arm"; then
+                echo "arm"
+            fi
+            ;;
+        "sparc")
+            if has_toolchain "sparc"; then
+                echo "sparc"
+            fi
+            ;;
+        "x86"|"x86_64"|"i386")
+            if has_toolchain "x86_64" || has_toolchain "i386"; then
+                echo "x86_64"
+            fi
+            ;;
+        *)
+            # Try to find any available toolchain
+            if [[ ${#DETECTED_TOOLCHAINS[@]} -gt 0 ]]; then
+                echo "${DETECTED_TOOLCHAINS[0]}"
+            fi
+            ;;
+    esac
+}
+
+# Deploy to VM after build
+deploy_to_vm() {
+    local project_name="$1"
+    local vm_name="$2"
+    local binary_path="$3"
+    local deploy_dir="$4"
+    
+    heading "Deploying to VM: ${vm_name}"
+    
+    if [[ -z "$binary_path" ]]; then
+        # Try to find built binary in common locations
+        local project_path="${PROJECTS_DIR}/${project_name}"
+        local build_dirs=(
+            "${project_path}/build"
+            "${project_path}/bin"
+            "${project_path}/dist"
+            "${project_path}"
+        )
+        
+        for dir in "${build_dirs[@]}"; do
+            if [[ -f "${dir}/${project_name}" ]]; then
+                binary_path="${dir}/${project_name}"
+                break
+            elif [[ -f "${dir}/${project_name}.elf" ]]; then
+                binary_path="${dir}/${project_name}.elf"
+                break
+            elif [[ -f "${dir}/output.elf" ]]; then
+                binary_path="${dir}/output.elf"
+                break
+            fi
+        done
+        
+        if [[ -z "$binary_path" ]]; then
+            die "Could not find built binary for project: ${project_name}"
+        fi
+    fi
+    
+    if [[ ! -f "$binary_path" ]]; then
+        die "Binary not found: ${binary_path}"
+    fi
+    
+    # Check if VM exists
+    if ! find_vm_config "$vm_name"; then
+        die "VM not found: ${vm_name}"
+    fi
+    
+    # Deploy the binary
+    log "Deploying binary: ${binary_path}"
+    if ! deploy_binary "$vm_name" "$binary_path"; then
+        warn "Failed to deploy binary to VM: ${vm_name}"
+        return 1
+    fi
+    
+    log "✅ Binary deployed successfully to: ${vm_name}"
+    return 0
+}
+
+# Full build-deploy-debug workflow
+build_deploy_debug_workflow() {
+    local project_name="$1"
+    local vm_name="$2"
+    local toolchain="$3"
+    local target_arch="$4"
+    local skip_build="$5"
+    local skip_deploy="$6"
+    
+    heading "Build-Deploy-Debug Workflow: ${project_name} → ${vm_name}"
+    
+    ensure_projects_dir
+    
+    # Step 1: Build (unless skipped)
+    if [[ "$skip_build" != "true" ]]; then
+        log "Step 1: Building project..."
+        if ! build_project "$project_name" "" "$target_arch" "$toolchain"; then
+            warn "Build failed, skipping workflow"
+            return 1
+        fi
+    else
+        log "Skipping build step"
+    fi
+    
+    # Step 2: Deploy (unless skipped)
+    if [[ "$skip_deploy" != "true" ]]; then
+        log "Step 2: Deploying to VM..."
+        if ! deploy_to_vm "$project_name" "$vm_name"; then
+            warn "Deploy failed, skipping debug"
+            return 1
+        fi
+    else
+        log "Skipping deploy step"
+    fi
+    
+    # Step 3: Debug
+    log "Step 3: Starting debug session..."
+    if ! debug_start "$vm_name"; then
+        warn "Failed to start debug session"
+        return 1
+    fi
+    
+    log "✅ Build-Deploy-Debug workflow completed successfully"
+    return 0
+}
+
+# Create development project template
+create_dev_project() {
+    local project_name="$1"
+    local template_type="$2"
+    local target_arch="$3"
+    local project_path="${PROJECTS_DIR}/${project_name}"
+    
+    ensure_projects_dir
+    
+    heading "Creating Development Project: ${project_name}"
+    log "Project type: ${template_type:-generic}"
+    log "Target architecture: ${target_arch:-unknown}"
+    
+    # Create project directory
+    if [[ -d "$project_path" ]]; then
+        die "Project directory already exists: ${project_path}"
+    fi
+    
+    mkdir -p "$project_path/src" "$project_path/include" "$project_path/build"
+    
+    # Create template files based on type
+    case "$template_type" in
+        "retro68"|"68k")
+            create_retro68_project "$project_name" "$project_path" "$target_arch"
+            ;;
+        "ppc")
+            create_ppc_project "$project_name" "$project_path" "$target_arch"
+            ;;
+        "arm")
+            create_arm_project "$project_name" "$project_path" "$target_arch"
+            ;;
+        "generic"|*)
+            create_generic_project "$project_name" "$project_path" "$target_arch"
+            ;;
+    esac
+    
+    log "✅ Project created at: ${project_path}"
+    return 0
+}
+
+# Create Retro68 project template
+create_retro68_project() {
+    local project_name="$1"
+    local project_path="$2"
+    local target_arch="$3"
+    
+    # Create main source file
+    cat > "${project_path}/src/main.c" << 'EOF'
+#include <stdio.h>
+
+int main() {
+    printf("Hello from Retro68!\n");
+    return 0;
+}
+EOF
+    
+    # Create Makefile for Retro68
+    cat > "${project_path}/Makefile" << MAKEFILE_END
+# Retro68 Project Makefile
+TARGET = ${project_name}
+SRC = src/main.c
+CC = m68k-elf-gcc
+CFLAGS = -Wall -O2 -mcpu=68000
+LDFLAGS = -T macos71.ld
+
+all: build/\$(TARGET).elf
+
+build/\$(TARGET).elf: \$(SRC)
+	mkdir -p build
+	\$(CC) \$(CFLAGS) \$(LDFLAGS) -o \$@ \$^
+
+clean:
+	rm -rf build/*
+
+.PHONY: all clean
+MAKEFILE_END
+    
+    # Create project config
+    cat > "${project_path}/project.cfg" << EOF
+project_name=${project_name}
+target_arch=${target_arch:-68k}
+toolchain=retro68
+compiler=m68k-elf-gcc
+EOF
+    
+    log "Created Retro68 project template"
+}
+
+# Create generic project template
+create_generic_project() {
+    local project_name="$1"
+    local project_path="$2"
+    local target_arch="$3"
+    
+    # Create main source file
+    cat > "${project_path}/src/main.c" << 'EOF'
+#include <stdio.h>
+
+int main() {
+    printf("Hello World!\n");
+    return 0;
+}
+EOF
+    
+    # Create simple Makefile
+    cat > "${project_path}/Makefile" << MAKEFILE_END
+# Generic Project Makefile
+TARGET = ${project_name}
+SRC = src/main.c
+
+all: build/\$(TARGET)
+
+build/\$(TARGET): \$(SRC)
+	mkdir -p build
+	gcc -Wall -O2 -o \$@ \$^
+
+clean:
+	rm -rf build/*
+
+.PHONY: all clean
+MAKEFILE_END
+    
+    # Create project config
+    cat > "${project_path}/project.cfg" << EOF
+project_name=${project_name}
+target_arch=${target_arch:-generic}
+toolchain=system
+compiler=gcc
+EOF
+    
+    log "Created generic project template"
+}
+
+# Create PPC project template
+create_ppc_project() {
+    local project_name="$1"
+    local project_path="$2"
+    local target_arch="$3"
+    
+    # Create main source file
+    cat > "${project_path}/src/main.c" << 'EOF'
+#include <stdio.h>
+
+int main() {
+    printf("Hello from PowerPC!\n");
+    return 0;
+}
+EOF
+    
+    # Create Makefile for PowerPC
+    cat > "${project_path}/Makefile" << MAKEFILE_END
+# PowerPC Project Makefile
+TARGET = ${project_name}
+SRC = src/main.c
+CC = powerpc-elf-gcc
+CFLAGS = -Wall -O2
+LDFLAGS = 
+
+all: build/\$(TARGET).elf
+
+build/\$(TARGET).elf: \$(SRC)
+	mkdir -p build
+	\$(CC) \$(CFLAGS) \$(LDFLAGS) -o \$@ \$^
+
+clean:
+	rm -rf build/*
+
+.PHONY: all clean
+MAKEFILE_END
+    
+    # Create project config
+    cat > "${project_path}/project.cfg" << EOF
+project_name=${project_name}
+target_arch=${target_arch:-ppc}
+toolchain=powerpc
+compiler=powerpc-elf-gcc
+EOF
+    
+    log "Created PowerPC project template"
+}
+
+# Create ARM project template
+create_arm_project() {
+    local project_name="$1"
+    local project_path="$2"
+    local target_arch="$3"
+    
+    # Create main source file
+    cat > "${project_path}/src/main.c" << 'EOF'
+#include <stdio.h>
+
+int main() {
+    printf("Hello from ARM!\n");
+    return 0;
+}
+EOF
+    
+    # Create Makefile for ARM
+    cat > "${project_path}/Makefile" << MAKEFILE_END
+# ARM Project Makefile
+TARGET = ${project_name}
+SRC = src/main.c
+CC = arm-none-eabi-gcc
+CFLAGS = -Wall -O2 -mcpu=arm7tdmi
+LDFLAGS = -T arm.ld
+
+all: build/\$(TARGET).elf
+
+build/\$(TARGET).elf: \$(SRC)
+	mkdir -p build
+	\$(CC) \$(CFLAGS) \$(LDFLAGS) -o \$@ \$^
+
+clean:
+	rm -rf build/*
+
+.PHONY: all clean
+MAKEFILE_END
+    
+    # Create project config
+    cat > "${project_path}/project.cfg" << EOF
+project_name=${project_name}
+target_arch=${target_arch:-arm}
+toolchain=arm
+compiler=arm-none-eabi-gcc
+EOF
+    
+    log "Created ARM project template"
+}
+
+# ---------------------------------------------------------------------------
+# Source Code Mounting
+# ---------------------------------------------------------------------------
+
+# Mount source code directory into VM for development
+mount_source_code() {
+    local vm_name="$1"
+    local source_dir="$2"
+    local mount_point="$3"
+    local readonly="$4"
+    
+    heading "Mounting Source Code for VM: ${vm_name}"
+    
+    # Validate VM exists
+    if ! find_vm_config "$vm_name"; then
+        die "VM not found: ${vm_name}"
+    fi
+    
+    # Validate source directory
+    if [[ -z "$source_dir" ]]; then
+        # Use projects directory by default
+        source_dir="$PROJECTS_DIR"
+    fi
+    
+    if [[ ! -d "$source_dir" ]]; then
+        die "Source directory not found: ${source_dir}"
+    fi
+    
+    # Validate mount point
+    if [[ -z "$mount_point" ]]; then
+        mount_point="/mnt/source"
+    fi
+    
+    # Ensure absolute path
+    source_dir="$(cd "$source_dir" && pwd)"
+    
+    log "Source directory: ${source_dir}"
+    log "Mount point: ${mount_point}"
+    log "Read-only: ${readonly:-yes}"
+    
+    # Check if VM is running
+    if is_vm_running "$vm_name"; then
+        warn "Cannot mount directory while VM is running"
+        log "Stop the VM first, then add the mount configuration"
+        return 1
+    fi
+    
+    # Update VM configuration to include the mount
+    local config_file="$(find_vm_config_file "$vm_name")"
+    if [[ -z "$config_file" ]]; then
+        die "Could not find VM config file for: ${vm_name}"
+    fi
+    
+    # Add virtio-9p or virtfs configuration
+    local fs_type="virtio-9p"
+    local fs_id="source_$(echo "$vm_name" | tr - _)"
+    local security_model="mapped-file"
+    
+    # Check if already mounted
+    if grep -q "${source_dir}" "$config_file"; then
+        log "Source directory already mounted in VM configuration"
+        return 0
+    fi
+    
+    # Add 9P filesystem configuration
+    echo "" >> "$config_file"
+    echo "# Source code mounting" >> "$config_file"
+    echo "QEMU_FS_TYPE_${fs_id}=\"${fs_type}\"" >> "$config_file"
+    echo "QEMU_FS_SOURCE_${fs_id}=\"${source_dir}\"" >> "$config_file"
+    echo "QEMU_FS_MOUNT_${fs_id}=\"${mount_point}\"" >> "$config_file"
+    echo "QEMU_FS_SECURITY_${fs_id}=\"${security_model}\"" >> "$config_file"
+    echo "QEMU_FS_READONLY_${fs_id}=\"${readonly:-yes}\"" >> "$config_file"
+    
+    log "✅ Source directory configured for mounting"
+    log "Add this to your QEMU command:"
+    log "  -fsdev ${fs_type},id=${fs_id},path=${source_dir},security_model=${security_model}\"
+    log "  -device virtio-9p-pci,fsdev=${fs_id},mount_tag=${mount_point}"
+    
+    return 0
+}
+
+# Unmount/Remove source code mount from VM
+unmount_source_code() {
+    local vm_name="$1"
+    local mount_point="$2"
+    
+    heading "Removing Source Code Mount from VM: ${vm_name}"
+    
+    # Validate VM exists
+    if ! find_vm_config "$vm_name"; then
+        die "VM not found: ${vm_name}"
+    fi
+    
+    local config_file="$(find_vm_config_file "$vm_name")"
+    if [[ -z "$config_file" ]]; then
+        die "Could not find VM config file for: ${vm_name}"
+    fi
+    
+    if [[ -z "$mount_point" ]]; then
+        mount_point="/mnt/source"
+    fi
+    
+    # Remove source code mounting configuration
+    local temp_file="${config_file}.tmp"
+    
+    if grep -q "source_${vm_name}" "$config_file"; then
+        # Remove all lines related to this mount
+        grep -v "QEMU_FS_.*_source_${vm_name}" "$config_file" > "$temp_file"
+        mv "$temp_file" "$config_file"
+        log "✅ Source code mount configuration removed"
+    else
+        log "No source code mount found for VM: ${vm_name}"
+        return 1
+    fi
+    
+    return 0
+}
+
+# List mounted source directories for VM
+list_source_mounts() {
+    local vm_name="$1"
+    
+    heading "Source Code Mounts for VM: ${vm_name}"
+    
+    # Validate VM exists
+    if ! find_vm_config "$vm_name"; then
+        die "VM not found: ${vm_name}"
+    fi
+    
+    local config_file="$(find_vm_config_file "$vm_name")"
+    if [[ -z "$config_file" ]]; then
+        die "Could not find VM config file for: ${vm_name}"
+    fi
+    
+    local mounts_found=false
+    
+    while IFS= read -r line; do
+        if [[ "$line" =~ QEMU_FS_TYPE_[^=]+=.*source_ ]]; then
+            local fs_id=$(echo "$line" | sed 's|QEMU_FS_TYPE_||;s|=.*||')
+            local source_path=$(grep "QEMU_FS_SOURCE_${fs_id}=" "$config_file" | sed 's|.*=||')
+            local mount_point=$(grep "QEMU_FS_MOUNT_${fs_id}=" "$config_file" | sed 's|.*=||')
+            local readonly=$(grep "QEMU_FS_READONLY_${fs_id}=" "$config_file" | sed 's|.*=||')
+            
+            echo "  ✓ ${source_path} -> ${mount_point} [readonly: ${readonly}]"
+            mounts_found=true
+        fi
+    done < "$config_file"
+    
+    if ! $mounts_found; then
+        log "No source code mounts configured for VM: ${vm_name}"
+    fi
+}
+
+# Mount source code interactive
+mount_source_code_interactive() {
+    if ! is_interactive; then
+        warn "mount_source_code_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Mount Source Code Directory"
+    
+    # List VMs
+    list_vms
+    
+    local vm_name=$(ask "Select VM name" "")
+    if [[ -z "$vm_name" ]]; then
+        warn "VM name is required"
+        return 1
+    fi
+    
+    # List projects
+    list_projects
+    
+    local source_dir=$(ask "Source directory to mount" "$PROJECTS_DIR")
+    local mount_point=$(ask "Mount point in VM" "/mnt/source")
+    local readonly=$(ask "Read-only mount?" "yes")
+    
+    mount_source_code "$vm_name" "$source_dir" "$mount_point" "$readonly"
+}
+
+# List development projects
+list_projects() {
+    ensure_projects_dir
+    
+    heading "Development Projects"
+    
+    if [[ -d "$PROJECTS_DIR" ]]; then
+        local projects=()
+        local project
+        
+        for project_dir in "${PROJECTS_DIR}"/*/; do
+            if [[ -f "${project_dir}project.cfg" ]]; then
+                local project_name=$(grep -E "^project_name=" "${project_dir}project.cfg" | cut -d'=' -f2)
+                local target_arch=$(grep -E "^target_arch=" "${project_dir}project.cfg" | cut -d'=' -f2)
+                local toolchain=$(grep -E "^toolchain=" "${project_dir}project.cfg" | cut -d'=' -f2)
+                
+                projects+=("${project_name:-$(basename "$project_dir")}")
+                echo "  ✓ $(basename "$project_dir") [${target_arch:-unknown}/${toolchain:-system}]"
+            else
+                echo "  ? $(basename "$project_dir") [no config]"
+            fi
+        done
+        
+        if [[ ${#projects[@]} -eq 0 ]]; then
+            log "No projects found in ${PROJECTS_DIR}"
+        else
+            local count=${#projects[@]}
+            log "Found ${count} projects"
+        fi
+    else
+        log "No projects directory found"
+    fi
+}
+
+# Build project menu
+build_project_menu() {
+    if ! is_interactive; then
+        warn "build_project_menu function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Build Project Menu"
+    
+    # List available projects
+    list_projects
+    
+    echo ""
+    local project_name=$(ask "Enter project name" "")
+    
+    if [[ -z "$project_name" ]]; then
+        log "No project specified"
+        return 1
+    fi
+    
+    local project_path="${PROJECTS_DIR}/${project_name}"
+    if [[ ! -d "$project_path" ]]; then
+        ask "Project not found. Create new project?" "yes" | grep -iq "y" && {
+            local template_type=$(ask "Select project template" "generic")
+            local target_arch=$(ask "Target architecture" "")
+            create_dev_project "$project_name" "$template_type" "$target_arch"
+            project_path="${PROJECTS_DIR}/${project_name}"
+        }
+    fi
+    
+    # Select toolchain
+    detect_cross_compilation_toolchains
+    local toolchain=$(ask "Select toolchain (leave empty for auto-select)" "")
+    
+    # Build the project
+    build_project "$project_name" "$project_path" "" "$toolchain"
+    
+    if is_yes "$(ask "Deploy to VM?" "yes")"; then
+        local vm_name=$(ask "VM name" "")
+        if [[ -n "$vm_name" ]]; then
+            deploy_to_vm "$project_name" "$vm_name"
+        fi
+    fi
+}
+
+# Create development project interactive
+create_dev_project_interactive() {
+    if ! is_interactive; then
+        warn "create_dev_project_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Create Development Project"
+    
+    local project_name=$(ask "Project name" "")
+    if [[ -z "$project_name" ]]; then
+        warn "Project name is required"
+        return 1
+    fi
+    
+    local template_type=$(ask "Project template type" "generic")
+    local target_arch=$(ask "Target architecture (68k, ppc, arm, etc.)" "")
+    
+    create_dev_project "$project_name" "$template_type" "$target_arch"
+}
+
+# Build-Deploy-Debug interactive workflow
+build_deploy_debug_interactive() {
+    if ! is_interactive; then
+        warn "build_deploy_debug_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Build-Deploy-Debug Workflow"
+    
+    # List available projects
+    list_projects
+    
+    local project_name=$(ask "Project name" "")
+    if [[ -z "$project_name" ]]; then
+        warn "Project name is required"
+        return 1
+    fi
+    
+    # List available VMs
+    list_vms
+    
+    local vm_name=$(ask "Target VM name" "")
+    if [[ -z "$vm_name" ]]; then
+        warn "VM name is required"
+        return 1
+    fi
+    
+    detect_cross_compilation_toolchains
+    local toolchain=$(ask "Toolchain (leave empty for auto-select)" "")
+    local target_arch=$(ask "Target architecture (leave empty for auto-detect)" "")
+    
+    local skip_build=$(ask "Skip build step?" "no")
+    local skip_deploy=$(ask "Skip deploy step?" "no")
+    
+    build_deploy_debug_workflow "$project_name" "$vm_name" "$toolchain" "$target_arch" "$skip_build" "$skip_deploy"
 }
 
 # ---------------------------------------------------------------------------
@@ -5551,7 +6345,7 @@ compile_with_retro68() {
     # Verify output
     if [[ -f "build/${output_name}" ]]; then
         local file_size=$(stat -f%z "build/${output_name}" 2>/dev/null || stat -c%s "build/${output_name}")
-        log "✅ Compilation successful: build/${output_name} (${file_size} bytes)"
+        log "✅ Compilation successful: build/${output_name} [${file_size} bytes]"
         return 0
     else
         die "Output file not created: build/${output_name}"
@@ -5716,7 +6510,7 @@ test_netatalk_connection() {
     local host="$1"
     local share="$2"
     
-    heading "Testing Netatalk (AFP) Connection: afp://$host/$share"
+    heading "Testing Netatalk [AFP] Connection: afp://$host/$share"
     
     # Method 1: Try with mount_afp
     if command -v mount_afp &>/dev/null; then
@@ -5786,7 +6580,7 @@ test_gdb_connection() {
     
     # Check if gdb or ggdb is available
     if ! command -v gdb &>/dev/null && ! command -v ggdb &>/dev/null; then
-        warn "GDB not found. Install gdb or ggdb (GNU Debugger)."
+        warn "GDB not found. Install gdb or ggdb [GNU Debugger]."
         return 1
     fi
     
@@ -5989,7 +6783,7 @@ cleanup_all_snapshots() {
     local max_age_days="${1:-30}"
     local all_vms=()
     
-    heading "Cleaning up all VM snapshots (older than ${max_age_days} days)"
+    heading "Cleaning up all VM snapshots [older than ${max_age_days} days]"
     
     # Find all VM config files
     while IFS= read -r -d '' file; do
@@ -6159,10 +6953,10 @@ cleanup_menu() {
         echo "Cleanup Options:"
         echo "  [1] Cleanup old snapshots for a specific VM"
         echo "  [2] Cleanup old snapshots for all VMs"
-        echo "  [3] Find and remove unused disk images (DRY RUN)"
-        echo "  [4] Remove unused disk images (ACTUAL DELETE)"
+        echo "  [3] Find and remove unused disk images [DRY RUN]"
+        echo "  [4] Remove unused disk images [ACTUAL DELETE]"
         echo "  [5] Cleanup temporary files"
-        echo "  [6] Run all cleanup operations (DRY RUN)"
+        echo "  [6] Run all cleanup operations [DRY RUN]"
         echo ""
         echo "  [B] Back to main menu"
         echo ""
@@ -6222,11 +7016,11 @@ cleanup_menu() {
                 cleanup_temp_files
                 ;;
             6)
-                log "Running all cleanup operations (DRY RUN)..."
+                log "Running all cleanup operations [DRY RUN]...""
                 cleanup_all_snapshots
                 cleanup_unused_disks true
                 cleanup_temp_files
-                log "All cleanup operations complete (DRY RUN)"
+                log "All cleanup operations complete [DRY RUN]""
                 ;;
             b|back)
                 return 0
@@ -6264,7 +7058,7 @@ test_sharing_services() {
     echo ""
     
     # Test 1: Local share
-    echo "[1] Local share (${volatile_hd})..."
+    echo "[1] Local share ${volatile_hd}...""
     if [[ -d "${volatile_hd}" && -w "${volatile_hd}" ]]; then
         log "✓ Local share: OK"
         results+=("✓ Local share: OK")
@@ -9220,6 +10014,17 @@ show_main_menu() {
         echo "  [71] List detected toolchains"
         echo "  [72] Configure toolchain environment"
         echo ""
+        echo "🔨 Build Automation:"
+        echo "  [73] Build project"
+        echo "  [74] Create development project"
+        echo "  [75] List development projects"
+        echo "  [76] Build-Deploy-Debug workflow"
+        echo ""
+        echo "📁 Source Code Mounting:"
+        echo "  [77] Mount source code to VM"
+        echo "  [78] Unmount source code from VM"
+        echo "  [79] List source code mounts"
+        echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
         echo ""
@@ -9306,6 +10111,21 @@ show_main_menu() {
             70) detect_cross_compilation_toolchains ;;
             71) list_detected_toolchains ;;
             72) configure_toolchain ;;
+            73) build_project_menu ;;
+            74) create_dev_project_interactive ;;
+            75) list_projects ;;
+            76) build_deploy_debug_interactive ;;
+            77) mount_source_code_interactive ;;
+            78) 
+                local vm_name
+                vm_name=$(ask "Enter VM name" "")
+                [[ -n "$vm_name" ]] && unmount_source_code "$vm_name" || echo "VM name required"
+                ;;
+            79) 
+                local vm_name
+                vm_name=$(ask "Enter VM name" "")
+                [[ -n "$vm_name" ]] && list_source_mounts "$vm_name" || echo "VM name required"
+                ;;
             80) orchestration_menu ;;
             81) export_vm_menu ;;
             82) import_vm_menu ;;
@@ -9776,6 +10596,17 @@ Toolchain Management:
   detect-toolchains  Detect available cross-compilation toolchains
   list-toolchains    List detected cross-compilation toolchains
   configure-toolchain Configure toolchain environment
+
+Build Automation:
+  build-project    Build a development project
+  create-project   Create a new development project
+  list-projects    List all development projects
+  build-deploy-debug Run full build-deploy-debug workflow
+
+Source Code Mounting:
+  mount-source    Mount source code directory to VM
+  unmount-source  Unmount source code directory from VM
+  list-mounts     List mounted source code directories
   cleanup-snapshots Cleanup old VM snapshots
   cleanup-disks    Find and remove unused disk images
   menu             Interactive menu (default)
@@ -10069,6 +10900,29 @@ main() {
         list-toolchains|toolchains-list) list_detected_toolchains ;;
         configure-toolchain|toolchain-configure) 
             [[ -n "${2:-}" ]] && setup_toolchain_environment "$2" || configure_toolchain ;;
+        
+        # Build automation
+        build-project|project-build) 
+            [[ -n "${2:-}" ]] && build_project "$2" "$3" "$4" "$5" || die "Usage: build-project <project_name> [path] [arch] [toolchain] [output_dir]"
+            ;;
+        create-project|project-create) 
+            [[ -n "${2:-}" ]] && create_dev_project "$2" "$3" "$4" || die "Usage: create-project <name> [template_type] [arch]"
+            ;;
+        list-projects|projects-list) list_projects ;;
+        build-deploy-debug|workflow) 
+            [[ -n "${2:-}" && -n "${3:-}" ]] && build_deploy_debug_workflow "$2" "$3" "$4" "$5" "$6" "$7" || die "Usage: build-deploy-debug <project> <vm> [toolchain] [arch] [skip_build] [skip_deploy]"
+            ;;
+        
+        # Source code mounting
+        mount-source|source-mount) 
+            [[ -n "${2:-}" ]] && mount_source_code "$2" "$3" "$4" "$5" || die "Usage: mount-source <vm_name> [source_dir] [mount_point] [readonly]"
+            ;;
+        unmount-source|source-unmount) 
+            [[ -n "${2:-}" ]] && unmount_source_code "$2" "$3" || die "Usage: unmount-source <vm_name> [mount_point]"
+            ;;
+        list-mounts|mounts-list) 
+            [[ -n "${2:-}" ]] && list_source_mounts "$2" || die "Usage: list-mounts <vm_name>"
+            ;;
         
         # Disk/ISO management
         disk-create|create-disk) create_disk_image ;;
