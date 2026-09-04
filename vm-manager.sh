@@ -2313,6 +2313,163 @@ create_vm() {
     log "To configure: ${SCRIPT_NAME} edit ${vm_name}"
 }
 
+# Clone an existing VM
+clone_vm() {
+    local source_vm="$1"
+    local new_vm_name="$2"
+    
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "clone_vm function requires interactive mode"
+        return 1
+    fi
+    
+    # If no arguments, prompt for them
+    if [[ -z "${source_vm}" ]]; then
+        heading "Clone Virtual Machine"
+        list_vms || return 1
+        
+        local vm_num
+        vm_num=$(ask "Select VM number to clone" "")
+        
+        # Get all VM config files from vms/VM_NAME_PLATFORM/conf/
+        local vm_confs=()
+        while IFS= read -r -d '' vm_conf; do
+            vm_confs+=("${vm_conf}")
+        done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
+        
+        local i=0
+        for vm_conf in "${vm_confs[@]}"; do
+            [[ -f "${vm_conf}" ]] && {
+                if [[ $i -eq $vm_num ]]; then
+                    source_vm=$(basename "${vm_conf}" .conf)
+                    break
+                fi
+                ((i++)) || true
+            }
+        done
+        
+        [[ -z "${source_vm}" ]] && { warn "Invalid VM selection"; return 1; }
+    fi
+    
+    if [[ -z "${new_vm_name}" ]]; then
+        new_vm_name=$(ask "New VM name for the clone" "${source_vm}-clone")
+        [[ -z "${new_vm_name}" ]] && { warn "New VM name cannot be empty"; return 1; }
+    fi
+    
+    heading "Cloning VM: ${source_vm} → ${new_vm_name}"
+    
+    # Find source VM directory and config
+    local source_vm_dir=""
+    local source_config_file=""
+    local source_platform=""
+    
+    while IFS= read -r -d '' file; do
+        if [[ "$(basename "$file" .conf)" == "${source_vm}" ]]; then
+            source_config_file="$file"
+            source_vm_dir=$(dirname "$(dirname "${source_config_file}")")
+            source_platform=$(basename "${source_vm_dir}")
+            break
+        fi
+    done < <(find "${VM_DIR}" -path "*/conf/${source_vm}.conf" -print0 2>/dev/null)
+    
+    [[ -f "${source_config_file}" ]] || die "Source VM config not found: ${source_vm}"
+    
+    # Check if new VM already exists
+    local new_vm_dir="${VM_DIR}/${new_vm_name}_${source_platform}"
+    if [[ -d "${new_vm_dir}" ]]; then
+        local overwrite
+        overwrite=$(ask "Destination VM already exists. Overwrite? (y/n)" "n")
+        if [[ "${overwrite}" != "y" ]]; then
+            warn "Clone cancelled"
+            return 1
+        fi
+        log "Removing existing VM..."
+        rm -rf "${new_vm_dir}"
+    fi
+    
+    # Create new VM directory structure
+    ensure_dir "${new_vm_dir}/conf"
+    ensure_dir "${new_vm_dir}/qcow2"
+    ensure_dir "${new_vm_dir}/sh"
+    ensure_dir "${new_vm_dir}/rom"
+    ensure_dir "${new_vm_dir}/snapshots"
+    
+    log "Created directory structure: ${new_vm_dir}"
+    
+    # Copy configuration file
+    local new_config_file="${new_vm_dir}/conf/${new_vm_name}.conf"
+    cp "${source_config_file}" "${new_config_file}"
+    log "✓ Copied configuration file"
+    
+    # Update VM name in the configuration
+    sed -i.bak "s/${source_vm}/${new_vm_name}/g" "${new_config_file}"
+    log "✓ Updated VM name in configuration"
+    
+    # Copy disk images (use qemu-img convert to ensure compatibility)
+    local source_disk_dir="${source_vm_dir}/qcow2"
+    local new_disk_dir="${new_vm_dir}/qcow2"
+    
+    if [[ -d "${source_disk_dir}" ]]; then
+        for disk_file in "${source_disk_dir}"/*.qcow2; do
+            [[ -f "${disk_file}" ]] || continue
+            local disk_name=$(basename "${disk_file}")
+            local new_disk_name=$(echo "${disk_name}" | sed "s/${source_vm}/${new_vm_name}/g")
+            local new_disk_path="${new_disk_dir}/${new_disk_name}"
+            
+            log "Cloning disk: ${disk_name} → ${new_disk_name}"
+            if qemu-img convert -p -O qcow2 "${disk_file}" "${new_disk_path}" 2>/dev/null; then
+                log "✓ Disk cloned successfully"
+                # Update disk path in configuration
+                sed -i.bak "s|${disk_file}|${new_disk_path}|g" "${new_config_file}"
+            else
+                warn "✗ Failed to clone disk: ${disk_name}"
+            fi
+        done
+    fi
+    
+    # Copy ROM files if they exist
+    local source_rom_dir="${source_vm_dir}/rom"
+    local new_rom_dir="${new_vm_dir}/rom"
+    
+    if [[ -d "${source_rom_dir}" ]]; then
+        for rom_file in "${source_rom_dir}"/*; do
+            [[ -f "${rom_file}" ]] || continue
+            cp "${rom_file}" "${new_rom_dir}/"
+            log "✓ Copied ROM file: $(basename "${rom_file}")"
+        done
+    fi
+    
+    # Copy scripts if they exist
+    local source_sh_dir="${source_vm_dir}/sh"
+    local new_sh_dir="${new_vm_dir}/sh"
+    
+    if [[ -d "${source_sh_dir}" ]]; then
+        for sh_file in "${source_sh_dir}"/*; do
+            [[ -f "${sh_file}" ]] || continue
+            cp "${sh_file}" "${new_sh_dir}/"
+            log "✓ Copied script: $(basename "${sh_file}")"
+        done
+    fi
+    
+    log "✅ VM cloned successfully: ${new_vm_name}"
+    log "To launch: ${SCRIPT_NAME} launch ${new_vm_name}"
+    log "To configure: ${SCRIPT_NAME} edit ${new_vm_name}"
+    
+    return 0
+}
+
+# Clone VM menu
+clone_vm_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "clone_vm_menu function requires interactive mode"
+        return 1
+    fi
+    
+    clone_vm
+}
+
 # ---------------------------------------------------------------------------
 # Platform-Specific Launch Functions (from vm_assist.sh)
 # ---------------------------------------------------------------------------
@@ -6189,53 +6346,54 @@ show_main_menu() {
         echo "🔧 Advanced VM Management:"
         echo "  [21] Stop a running VM"
         echo "  [22] Edit VM configuration"
-        echo "  [23] Create environment configuration"
-        echo "  [24] List ROM files"
-        echo "  [25] List disk images"
+        echo "  [23] Clone VM"
+        echo "  [24] Create environment configuration"
+        echo "  [25] List ROM files"
+        echo "  [26] List disk images"
         echo ""
         echo "💾 Backup & Restore:"
-        echo "  [26] Create configuration backup"
-        echo "  [27] List available backups"
-        echo "  [28] Restore from backup"
+        echo "  [27] Create configuration backup"
+        echo "  [28] List available backups"
+        echo "  [29] Restore from backup"
         echo ""
         echo "🚀 Quick Launch (Platform Presets):"
-        echo "  [29] MacOS 68k (System 7-8.1)"
-        echo "  [30] MacOS PPC (7.5.2-9.2.2, G3/G4)"
-        echo "  [31] MacOS PPC64 (Mac OS X, G5)"
-        echo "  [32] HaikuOS"
-        echo "  [33] Linux (generic)"
-        echo "  [34] Atari ST/TT/Falcon (68k)"
-        echo "  [35] Commodore Amiga (68k/AROS)"
-        echo "  [36] Solaris x86"
-        echo "  [37] Solaris SPARC"
-        echo "  [38] Windows XP"
-        echo "  [39] OpenStep x86"
-        echo "  [40] Custom QEMU (any architecture)"
+        echo "  [30] MacOS 68k (System 7-8.1)"
+        echo "  [31] MacOS PPC (7.5.2-9.2.2, G3/G4)"
+        echo "  [32] MacOS PPC64 (Mac OS X, G5)"
+        echo "  [33] HaikuOS"
+        echo "  [34] Linux (generic)"
+        echo "  [35] Atari ST/TT/Falcon (68k)"
+        echo "  [36] Commodore Amiga (68k/AROS)"
+        echo "  [37] Solaris x86"
+        echo "  [38] Solaris SPARC"
+        echo "  [39] Windows XP"
+        echo "  [40] OpenStep x86"
+        echo "  [41] Custom QEMU (any architecture)"
         echo ""
         echo "📖 Information:"
-        echo "  [41] Show QEMU version"
-        echo "  [42] Show available architectures"
-        echo "  [43] Show VM configurations"
+        echo "  [42] Show QEMU version"
+        echo "  [43] Show available architectures"
+        echo "  [44] Show VM configurations"
         echo ""
         echo "🔍 Diagnostics:"
-        echo "  [44] Test sharing services (Samba/Netatalk)"
-        echo "  [45] Configure Netatalk (AFP) file sharing"
-        echo "  [46] Configure Samba file sharing"
-        echo "  [47] Verify all dependencies"
-        echo "  [48] Configure XQuartz for X11 display"
-        echo "  [49] Configure RAMDISK for sharing"
-        echo "  [50] Test Samba connection"
-        echo "  [51] Test Netatalk connection"
-        echo "  [52] Test SSH connection"
-        echo "  [53] Test GDB connection"
-        echo "  [54] Show QEMU command (debugging)"
-        echo "  [55] VM Snapshot Management"
-        echo "  [56] Check MacPorts installation"
-        echo "  [57] Check Homebrew installation"
-        echo "  [58] Update package manager"
-        echo "  [59] Install VM dependencies"
-        echo "  [60] Test local share directory"
-        echo "  [61] List all shares and directories"
+        echo "  [45] Test sharing services (Samba/Netatalk)"
+        echo "  [46] Configure Netatalk (AFP) file sharing"
+        echo "  [47] Configure Samba file sharing"
+        echo "  [48] Verify all dependencies"
+        echo "  [49] Configure XQuartz for X11 display"
+        echo "  [50] Configure RAMDISK for sharing"
+        echo "  [51] Test Samba connection"
+        echo "  [52] Test Netatalk connection"
+        echo "  [53] Test SSH connection"
+        echo "  [54] Test GDB connection"
+        echo "  [55] Show QEMU command (debugging)"
+        echo "  [56] VM Snapshot Management"
+        echo "  [57] Check MacPorts installation"
+        echo "  [58] Check Homebrew installation"
+        echo "  [59] Update package manager"
+        echo "  [60] Install VM dependencies"
+        echo "  [61] Test local share directory"
+        echo "  [62] List all shares and directories"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -6266,45 +6424,46 @@ show_main_menu() {
             20) export_utm_menu ;;
             21) stop_vm_menu ;;
             22) edit_vm_menu ;;
-            23) create_env_config ;;
-            24) list_roms ;;
-            25) list_disks ;;
+            23) clone_vm_menu ;;
+            24) create_env_config ;;
+            25) list_roms ;;
+            26) list_disks ;;
             26) backup_configurations ;;
             27) list_backups ;;
             28) backup_restore_menu ;;
-            29) launch_macos_68k ;;
-            30) launch_macos_ppc ;;
-            31) launch_macos_ppc64 ;;
-            32) launch_haiku ;;
-            33) launch_linux ;;
-            34) launch_atari ;;
-            35) launch_amiga ;;
-            36) launch_solaris_x86 ;;
-            37) launch_solaris_sparc ;;
-            38) launch_windows_xp ;;
-            39) launch_openstep ;;
-            40) launch_custom ;;
-            41) show_qemu_version ;;
-            42) show_architectures ;;
-            43) show_vm_configs ;;
-            44) test_sharing_services ;;
-            45) configure_netatalk ;;
-            46) configure_samba ;;
-            47) verify_dependencies ;;
-            48) configure_xquartz ;;
-            49) configure_ramdisk ;;
-            50) test_samba_connection localhost VM_Shares ;;
-            51) test_netatalk_connection localhost VM_Shares ;;
-            52) test_ssh_connection localhost 22 ;;
-            53) test_gdb_connection ;;
-            54) show_qemu_command_menu ;;
-            55) snapshot_menu ;;
-            56) check_macports ;;
-            57) check_homebrew ;;
-            58) update_package_manager ;;
-            59) install_vm_dependencies ;;
-            60) test_local_share ;;
-            61) list_shares ;;
+            30) launch_macos_68k ;;
+            31) launch_macos_ppc ;;
+            32) launch_macos_ppc64 ;;
+            33) launch_haiku ;;
+            34) launch_linux ;;
+            35) launch_atari ;;
+            36) launch_amiga ;;
+            37) launch_solaris_x86 ;;
+            38) launch_solaris_sparc ;;
+            39) launch_windows_xp ;;
+            40) launch_openstep ;;
+            41) launch_custom ;;
+            42) show_qemu_version ;;
+            43) show_architectures ;;
+            44) show_vm_configs ;;
+            45) test_sharing_services ;;
+            46) configure_netatalk ;;
+            47) configure_samba ;;
+            48) verify_dependencies ;;
+            49) configure_xquartz ;;
+            50) configure_ramdisk ;;
+            51) test_samba_connection localhost VM_Shares ;;
+            52) test_netatalk_connection localhost VM_Shares ;;
+            53) test_ssh_connection localhost 22 ;;
+            54) test_gdb_connection ;;
+            55) show_qemu_command_menu ;;
+            56) snapshot_menu ;;
+            57) check_macports ;;
+            58) check_homebrew ;;
+            59) update_package_manager ;;
+            60) install_vm_dependencies ;;
+            61) test_local_share ;;
+            62) list_shares ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -6646,6 +6805,7 @@ Build QEMU:
 VM Management:
   create            Create new VM
   create-template   Create VM from template
+  clone <src> <dest> Clone an existing VM
   list              List all VMs
   launch <name>    Launch a VM
   delete <name>    Delete a VM
@@ -6885,6 +7045,10 @@ main() {
         # VM management
         create) create_vm ;;
         create-template|create-vm-template|template) create_vm_template ;;
+        clone) 
+            [[ -n "${2:-}" && -n "${3:-}" ]] && clone_vm "$2" "$3" || 
+            [[ -n "${2:-}" ]] && clone_vm "$2" "" || clone_vm_menu
+            ;;
         list|list-vms) list_vms ;;
         launch) 
             [[ -n "${2:-}" ]] && launch_vm "$2" || launch_vm_menu
