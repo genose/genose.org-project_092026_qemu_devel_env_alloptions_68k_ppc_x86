@@ -3224,14 +3224,14 @@ configure_netatalk() {
    max connections = 10
 
 [VM_Shares]
-   path = ${SHARED_DIR}
+   path = ${VM_SHARED_DIR}
    cnidscheme = dbd
    vol size limit = 0
    valid users = ${current_user}
    rwlist = ${current_user}
 
 [VM_Disks]
-   path = ${DISK_DIR}
+   path = ${VM_DIR}
    cnidscheme = dbd
    vol size limit = 0
    valid users = ${current_user}
@@ -3251,8 +3251,8 @@ EOF
     ensure_dir "$apple_volumes_dir"
     
     cat > "$apple_volumes" << EOF
-${SHARED_DIR} "VM RAMDISK" options:usedots,noadouble
-${DISK_DIR} "VM Disques" options:usedots,noadouble
+${VM_SHARED_DIR} "VM RAMDISK" options:usedots,noadouble
+${VM_DIR} "VM Disques" options:usedots,noadouble
 ${ISO_DIR} "VM ISOs" options:usedots,noadouble,ro
 EOF
     
@@ -3395,7 +3395,7 @@ configure_samba() {
 
 [VM_Shares]
    comment = VM Assistant Share
-   path = ${SHARED_DIR}
+   path = ${VM_SHARED_DIR}
    browsable = yes
    read only = no
    guest ok = yes
