@@ -1275,6 +1275,24 @@ find_vm_config() {
     fi
 }
 
+# Find VM config file path for a given VM name
+# Returns the config file path
+find_vm_config_file() {
+    local vm_name="$1"
+    
+    [[ -n "${vm_name}" ]] || die "VM name is required"
+    
+    local config_file=""
+    find_vm_config "${vm_name}" config_file
+    
+    if [[ -n "${config_file}" && -f "${config_file}" ]]; then
+        echo "${config_file}"
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Find VM directory for a given VM name
 # Sets the vm_dir variable passed by reference
 find_vm_directory() {
@@ -1303,6 +1321,33 @@ find_vm_directory() {
         
         return 1
     fi
+}
+
+# Get VM IP address (placeholder implementation)
+# Returns 0 and echo the IP if available, 1 otherwise
+get_vm_ip() {
+    local vm_name="$1"
+    
+    [[ -n "${vm_name}" ]] || return 1
+    
+    # For now, return localhost as a fallback for SPICE
+    # TODO: Implement actual VM IP detection based on the platform
+    echo "127.0.0.1"
+    return 0
+}
+
+# Ensure VM exists by checking if its configuration exists
+ensure_vm_exists() {
+    local vm_name="$1"
+    
+    [[ -n "${vm_name}" ]] || die "VM name is required"
+    
+    local config_file=""
+    if ! find_vm_config "${vm_name}" config_file; then
+        die "VM not found: ${vm_name}"
+    fi
+    
+    return 0
 }
 
 # Check if a VM is currently running
@@ -9836,6 +9881,412 @@ config_commit_interactive() {
 }
 
 # ---------------------------------------------------------------------------
+# SPICE Advanced Features
+# ---------------------------------------------------------------------------
+
+# Directory for SPICE configurations
+SPICE_CONFIG_DIR="${CONFIG_DIR}/spice_configs"
+
+# Ensure SPICE config directory exists
+ensure_spice_dirs() {
+    ensure_dir "${SPICE_CONFIG_DIR}"
+}
+
+# Start VM with SPICE display
+# Usage: spice_start <vm_name> [port] [tls_port] [options]
+spice_start() {
+    local vm_name="$1"
+    local port="$2"
+    local tls_port="$3"
+    local options="$4"
+    
+    heading "Starting VM with SPICE: ${vm_name}"
+    
+    # Validate VM exists by checking if config exists
+    local config_file=""
+    if ! find_vm_config "$vm_name" config_file; then
+        die "Configuration file not found for VM: ${vm_name}"
+    fi
+    
+    # Set default ports if not specified
+    [[ -n "$port" ]] || port="${DEFAULT_SPICE_PORT}"
+    [[ -n "$tls_port" ]] || tls_port=""
+    
+    # Check if VM is already running
+    if is_vm_running "$vm_name"; then
+        warn "VM ${vm_name} is already running"
+        return 1
+    fi
+    
+    log "Starting VM ${vm_name} with SPICE on port ${port}"
+    
+    # Load configuration
+    source_vm_config "$config_file"
+    
+    # Force SPICE display backend
+    DISPLAY_BACKEND="spice"
+    
+    # Add SPICE-specific arguments
+    local spice_args=(-spice "port=${port}")
+    
+    # Add TLS configuration if TLS port is specified
+    if [[ -n "$tls_port" ]]; then
+        spice_args+=(-spice "tls-port=${tls_port}")
+        spice_args+=(-spice "disable-ticketing")
+        log "SPICE TLS enabled on port: ${tls_port}"
+    else
+        spice_args+=(-spice "disable-ticketing")
+        warn "SPICE running without TLS encryption [use tls_port for secure connection]"
+    fi
+    
+    # Add audio redirection
+    spice_args+=(-audiodev "spice,id=snd0")
+    
+    # Add USB redirection if supported
+    spice_args+=(-device "virtio-serial-pci,id=spicechannel0,name=vdagent")
+    spice_args+=(-chardev "spicevmc,id=vdagent,debug=0,name=vdagent")
+    spice_args+=(-device "virtserialport,chardev=vdagent,name=com.redhat.spice.0")
+    
+    # Add clipboard sharing
+    spice_args+=(-device "virtio-serial-pci,id=spicechannel1,name=usbredir")
+    spice_args+=(-chardev "spicevmc,id=usbredirchardev1,name=usbredir")
+    spice_args+=(-device "virtserialport,chardev=usbredirchardev1,name=com.redhat.spice.1")
+    
+    # Add additional SPICE options if provided
+    if [[ -n "$options" ]]; then
+        spice_args+=($options)
+    fi
+    
+    # Add SPICE arguments to QEMU args
+    QEMU_ARGS+=("${spice_args[@]}")
+    
+    # Launch VM with SPICE
+    launch_vm "$vm_name"
+    
+    log "✅ VM ${vm_name} started with SPICE"
+    log "SPICE connection: spice://localhost:${port}"
+    if [[ -n "$tls_port" ]]; then
+        log "Secure SPICE connection: spice://localhost:${tls_port} [TLS]"
+    fi
+    log ""
+    log "To connect to SPICE:"
+    log "  Linux: remote-viewer spice://localhost:${port}"
+    log "  macOS: open spice://localhost:${port}"
+    log "  Windows: virt-viewer spice://localhost:${port}"
+    
+    return 0
+}
+
+# Connect to SPICE console for a VM
+# Usage: spice_connect <vm_name> [port]
+spice_connect() {
+    local vm_name="$1"
+    local port="$2"
+    
+    heading "Connecting to SPICE Console: ${vm_name}"
+    
+    # Validate VM exists by checking if config exists
+    local config_file=""
+    if ! find_vm_config "$vm_name" config_file; then
+        die "Configuration file not found for VM: ${vm_name}"
+    fi
+    
+    # Get SPICE port from configuration if not specified
+    if [[ -z "$port" ]]; then
+        if [[ -f "$config_file" ]]; then
+            port=$(grep -E "SPICE_PORT|^port=" "$config_file" | head -1 | cut -d'=' -f2)
+        fi
+        [[ -n "$port" ]] || port="${DEFAULT_SPICE_PORT}"
+    fi
+    
+    # Check if SPICE is available
+    if ! command -v remote-viewer &>/dev/null && ! command -v virt-viewer &>/dev/null; then
+        die "SPICE client not found. Install remote-viewer or virt-viewer."
+    fi
+    
+    # Check if VM is running
+    if ! is_vm_running "$vm_name"; then
+        die "VM ${vm_name} is not running. Start it first with SPICE support."
+    fi
+    
+    log "Connecting to SPICE console for VM: ${vm_name}"
+    log "Port: ${port}"
+    
+    # Try to get VM IP for remote connection
+    if get_vm_ip "$vm_name"; then
+        local vm_ip=$(get_vm_ip "$vm_name")
+        log "VM IP: ${vm_ip}"
+        
+        # Try both localhost and VM IP
+        local spice_url="spice://${vm_ip}:${port}"
+        log "SPICE URL: ${spice_url}"
+        
+        # Try to connect using remote-viewer
+        if command -v remote-viewer &>/dev/null; then
+            log "Connecting with remote-viewer..."
+            remote-viewer "${spice_url}" &
+            log "✅ SPICE connection initiated with remote-viewer"
+        elif command -v virt-viewer &>/dev/null; then
+            log "Connecting with virt-viewer..."
+            virt-viewer "${spice_url}" &
+            log "✅ SPICE connection initiated with virt-viewer"
+        else
+            log "Open SPICE URL manually:"
+            log "  ${spice_url}"
+        fi
+    else
+        # Fallback to localhost
+        local spice_url="spice://localhost:${port}"
+        log "SPICE URL: ${spice_url}"
+        log "Open this URL in your SPICE client"
+    fi
+    
+    return 0
+}
+
+# Configure SPICE options for a VM
+# Usage: spice_config <vm_name> [port] [tls_port] [tls_cert] [tls_key]
+spice_config() {
+    local vm_name="$1"
+    local port="$2"
+    local tls_port="$3"
+    local tls_cert="$4"
+    local tls_key="$5"
+    
+    heading "Configuring SPICE Options for VM: ${vm_name}"
+    
+    # Validate VM exists by checking if config exists
+    local config_file=""
+    if ! find_vm_config "$vm_name" config_file; then
+        die "Configuration file not found for VM: ${vm_name}"
+    fi
+    
+    ensure_spice_dirs
+    
+    # Set defaults
+    [[ -n "$port" ]] || port="${DEFAULT_SPICE_PORT}"
+    [[ -n "$tls_port" ]] || tls_port=""
+    [[ -n "$tls_cert" ]] || tls_cert=""
+    [[ -n "$tls_key" ]] || tls_key=""
+    
+    # Create SPICE configuration for this VM
+    local spice_config_file="${SPICE_CONFIG_DIR}/${vm_name}-spice.conf"
+    
+    log "Creating SPICE configuration: ${spice_config_file}"
+    
+    # Create configuration file
+    cat > "${spice_config_file}" << EOF
+# SPICE Configuration for VM: ${vm_name}
+# Generated: $(date)
+
+SPICE_ENABLED=true
+SPICE_PORT=${port}
+SPICE_TLS_PORT=${tls_port}
+SPICE_DISABLE_TICKETING=true
+EOF
+    
+    # Add TLS configuration if cert and key are provided
+    if [[ -n "$tls_cert" && -n "$tls_key" ]]; then
+        cat >> "${spice_config_file}" << EOF
+SPICE_TLS_CERT=${tls_cert}
+SPICE_TLS_KEY=${tls_key}
+SPICE_TLS_ENABLED=true
+EOF
+        log "TLS configuration enabled"
+    else
+        cat >> "${spice_config_file}" << EOF
+SPICE_TLS_ENABLED=false
+EOF
+        if [[ -n "$tls_port" ]]; then
+            warn "TLS port specified but no certificate provided. Using non-TLS connection."
+        fi
+    fi
+    
+    # Add audio and USB configuration
+    cat >> "${spice_config_file}" << EOF
+SPICE_AUDIO_ENABLED=true
+SPICE_USB_REDIRECTION=true
+SPICE_CLIPBOARD_SHARING=true
+SPICE_MULTI_MONITOR=false
+EOF
+    
+    log "✅ SPICE configuration created: ${spice_config_file}"
+    
+    # Update VM configuration to reference SPICE config
+    local spice_ref="SPICE_CONFIG=${spice_config_file}"
+    
+    if ! grep -q "SPICE_CONFIG" "$config_file"; then
+        echo "${spice_ref}" >> "$config_file"
+        log "VM configuration updated with SPICE reference"
+    else
+        # Update existing SPICE config reference
+        sed -i.bak "s|SPICE_CONFIG=.*|${spice_ref}|" "$config_file" 2>/dev/null
+    fi
+    
+    return 0
+}
+
+# Create TLS certificates for SPICE
+# Usage: spice_create_tls <cert_path> <key_path> [days]
+spice_create_tls() {
+    local cert_path="$1"
+    local key_path="$2"
+    local days="$3"
+    
+    heading "Creating TLS Certificates for SPICE"
+    
+    [[ -n "$days" ]] || days=365
+    
+    if [[ -z "$cert_path" || -z "$key_path" ]]; then
+        die "Certificate and key paths are required. Usage: spice_create_tls cert_path key_path [days]"
+    fi
+    
+    # Create directory if it doesn't exist
+    local cert_dir=$(dirname "$cert_path")
+    local key_dir=$(dirname "$key_path")
+    
+    mkdir -p "$cert_dir" "$key_dir"
+    
+    # Check if OpenSSL is available
+    if ! command -v openssl &>/dev/null; then
+        die "OpenSSL is required to create TLS certificates. Install OpenSSL first."
+    fi
+    
+    log "Creating self-signed certificate for SPICE"
+    log "Certificate: ${cert_path}"
+    log "Key: ${key_path}"
+    log "Validity: ${days} days"
+    
+    # Generate self-signed certificate
+    if openssl req -x509 -nodes -newkey rsa:2048 \
+        -keyout "$key_path" \
+        -out "$cert_path" \
+        -days "$days" \
+        -subj "/CN=SPICE Server" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null; then
+        
+        # Set proper permissions
+        chmod 600 "$key_path"
+        chmod 644 "$cert_path"
+        
+        log "✅ TLS certificate created"
+        log "  Certificate: ${cert_path}"
+        log "  Private Key: ${key_path}"
+        log "  Expires: $(date -d "+${days} days" +%Y-%m-%d 2>/dev/null || echo "N/A")"
+        log ""
+        log "Use these files in spice_config:"
+        log "  spice_config vm_name ${port} ${tls_port} ${cert_path} ${key_path}"
+        
+        return 0
+    else
+        die "Failed to create TLS certificate. Check OpenSSL installation."
+    fi
+}
+
+# Interactive SPICE start
+spice_start_interactive() {
+    if ! is_interactive; then
+        warn "spice_start_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Start VM with SPICE [Interactive]"
+    
+    list_vms
+    echo ""
+    
+    local vm_name
+    vm_name=$(ask "Enter VM name to start with SPICE" "")
+    
+    if [[ -z "$vm_name" ]]; then
+        die "VM name is required"
+    fi
+    
+    local port
+    port=$(ask "Enter SPICE port" "${DEFAULT_SPICE_PORT}")
+    
+    local tls_port
+    tls_port=$(ask "Enter SPICE TLS port (leave blank for no TLS)" "")
+    
+    local options
+    options=$(ask "Enter additional SPICE options (leave blank for none)" "")
+    
+    spice_start "$vm_name" "$port" "$tls_port" "$options"
+}
+
+# Interactive SPICE connect
+spice_connect_interactive() {
+    if ! is_interactive; then
+        warn "spice_connect_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Connect to SPICE Console [Interactive]"
+    
+    list_vms
+    echo ""
+    
+    local vm_name
+    vm_name=$(ask "Enter VM name to connect to" "")
+    
+    if [[ -z "$vm_name" ]]; then
+        die "VM name is required"
+    fi
+    
+    local port
+    port=$(ask "Enter SPICE port (leave blank for default)" "")
+    
+    spice_connect "$vm_name" "$port"
+}
+
+# Interactive SPICE configuration
+spice_config_interactive() {
+    if ! is_interactive; then
+        warn "spice_config_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Configure SPICE Options [Interactive]"
+    
+    list_vms
+    echo ""
+    
+    local vm_name
+    vm_name=$(ask "Enter VM name to configure SPICE" "")
+    
+    if [[ -z "$vm_name" ]]; then
+        die "VM name is required"
+    fi
+    
+    local port
+    port=$(ask "Enter SPICE port" "${DEFAULT_SPICE_PORT}")
+    
+    local tls_port
+    tls_port=$(ask "Enter TLS port (leave blank for no TLS)" "")
+    
+    local use_tls
+    use_tls=$(ask "Enable TLS? (yes/no)" "no")
+    
+    local cert_path=""
+    local key_path=""
+    
+    if [[ "$use_tls" == "yes" ]]; then
+        cert_path=$(ask "Enter path to TLS certificate (leave blank to create new)" "")
+        key_path=$(ask "Enter path to TLS key (leave blank to create new)" "")
+        
+        if [[ -z "$cert_path" || -z "$key_path" ]]; then
+            cert_path="${SPICE_CONFIG_DIR}/${vm_name}-spice.crt"
+            key_path="${SPICE_CONFIG_DIR}/${vm_name}-spice.key"
+            
+            log "Creating new TLS certificate..."
+            spice_create_tls "$cert_path" "$key_path"
+        fi
+    fi
+    
+    spice_config "$vm_name" "$port" "$tls_port" "$cert_path" "$key_path"
+}
+
+# ---------------------------------------------------------------------------
 # GDB Debugging Integration Enhancement
 # ---------------------------------------------------------------------------
 
@@ -14202,6 +14653,12 @@ show_main_menu() {
         echo "  [133] Commit configuration"
         echo "  [134] List all config backups"
         echo ""
+        echo "🔗 SPICE Advanced Features:"
+        echo "  [135] Start VM with SPICE"
+        echo "  [136] Connect to SPICE console"
+        echo "  [137] Configure SPICE options"
+        echo "  [138] Create TLS certificates for SPICE"
+        echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
         echo ""
@@ -14453,6 +14910,18 @@ show_main_menu() {
             132) config_diff_interactive ;;
             133) config_commit_interactive ;;
             134) list_config_backups ;;
+            
+            # SPICE Advanced Features
+            135) spice_start_interactive ;;
+            136) spice_connect_interactive ;;
+            137) spice_config_interactive ;;
+            138) 
+                local cert_path key_path days
+                cert_path=$(ask "Enter path for TLS certificate" "${SPICE_CONFIG_DIR}/spice-server.crt")
+                key_path=$(ask "Enter path for TLS key" "${SPICE_CONFIG_DIR}/spice-server.key")
+                days=$(ask "Enter certificate validity in days" "365")
+                [[ -n "$cert_path" && -n "$key_path" ]] && spice_create_tls "$cert_path" "$key_path" "$days" || echo "Certificate and key paths required"
+                ;;
             
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
@@ -14958,6 +15427,12 @@ Enhanced Deployment:
   menu             Interactive menu (default)
   help             Show this help
 
+SPICE Advanced Features:
+  spice-start <vm> [port] [tls_port] [options]  Start VM with SPICE display
+  spice-connect <vm> [port]                   Connect to SPICE console
+  spice-config <vm> [port] [tls_port] [cert] [key]  Configure SPICE options
+  spice-create-tls <cert> <key> [days]       Create TLS certificates for SPICE
+
 Environment Variables:
   QEMU_VERSION              QEMU version to build       (default: 9.2.0)
   QEMU_INSTALL_PREFIX       Installation prefix          (default: ~/.local/qemu-retro)
@@ -15101,6 +15576,18 @@ main() {
         fi
     fi
     detect_display_backend "${test_qemu}"
+    
+    # Check if XQuartz is running and no command provided, offer GUI mode
+    if [[ -z "${1:-}" ]] && is_interactive; then
+        if pgrep -x "Xquartz" &>/dev/null; then
+            local use_gui
+            use_gui=$(ask "XQuartz is running. Use GUI mode? (yes/no)" "yes")
+            if [[ "$use_gui" == "yes" ]]; then
+                gui_mode_start
+                return 0
+            fi
+        fi
+    fi
     
     # Detect QEMU capabilities (silent for now, can be run manually)
     if [[ "${1:-}" != "menu" && "${1:-}" != "help" && "${1:-}" != "--help" && "${1:-}" != "-h" ]]; then
@@ -15409,6 +15896,20 @@ main() {
             [[ -n "${2:-}" && -n "${3:-}" ]] && config_commit "$2" "$3" || die "Usage: config-commit <vm_name> <message>"
             ;;
         list-backups|backups-list) list_config_backups ;;
+        
+        # SPICE Advanced Features
+        spice-start) 
+            [[ -n "${2:-}" ]] && spice_start "$2" "${3:-}" "${4:-}" "${5:-}" || die "Usage: spice-start <vm_name> [port] [tls_port] [options]"
+            ;;
+        spice-connect) 
+            [[ -n "${2:-}" ]] && spice_connect "$2" "${3:-}" || die "Usage: spice-connect <vm_name> [port]"
+            ;;
+        spice-config) 
+            [[ -n "${2:-}" ]] && spice_config "$2" "${3:-}" "${4:-}" "${5:-}" "${6:-}" || die "Usage: spice-config <vm_name> [port] [tls_port] [tls_cert] [tls_key]"
+            ;;
+        spice-create-tls) 
+            [[ -n "${2:-}" && -n "${3:-}" ]] && spice_create_tls "$2" "$3" "${4:-}" || die "Usage: spice-create-tls <cert_path> <key_path> [days]"
+            ;;
         
         # Disk/ISO management
         disk-create|create-disk) create_disk_image ;;
