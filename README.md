@@ -41,8 +41,9 @@
 13. [🔄 Migration Guide](#-migration-guide)
 14. [📊 Feature Status](#-feature-status)
 15. [🎯 Roadmap](#-roadmap)
-16. [🤝 Contributing](#-contributing) 
-17. [📄 License](#-license)
+16. [📚 Additional Documentation](#-additional-documentation)
+17. [🤝 Contributing](#-contributing) 
+18. [📄 License](#-license)
 
 ---
 
@@ -1496,6 +1497,34 @@ DEFAULT_DISPLAY=""  # Auto-detected by default
 - [ ] Community sharing platform
 - [ ] Cloud synchronization
 - [ ] Team collaboration features
+
+---
+
+## 📚 Additional Documentation
+
+This project includes comprehensive documentation organized in the `docs/` directory:
+
+### 🎯 Project & Development
+- **[Project Context](docs/PROJECT-CONTEXT.md)** - Project overview, goals, and architecture
+- **[Development History](docs/DEVELOPMENT-HISTORY.md)** - Development timeline and evolution
+- **[Contributing Guide](docs/CONTRIBUTING.md)** - How to contribute to the project
+- **[Roadmap](docs/ROADMAP.md)** - Feature audit, current status, and future proposals
+
+### 🏗️ Technical Documentation
+- **[Architecture Compatibility](docs/technical/ARCHITECTURE-COMPATIBILITY.md)** - Detailed compatibility matrices for PowerPC, 68k, and other architectures
+- **[Option C Debugging Guide](docs/technical/OPTION-C-DEBUGGING-GUIDE.md)** - Guide for GDB, SSH, and Netatalk debugging options
+
+### 👨‍💻 Retro68 Development
+- **[Retro68 Guide](docs/retro68/README.md)** - Complete installation and usage guide for Retro68 toolchain
+- **[Instructions](docs/retro68/INSTRUCTIONS.md)** - Step-by-step Retro68 setup and compilation instructions
+- **[Debug Guide](docs/retro68/DEBUG_GUIDE.md)** - Comprehensive debugging guide for MacOS development
+- **[Quick Start](docs/retro68/QUICKSTART_DEBUG.md)** - Quick debugging setup guide
+
+### 📁 Project Documentation
+- **[MacOS71_GDB_ICMP_Test](vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/README.md)** - Test project for debugging MacOS 7.1
+
+### 📦 Patches
+- **[QEMU Patches](patches/README.md)** - Information about upstream backport patches
 
 ---
 
