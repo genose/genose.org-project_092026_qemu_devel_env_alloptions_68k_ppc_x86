@@ -2164,7 +2164,7 @@ launch_vm() {
     # Option C: Start Netatalk if enabled
     if [[ "${ENABLE_NETATALK:-n}" == "y" ]]; then
         local netatalk_share_name="${NETATALK_SHARE_NAME:-VM_${vm_name}}"
-        local share_dir="${SHARED_DIR:-${DEFAULT_MACOS_SHARE_DIR}}"
+        local share_dir="${VM_SHARED_DIR:-${DEFAULT_MACOS_SHARE_DIR}}"
         detect_netatalk
         if [[ "$NETATALK_INSTALLED" == true ]]; then
             if start_netatalk_share "$netatalk_share_name" "$share_dir"; then
@@ -2936,7 +2936,7 @@ GDB_PORT=${DEFAULT_GDB_PORT}
 GDB_BRIDGE_PORT=${DEFAULT_GDB_BRIDGE_PORT}
 
 # Host Integration
-SHARED_DIR=${VM_SHARED_DIR}
+VM_SHARED_DIR=${VM_SHARED_DIR}
 AUDIO_BACKEND=sdl
 
 # ROM/Firmware
@@ -7046,7 +7046,7 @@ NETWORK_MODEL=${network_model}
 NETWORK_TYPE=${network_type}
 
 # --- Host integration ---
-SHARED_DIR=${shared_dir}
+VM_SHARED_DIR=${shared_dir}
 
 # --- Audio ---
 AUDIO_BACKEND=${audio_backend}
@@ -7211,9 +7211,11 @@ show_main_menu() {
             24) create_env_config ;;
             25) list_roms ;;
             26) list_disks ;;
-            26) backup_configurations ;;
-            27) list_backups ;;
-            28) backup_restore_menu ;;
+            27) backup_configurations ;;
+            28) list_backups ;;
+            29) backup_restore_menu ;;
+            30) cleanup_all_snapshots ;;
+            31) cleanup_unused_disks ;;
             32) launch_macos_68k ;;
             33) launch_macos_ppc ;;
             34) launch_macos_ppc64 ;;
@@ -7232,24 +7234,25 @@ show_main_menu() {
             47) show_qemu_version ;;
             48) show_architectures ;;
             49) show_vm_configs ;;
-            45) test_sharing_services ;;
-            46) configure_netatalk ;;
-            47) configure_samba ;;
-            48) verify_dependencies ;;
-            49) configure_xquartz ;;
-            50) configure_ramdisk ;;
-            51) test_samba_connection localhost VM_Shares ;;
-            52) test_netatalk_connection localhost VM_Shares ;;
-            53) test_ssh_connection localhost 22 ;;
-            54) test_gdb_connection ;;
-            55) show_qemu_command_menu ;;
-            56) snapshot_menu ;;
-            57) check_macports ;;
-            58) check_homebrew ;;
-            59) update_package_manager ;;
-            60) install_vm_dependencies ;;
-            61) test_local_share ;;
-            62) list_shares ;;
+            50) test_sharing_services ;;
+            51) configure_netatalk ;;
+            52) configure_samba ;;
+            53) verify_dependencies ;;
+            54) configure_xquartz ;;
+            55) configure_ramdisk ;;
+            56) test_samba_connection localhost VM_Shares ;;
+            57) test_netatalk_connection localhost VM_Shares ;;
+            58) test_ssh_connection localhost 22 ;;
+            59) test_gdb_connection ;;
+            60) show_qemu_command_menu ;;
+            61) snapshot_menu ;;
+            62) check_macports ;;
+            63) check_homebrew ;;
+            64) update_package_manager ;;
+            65) install_vm_dependencies ;;
+            66) test_local_share ;;
+            67) list_shares ;;
+            68) cleanup_menu ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
