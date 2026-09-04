@@ -8435,6 +8435,912 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Enhanced Debugging Workflows - Multi-VM Debugging
+# ---------------------------------------------------------------------------
+
+# Directory for multi-VM debug sessions
+MULTI_DEBUG_DIR="${CONFIG_DIR}/multi_debug"
+
+# Ensure multi-debug directory exists
+ensure_multi_debug_dirs() {
+    ensure_dir "${MULTI_DEBUG_DIR}"
+}
+
+# Start multi-VM debug session
+# Usage: start_multi_debug <session_name> <vm1> <port1> [vm2 port2 ...]
+start_multi_debug() {
+    local session_name="$1"
+    shift
+    local vms=("$@")
+    
+    heading "Starting Multi-VM Debug Session: ${session_name}"
+    
+    ensure_multi_debug_dirs
+    
+    if [[ ${#vms[@]} -lt 2 || $(( ${#vms[@]} % 2 )) -ne 0 ]]; then
+        die "Usage: start_multi_debug SESSION_NAME VM1 PORT1 [VM2 PORT2 ...]"
+    fi
+    
+    [[ -n "$session_name" ]] || session_name="multi_debug_$(date +%Y%m%d-%H%M%S)"
+    
+    local session_dir="${MULTI_DEBUG_DIR}/${session_name}"
+    local metadata_file="${session_dir}/session.meta"
+    local script_file="${session_dir}/multi_debug.sh"
+    
+    # Create session directory
+    log "Creating multi-debug session directory: ${session_dir}"
+    mkdir -p "${session_dir}"
+    
+    # Save metadata
+    cat > "${metadata_file}" << EOF
+# Multi-VM Debug Session Metadata
+SESSION_NAME="${session_name}"
+STARTED_AT="$(date +%Y-%m-%d\ %H:%M:%S)"
+STATUS="active"
+VM_COUNT="$(( ${#vms[@]} / 2 ))"
+EOF
+    
+    # Create debug script that starts GDB for each VM
+    echo "#!/bin/bash" > "${script_file}"
+    echo "# Multi-VM Debug Script for session: ${session_name}" >> "${script_file}"
+    echo "# Generated: $(date)" >> "${script_file}"
+    echo "" >> "${script_file}"
+    echo 'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"' >> "${script_file}"
+    echo 'SESSION_DIR="${SCRIPT_DIR}"' >> "${script_file}"
+    echo "" >> "${script_file}"
+    
+    # Add GDB commands for each VM
+    local vm_count=$(( ${#vms[@]} / 2 ))
+    for ((i=0; i<vm_count; i++)); do
+        local vm_name="${vms[$((i*2))]}"
+        local gdb_port="${vms[$((i*2+1))]}"
+        local gdb_script="${session_dir}/gdb_${vm_name}.gdb"
+        
+        # Create individual GDB script for this VM
+        echo "# GDB script for VM: ${vm_name}" > "${gdb_script}"
+        echo "# Port: ${gdb_port}" >> "${gdb_script}"
+        echo "target remote localhost:${gdb_port}" >> "${gdb_script}"
+        echo "set pagination off" >> "${gdb_script}"
+        echo "set logging file ${session_dir}/debug_${vm_name}.log" >> "${gdb_script}"
+        echo "set logging enabled on" >> "${gdb_script}"
+        echo "continue" >> "${gdb_script}"
+        
+        # Add to main script
+        echo "" >> "${script_file}"
+        echo "# Starting GDB for ${vm_name} on port ${gdb_port}" >> "${script_file}"
+        echo "echo \"Starting debug session for ${vm_name}...\"" >> "${script_file}"
+        echo "gdb-multiarch -x \"${gdb_script}\" &" >> "${script_file}"
+        
+        log "Added VM: ${vm_name} on port: ${gdb_port}"
+    done
+    
+    # Add cleanup and instructions to main script
+    echo "" >> "${script_file}"
+    echo "echo \"Multi-VM debug session started for ${vm_count} VMs\"" >> "${script_file}"
+    echo "echo \"Session directory: ${session_dir}\"" >> "${script_file}"
+    echo "echo \"Logs are being written to individual debug_*.log files\"" >> "${script_file}"
+    echo "echo \"Press Ctrl+C to stop all debug sessions\"" >> "${script_file}"
+    echo "" >> "${script_file}"
+    echo "# Wait for all background processes" >> "${script_file}"
+    echo "wait" >> "${script_file}"
+    
+    chmod +x "${script_file}"
+    
+    log "✅ Multi-VM debug session configured: ${session_name}"
+    log "   Session directory: ${session_dir}"
+    log "   Script: ${script_file}"
+    log "   VMs configured: ${vm_count}"
+    log ""
+    log "To start the multi-debug session:"
+    log "  ${script_file}"
+    log ""
+    log "To start it in background:"
+    log "  nohup ${script_file} &"
+    
+    return 0
+}
+
+# Stop multi-VM debug session
+# Usage: stop_multi_debug <session_name>
+stop_multi_debug() {
+    local session_name="$1"
+    
+    heading "Stopping Multi-VM Debug Session: ${session_name}"
+    
+    local session_dir="${MULTI_DEBUG_DIR}/${session_name}"
+    local metadata_file="${session_dir}/session.meta"
+    
+    if [[ ! -d "$session_dir" ]]; then
+        die "Multi-debug session not found: ${session_name}"
+    fi
+    
+    # Find and kill any GDB processes associated with this session
+    local end_time=$(date +"%Y-%m-%d %H:%M:%S")
+    local start_time=$(grep "^STARTED_AT=" "$metadata_file" 2>/dev/null | cut -d'=' -f2- | tr -d '"')
+    
+    # Update metadata
+    sed -i.bak "s/^STATUS=.*/STATUS="stopped"/" "$metadata_file" 2>/dev/null
+    echo "ENDED_AT=\"${end_time}\"" >> "$metadata_file"
+    
+    # Kill any GDB processes that might be running for this session
+    local gdb_pids=()
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            local gdb_script="${session_dir}/${line}"
+            if [[ -f "$gdb_script" ]]; then
+                # Find GDB processes using this script
+                local pids=$(pgrep -f "${gdb_script}" 2>/dev/null || true)
+                if [[ -n "$pids" ]]; then
+                    gdb_pids+=($pids)
+                fi
+            fi
+        fi
+    done < <(find "$session_dir" -name "*.gdb" 2>/dev/null)
+    
+    if [[ ${#gdb_pids[@]} -gt 0 ]]; then
+        log "Stopping ${#gdb_pids[@]} GDB processes..."
+        for pid in "${gdb_pids[@]}"; do
+            if kill "$pid" 2>/dev/null; then
+                log "Stopped GDB process: ${pid}"
+            fi
+        done
+    else
+        log "No active GDB processes found for this session"
+    fi
+    
+    # Calculate duration
+    local start_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "$start_time" +%s 2>/dev/null || echo 0)
+    local end_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "$end_time" +%s 2>/dev/null || echo 0)
+    local duration=$((end_ts - start_ts))
+    
+    log "✅ Multi-VM debug session stopped: ${session_name}"
+    log "   Duration: ${duration} seconds"
+    
+    return 0
+}
+
+# List multi-VM debug sessions
+# Usage: list_multi_debug_sessions [status_filter]
+list_multi_debug_sessions() {
+    local status_filter="$1"
+    
+    heading "Multi-VM Debug Sessions"
+    
+    ensure_multi_debug_dirs
+    
+    local sessions=()
+    while IFS= read -r session_dir; do
+        [[ -d "$session_dir" ]] && sessions+=("$session_dir")
+    done < <(find "$MULTI_DEBUG_DIR" -type d -maxdepth 1 | sort -r)
+    
+    if [[ ${#sessions[@]} -eq 0 ]]; then
+        log "No multi-VM debug sessions found"
+        return 0
+    fi
+    
+    local index=0
+    for session_dir in "${sessions[@]}"; do
+        local session_name=$(basename "$session_dir")
+        local metadata_file="${session_dir}/session.meta"
+        
+        if [[ ! -f "$metadata_file" ]]; then
+            continue
+        fi
+        
+        local status=$(grep "^STATUS=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        local vm_count=$(grep "^VM_COUNT=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        local start_time=$(grep "^STARTED_AT=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        local end_time=$(grep "^ENDED_AT=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        local size=$(du -sh "$session_dir" 2>/dev/null | cut -f1)
+        
+        # Apply status filter if specified
+        if [[ -n "$status_filter" && "$status" != "$status_filter" ]]; then
+            continue
+        fi
+        
+        echo "  [${index}] ${session_name} [${status}] [${size}]"
+        echo "      VMs: ${vm_count}"
+        echo "      Started: ${start_time}"
+        if [[ -n "$end_time" ]]; then
+            echo "      Ended: ${end_time}"
+        fi
+        echo ""
+        
+        index=$((index + 1))
+    done
+    
+    return 0
+}
+
+# Delete multi-VM debug session
+# Usage: delete_multi_debug_session <session_name>
+delete_multi_debug_session() {
+    local session_name="$1"
+    
+    heading "Delete Multi-VM Debug Session"
+    
+    local session_dir="${MULTI_DEBUG_DIR}/${session_name}"
+    
+    if [[ ! -d "$session_dir" ]]; then
+        die "Multi-debug session not found: ${session_name}"
+    fi
+    
+    # Stop the session first if it's active
+    local metadata_file="${session_dir}/session.meta"
+    if [[ -f "$metadata_file" ]]; then
+        local status=$(grep "^STATUS=" "$metadata_file" | cut -d'=' -f2- | tr -d '"')
+        if [[ "$status" == "active" ]]; then
+            log "Stopping active session first..."
+            stop_multi_debug "$session_name"
+        fi
+    fi
+    
+    # Confirm deletion
+    if ! confirm "Are you sure you want to delete multi-debug session '${session_name}'?"; then
+        log "Deletion cancelled"
+        return 0
+    fi
+    
+    log "Deleting multi-debug session: ${session_dir}"
+    rm -rf "${session_dir}"
+    
+    log "✅ Multi-debug session deleted: ${session_name}"
+    
+    return 0
+}
+
+# Interactive multi-VM debug session start
+start_multi_debug_interactive() {
+    if ! is_interactive; then
+        warn "start_multi_debug_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Start Multi-VM Debug Session [Interactive]"
+    
+    list_vms
+    echo ""
+    
+    local session_name
+    session_name=$(ask "Enter session name (leave blank for auto-generated)" "")
+    
+    local vms=()
+    while true; do
+        local vm_name
+        vm_name=$(ask "Enter VM name to debug (or 'done' to finish)" "")
+        
+        if [[ "$vm_name" == "done" || -z "$vm_name" ]]; then
+            break
+        fi
+        
+        local gdb_port
+        gdb_port=$(ask "Enter GDB port for ${vm_name}" "1234")
+        
+        vms+=("$vm_name" "$gdb_port")
+    done
+    
+    if [[ ${#vms[@]} -lt 2 ]]; then
+        die "At least one VM must be specified"
+    fi
+    
+    start_multi_debug "$session_name" "${vms[@]}"
+}
+
+# ---------------------------------------------------------------------------
+# Enhanced Debugging Workflows - Debug Symbol Management
+# ---------------------------------------------------------------------------
+
+# Directory for debug symbols
+DEBUG_SYMBOLS_DIR="${CONFIG_DIR}/debug_symbols"
+
+# Ensure debug symbols directory exists
+ensure_debug_symbols_dirs() {
+    ensure_dir "${DEBUG_SYMBOLS_DIR}"
+}
+
+# Download and extract debug symbols for a binary
+# Usage: download_debug_symbols <binary_path> [output_dir] [url]
+download_debug_symbols() {
+    local binary_path="$1"
+    local output_dir="$2"
+    local url="$3"
+    
+    heading "Downloading Debug Symbols for: ${binary_path}"
+    
+    ensure_debug_symbols_dirs
+    
+    if [[ ! -f "$binary_path" ]]; then
+        die "Binary file not found: ${binary_path}"
+    fi
+    
+    local binary_name=$(basename "$binary_path")
+    [[ -n "$output_dir" ]] || output_dir="${DEBUG_SYMBOLS_DIR}/${binary_name}"
+    
+    # Create output directory
+    log "Output directory: ${output_dir}"
+    mkdir -p "${output_dir}"
+    
+    # Check if debug symbols are already available
+    local debug_file="${output_dir}/${binary_name}.debug"
+    
+    if [[ -f "$debug_file" ]]; then
+        log "Debug symbols already exist: ${debug_file}"
+        return 0
+    fi
+    
+    # Method 1: Try to extract debug symbols from the binary
+    if command -v objcopy &>/dev/null; then
+        log "Attempting to extract debug symbols with objcopy..."
+        if objcopy --only-keep-debug "$binary_path" "$debug_file" 2>/dev/null; then
+            # Strip debug symbols from original binary
+            objcopy --strip-debug "$binary_path" "${output_dir}/${binary_name}.stripped" 2>/dev/null
+            # Add debug link to original binary
+            objcopy --add-gnu-debuglink="$debug_file" "${output_dir}/${binary_name}.stripped" 2>/dev/null
+            
+            log "✅ Debug symbols extracted: ${debug_file}"
+            log "   Stripped binary: ${output_dir}/${binary_name}.stripped"
+            return 0
+        fi
+    fi
+    
+    # Method 2: Download from URL if provided
+    if [[ -n "$url" ]]; then
+        log "Downloading debug symbols from: ${url}"
+        if command -v wget &>/dev/null; then
+            if wget -O "$debug_file" "$url" 2>/dev/null; then
+                log "✅ Debug symbols downloaded: ${debug_file}"
+                return 0
+            fi
+        elif command -v curl &>/dev/null; then
+            if curl -L -o "$debug_file" "$url" 2>/dev/null; then
+                log "✅ Debug symbols downloaded: ${debug_file}"
+                return 0
+            fi
+        fi
+        
+        warn "Failed to download debug symbols from URL"
+    fi
+    
+    # Method 3: Look for debug symbols in common locations
+    local common_locations=(
+        "/usr/lib/debug/.build-id/"
+        "/usr/lib/debug/"
+        "/opt/debug/"
+    )
+    
+    for location in "${common_locations[@]}"; do
+        if [[ -d "$location" ]]; then
+            local debug_files=()
+            while IFS= read -r debug_file; do
+                [[ -f "$debug_file" ]] && debug_files+=("$debug_file")
+            done < <(find "$location" -name "*.debug" -path "*${binary_name}*" 2>/dev/null)
+            
+            if [[ ${#debug_files[@]} -gt 0 ]]; then
+                log "Found debug symbols in ${location}"
+                cp "${debug_files[0]}" "$debug_file"
+                log "✅ Copied debug symbols: ${debug_file}"
+                return 0
+            fi
+        fi
+    done
+    
+    warn "Could not find or extract debug symbols for: ${binary_path}"
+    warn "Try installing debug symbol packages for your distribution"
+    
+    return 1
+}
+
+# Generate debug information for a binary
+# Usage: generate_debug_info <binary_path> [output_dir]
+generate_debug_info() {
+    local binary_path="$1"
+    local output_dir="$2"
+    
+    heading "Generating Debug Information for: ${binary_path}"
+    
+    if [[ ! -f "$binary_path" ]]; then
+        die "Binary file not found: ${binary_path}"
+    fi
+    
+    local binary_name=$(basename "$binary_path")
+    [[ -n "$output_dir" ]] || output_dir="${DEBUG_SYMBOLS_DIR}/${binary_name}"
+    
+    ensure_debug_symbols_dirs
+    mkdir -p "${output_dir}"
+    
+    local info_file="${output_dir}/debug_info.txt"
+    
+    log "Collecting debug information..."
+    
+    echo "Debug Information for: ${binary_name}" > "$info_file"
+    echo "Generated: $(date)" >> "$info_file"
+    echo "=" >> "$info_file"
+    
+    # File type information
+    if command -v file &>/dev/null; then
+        echo "" >> "$info_file"
+        echo "File Type:" >> "$info_file"
+        file "$binary_path" >> "$info_file" 2>&1
+    fi
+    
+    # Symbol table information
+    if command -v nm &>/dev/null; then
+        echo "" >> "$info_file"
+        echo "Symbol Table:" >> "$info_file"
+        nm "$binary_path" | head -20 >> "$info_file" 2>&1
+    fi
+    
+    # Architecture information
+    if command -v readelf &>/dev/null; then
+        echo "" >> "$info_file"
+        echo "ELF Information:" >> "$info_file"
+        readelf -h "$binary_path" >> "$info_file" 2>&1
+    fi
+    
+    # Section information
+    if command -v objdump &>/dev/null; then
+        echo "" >> "$info_file"
+        echo "Sections:" >> "$info_file"
+        objdump -h "$binary_path" >> "$info_file" 2>&1
+        
+        echo "" >> "$info_file"
+        echo "Debug Sections:" >> "$info_file"
+        objdump -g "$binary_path" >> "$info_file" 2>&1 | head -20
+    fi
+    
+    log "✅ Debug information generated: ${info_file}"
+    
+    return 0
+}
+
+# List available debug symbols
+# Usage: list_debug_symbols [binary_name]
+list_debug_symbols() {
+    local binary_name="$1"
+    
+    heading "Debug Symbols"
+    
+    ensure_debug_symbols_dirs
+    
+    if [[ -n "$binary_name" ]]; then
+        local symbols_dir="${DEBUG_SYMBOLS_DIR}/${binary_name}"
+        
+        if [[ ! -d "$symbols_dir" ]]; then
+            log "No debug symbols found for: ${binary_name}"
+            return 0
+        fi
+        
+        log "Debug symbols for: ${binary_name}"
+        log "="
+        
+        local files=()
+        while IFS= read -r symbol_file; do
+            [[ -f "$symbol_file" ]] && files+=("$symbol_file")
+        done < <(find "$symbols_dir" -type f | sort)
+        
+        for symbol_file in "${files[@]}"; do
+            local size=$(du -h "$symbol_file" 2>/dev/null | cut -f1)
+            local modified=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "$symbol_file" 2>/dev/null || date -r "$symbol_file" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "unknown")
+            echo "  ${symbol_file} [${size}] [${modified}]"
+        done
+    else
+        log "All Debug Symbols:"
+        log "="
+        
+        local symbol_dirs=()
+        while IFS= read -r symbol_dir; do
+            [[ -d "$symbol_dir" ]] && symbol_dirs+=("$symbol_dir")
+        done < <(find "$DEBUG_SYMBOLS_DIR" -type d -maxdepth 1 | sort)
+        
+        for symbol_dir in "${symbol_dirs[@]}"; do
+            local binary_name=$(basename "$symbol_dir")
+            local file_count=$(find "$symbol_dir" -type f | wc -l | tr -d ' ')
+            local dir_size=$(du -sh "$symbol_dir" 2>/dev/null | cut -f1)
+            
+            log "📁 ${binary_name}: ${file_count} files [${dir_size}]"
+        done
+    fi
+    
+    return 0
+}
+
+# Delete debug symbols for a binary
+# Usage: delete_debug_symbols <binary_name>
+delete_debug_symbols() {
+    local binary_name="$1"
+    
+    heading "Delete Debug Symbols"
+    
+    ensure_debug_symbols_dirs
+    
+    local symbols_dir="${DEBUG_SYMBOLS_DIR}/${binary_name}"
+    
+    if [[ ! -d "$symbols_dir" ]]; then
+        die "Debug symbols directory not found: ${symbols_dir}"
+    fi
+    
+    # Confirm deletion
+    if ! confirm "Are you sure you want to delete debug symbols for '${binary_name}'?"; then
+        log "Deletion cancelled"
+        return 0
+    fi
+    
+    log "Deleting debug symbols: ${symbols_dir}"
+    rm -rf "${symbols_dir}"
+    
+    log "✅ Debug symbols deleted: ${binary_name}"
+    
+    return 0
+}
+
+# Interactive debug symbols management
+download_debug_symbols_interactive() {
+    if ! is_interactive; then
+        warn "download_debug_symbols_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Download Debug Symbols [Interactive]"
+    
+    local binary_path
+    binary_path=$(ask "Enter path to binary file" "")
+    
+    if [[ ! -f "$binary_path" ]]; then
+        die "Binary file not found: ${binary_path}"
+    fi
+    
+    local output_dir
+    output_dir=$(ask "Enter output directory (leave blank for default)" "")
+    
+    local url
+    url=$(ask "Enter URL to download debug symbols from (leave blank to extract from binary)" "")
+    
+    download_debug_symbols "$binary_path" "$output_dir" "$url"
+}
+
+# ---------------------------------------------------------------------------
+# Enhanced Debugging Workflows - Automatic GDB Configuration
+# ---------------------------------------------------------------------------
+
+# Directory for GDB configurations
+GDB_CONFIG_DIR="${CONFIG_DIR}/gdb_configs"
+
+# Ensure GDB config directory exists
+ensure_gdb_config_dirs() {
+    ensure_dir "${GDB_CONFIG_DIR}"
+}
+
+# Generate GDB configuration for a specific architecture
+# Usage: generate_gdb_config <arch> [output_file] [vm_name] [port]
+generate_gdb_config() {
+    local arch="$1"
+    local output_file="$2"
+    local vm_name="$3"
+    local port="$4"
+    
+    heading "Generating GDB Configuration for Architecture: ${arch}"
+    
+    ensure_gdb_config_dirs
+    
+    # Set defaults
+    [[ -n "$output_file" ]] || output_file="${GDB_CONFIG_DIR}/gdb_${arch}.gdb"
+    [[ -n "$port" ]] || port="1234"
+    
+    log "Configuration file: ${output_file}"
+    
+    case "$arch" in
+        68k|m68k)
+            cat > "$output_file" << EOF
+# GDB Configuration for Motorola 68k Architecture
+# Generated: $(date)
+
+# Set architecture and target
+set architecture m68k
+
+# Common 68k GDB settings
+set disable-randomization on
+set confirmation off
+
+# Connect to VM
+target remote localhost:${port}
+
+# 68k-specific settings
+set m68k:split-hll on
+set m68k:assembly-flavor att
+
+# Load symbols if available
+file ${vm_name:+${VM_DIR}/${vm_name}/}
+
+# Continue execution
+continue
+EOF
+            ;;
+        ppc|powerpc)
+            cat > "$output_file" << EOF
+# GDB Configuration for PowerPC Architecture
+# Generated: $(date)
+
+# Set architecture and target
+set architecture powerpc
+
+# Common PowerPC GDB settings
+set disable-randomization on
+set confirmation off
+
+# Connect to VM
+target remote localhost:${port}
+
+# PowerPC-specific settings
+set powerpc:vector-mode auto
+set powerpc:fpu on
+
+# Load symbols if available
+file ${vm_name:+${VM_DIR}/${vm_name}/}
+
+# Continue execution
+continue
+EOF
+            ;;
+        ppc64|powerpc64)
+            cat > "$output_file" << EOF
+# GDB Configuration for PowerPC 64-bit Architecture
+# Generated: $(date)
+
+# Set architecture and target
+set architecture powerpc:64
+
+# Common PowerPC 64-bit GDB settings
+set disable-randomization on
+set confirmation off
+
+# Connect to VM
+target remote localhost:${port}
+
+# PowerPC 64-bit-specific settings
+set powerpc:vector-mode altivec
+set powerpc:fpu on
+
+# Load symbols if available
+file ${vm_name:+${VM_DIR}/${vm_name}/}
+
+# Continue execution
+continue
+EOF
+            ;;
+        x86|i386)
+            cat > "$output_file" << EOF
+# GDB Configuration for x86 (32-bit) Architecture
+# Generated: $(date)
+
+# Set architecture and target
+set architecture i386
+
+# Common x86 GDB settings
+set disable-randomization on
+set confirmation off
+
+# Connect to VM
+target remote localhost:${port}
+
+# x86-specific settings
+set disable-randomization on
+
+# Load symbols if available
+file ${vm_name:+${VM_DIR}/${vm_name}/}
+
+# Continue execution
+continue
+EOF
+            ;;
+        x86_64|amd64)
+            cat > "$output_file" << EOF
+# GDB Configuration for x86_64 Architecture
+# Generated: $(date)
+
+# Set architecture and target
+set architecture i386:x86-64
+
+# Common x86_64 GDB settings
+set disable-randomization on
+set confirmation off
+
+# Connect to VM
+target remote localhost:${port}
+
+# x86_64-specific settings
+set disable-randomization on
+set debug malloc 1
+
+# Load symbols if available
+file ${vm_name:+${VM_DIR}/${vm_name}/}
+
+# Continue execution
+continue
+EOF
+            ;;
+        sparc|sparc64)
+            cat > "$output_file" << EOF
+# GDB Configuration for SPARC Architecture
+# Generated: $(date)
+
+# Set architecture and target
+set architecture sparc${arch#sparc}
+
+# Common SPARC GDB settings
+set disable-randomization on
+set confirmation off
+
+# Connect to VM
+target remote localhost:${port}
+
+# SPARC-specific settings
+set sparc:fpu on
+set sparc:vis on
+
+# Load symbols if available
+file ${vm_name:+${VM_DIR}/${vm_name}/}
+
+# Continue execution
+continue
+EOF
+            ;;
+        arm|aarch64)
+            cat > "$output_file" << EOF
+# GDB Configuration for ARM Architecture
+# Generated: $(date)
+
+# Set architecture and target
+set architecture arm${arch#arm}
+
+# Common ARM GDB settings
+set disable-randomization on
+set confirmation off
+
+# Connect to VM
+target remote localhost:${port}
+
+# ARM-specific settings
+set arm:fpu on
+set arm:neon on
+
+# Load symbols if available
+file ${vm_name:+${VM_DIR}/${vm_name}/}
+
+# Continue execution
+continue
+EOF
+            ;;
+        *)
+            cat > "$output_file" << EOF
+# GDB Configuration for Architecture: ${arch}
+# Generated: $(date)
+
+# Set architecture and target
+set architecture ${arch}
+
+# Common GDB settings
+set disable-randomization on
+set confirmation off
+
+# Connect to VM
+target remote localhost:${port}
+
+# Load symbols if available
+file ${vm_name:+${VM_DIR}/${vm_name}/}
+
+# Continue execution
+continue
+EOF
+            ;;
+    esac
+    
+    log "✅ GDB configuration generated: ${output_file}"
+    log ""
+    log "To use this configuration:"
+    log "  gdb-multiarch -x ${output_file}"
+    
+    return 0
+}
+
+# List available GDB configurations
+# Usage: list_gdb_configs
+list_gdb_configs() {
+    heading "GDB Configurations"
+    
+    ensure_gdb_config_dirs
+    
+    local configs=()
+    while IFS= read -r config_file; do
+        [[ -f "$config_file" ]] && configs+=("$config_file")
+    done < <(find "$GDB_CONFIG_DIR" -name "*.gdb" | sort)
+    
+    if [[ ${#configs[@]} -eq 0 ]]; then
+        log "No GDB configurations found"
+        return 0
+    fi
+    
+    log "Available GDB Configurations:"
+    log "="
+    
+    for i in "${!configs[@]}"; do
+        local config_name=$(basename "${configs[$i]}")
+        local size=$(du -sh "${configs[$i]}" 2>/dev/null | cut -f1)
+        local modified=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "${configs[$i]}" 2>/dev/null || date -r "${configs[$i]}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "unknown")
+        
+        echo "  [${i}] ${config_name} [${size}] [${modified}]"
+        
+        # Show first few lines as preview
+        head -3 "${configs[$i]}" | sed 's/^/      /' || true
+        echo ""
+    done
+    
+    return 0
+}
+
+# Delete GDB configuration
+# Usage: delete_gdb_config <config_name>
+delete_gdb_config() {
+    local config_name="$1"
+    
+    heading "Delete GDB Configuration"
+    
+    ensure_gdb_config_dirs
+    
+    local config_file="${GDB_CONFIG_DIR}/${config_name}"
+    
+    if [[ ! -f "$config_file" ]]; then
+        die "GDB configuration not found: ${config_name}"
+    fi
+    
+    # Confirm deletion
+    if ! confirm "Are you sure you want to delete GDB configuration '${config_name}'?"; then
+        log "Deletion cancelled"
+        return 0
+    fi
+    
+    log "Deleting GDB configuration: ${config_file}"
+    rm -f "${config_file}"
+    
+    log "✅ GDB configuration deleted: ${config_name}"
+    
+    return 0
+}
+
+# Interactive GDB configuration generation
+generate_gdb_config_interactive() {
+    if ! is_interactive; then
+        warn "generate_gdb_config_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Generate GDB Configuration [Interactive]"
+    
+    # List available architectures
+    echo "Available architectures:"
+    local archs=("68k" "m68k" "ppc" "powerpc" "ppc64" "powerpc64" "x86" "i386" "x86_64" "amd64" "sparc" "sparc64" "arm" "aarch64")
+    for i in "${!archs[@]}"; do
+        echo "  [${i}] ${archs[$i]}"
+    done
+    echo ""
+    
+    local arch_index
+    arch_index=$(ask "Select architecture" "0")
+    local arch="${archs[$arch_index]:-${archs[0]}}"
+    
+    local output_file
+    output_file=$(ask "Enter output filename (leave blank for default)" "")
+    
+    list_vms
+    local vm_name
+    vm_name=$(ask "Enter VM name (leave blank for none)" "")
+    
+    local port
+    port=$(ask "Enter GDB port" "1234")
+    
+    generate_gdb_config "$arch" "$output_file" "$vm_name" "$port"
+}
+
+# ---------------------------------------------------------------------------
 # Retro68 Toolchain Support
 # ---------------------------------------------------------------------------
 
@@ -12332,6 +13238,23 @@ show_main_menu() {
         echo "  [116] List breakpoint presets"
         echo "  [117] Delete breakpoint preset"
         echo ""
+        echo "🔗 Multi-VM Debugging:"
+        echo "  [118] Start multi-VM debug session"
+        echo "  [119] Stop multi-VM debug session"
+        echo "  [120] List multi-VM debug sessions"
+        echo "  [121] Delete multi-VM debug session"
+        echo ""
+        echo "🔍 Debug Symbol Management:"
+        echo "  [122] Download debug symbols"
+        echo "  [123] Generate debug information"
+        echo "  [124] List debug symbols"
+        echo "  [125] Delete debug symbols"
+        echo ""
+        echo "⚙️  Automatic GDB Configuration:"
+        echo "  [126] Generate GDB configuration"
+        echo "  [127] List GDB configurations"
+        echo "  [128] Delete GDB configuration"
+        echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
         echo ""
@@ -12516,6 +13439,43 @@ show_main_menu() {
                 local preset_name
                 preset_name=$(ask "Enter preset name to delete" "")
                 [[ -n "$preset_name" ]] && delete_breakpoint_preset "$preset_name" || echo "Preset name required"
+                ;;
+            
+            # Multi-VM Debugging
+            118) start_multi_debug_interactive ;;
+            119) 
+                local session_name
+                session_name=$(ask "Enter multi-debug session name to stop" "")
+                [[ -n "$session_name" ]] && stop_multi_debug "$session_name" || echo "Session name required"
+                ;;
+            120) list_multi_debug_sessions ;;
+            121) 
+                local session_name
+                session_name=$(ask "Enter multi-debug session name to delete" "")
+                [[ -n "$session_name" ]] && delete_multi_debug_session "$session_name" || echo "Session name required"
+                ;;
+            
+            # Debug Symbol Management
+            122) download_debug_symbols_interactive ;;
+            123) 
+                local binary_path
+                binary_path=$(ask "Enter path to binary" "")
+                [[ -n "$binary_path" ]] && generate_debug_info "$binary_path" || echo "Binary path required"
+                ;;
+            124) list_debug_symbols ;;
+            125) 
+                local binary_name
+                binary_name=$(ask "Enter binary name to delete debug symbols" "")
+                [[ -n "$binary_name" ]] && delete_debug_symbols "$binary_name" || echo "Binary name required"
+                ;;
+            
+            # Automatic GDB Configuration
+            126) generate_gdb_config_interactive ;;
+            127) list_gdb_configs ;;
+            128) 
+                local config_name
+                config_name=$(ask "Enter GDB config name to delete" "")
+                [[ -n "$config_name" ]] && delete_gdb_config "$config_name" || echo "Config name required"
                 ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
@@ -13411,6 +14371,39 @@ main() {
         list-presets|presets-list) list_breakpoint_presets ;;
         delete-preset|preset-delete) 
             [[ -n "${2:-}" ]] && delete_breakpoint_preset "$2" || die "Usage: delete-preset <preset_name>"
+            ;;
+        
+        # Multi-VM Debugging
+        multi-debug|debug-multi) 
+            [[ -n "${2:-}" && -n "${3:-}" ]] && start_multi_debug "$2" "$3" "$4" "$5" "$6" "$7" || die "Usage: multi-debug <session_name> <vm1> <port1> [vm2 port2 ...]"
+            ;;
+        stop-multi-debug|multi-debug-stop) 
+            [[ -n "${2:-}" ]] && stop_multi_debug "$2" || die "Usage: stop-multi-debug <session_name>"
+            ;;
+        list-multi-debug|multi-debug-list) list_multi_debug_sessions ;;
+        delete-multi-debug|multi-debug-delete) 
+            [[ -n "${2:-}" ]] && delete_multi_debug_session "$2" || die "Usage: delete-multi-debug <session_name>"
+            ;;
+        
+        # Debug Symbol Management
+        debug-symbols|symbols-debug) 
+            [[ -n "${2:-}" ]] && download_debug_symbols "$2" "$3" "$4" || die "Usage: debug-symbols <binary_path> [output_dir] [url]"
+            ;;
+        debug-info|info-debug) 
+            [[ -n "${2:-}" ]] && generate_debug_info "$2" "$3" || die "Usage: debug-info <binary_path> [output_dir]"
+            ;;
+        list-symbols|symbols-list) list_debug_symbols ;;
+        delete-symbols|symbols-delete) 
+            [[ -n "${2:-}" ]] && delete_debug_symbols "$2" || die "Usage: delete-symbols <binary_name>"
+            ;;
+        
+        # Automatic GDB Configuration
+        generate-gdb|gdb-generate) 
+            [[ -n "${2:-}" ]] && generate_gdb_config "$2" "$3" "$4" "$5" || die "Usage: generate-gdb <arch> [output_file] [vm_name] [port]"
+            ;;
+        list-gdb-configs|gdb-configs-list) list_gdb_configs ;;
+        delete-gdb-config|gdb-config-delete) 
+            [[ -n "${2:-}" ]] && delete_gdb_config "$2" || die "Usage: delete-gdb-config <config_name>"
             ;;
         
         # Disk/ISO management
