@@ -11,7 +11,7 @@
 ## Step 1: Compile the Application
 
 ```bash
-cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 make -f Makefile.retro68 clean
 make -f Makefile.retro68
 ```
@@ -48,7 +48,7 @@ qemu-system-ppc \
 ```bash
 gdb-multiarch
 (gdb) target remote localhost:1234
-(gdb) file ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test
+(gdb) file ~/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test
 (gdb) break main
 (gdb) break test_gdb_function
 (gdb) break test_icmp_function
@@ -101,7 +101,7 @@ info locals       # Local variables
 
 **Compile, copy, and debug:**
 ```bash
-cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test && \
+cd ~/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test && \
 make -f Makefile.retro68 && \
 cp build/MacOS71_GDB_ICMP_Test ~/vm_assistant/
 ```

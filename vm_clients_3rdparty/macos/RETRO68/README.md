@@ -52,7 +52,7 @@ Retro68 --version
 
 ```bash
 # Dans ~/.zshrc ou ~/.bashrc
-export PATH="~/vm_assistant/vm-assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
+export PATH="~/vm_assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
 source ~/.zshrc
 ```
 
@@ -86,7 +86,7 @@ Retro68 -g -O0 -m68040 hello.c -o HelloWorld
 ### Compiler MacOS71_GDB_ICMP_Test
 
 ```bash
-cd ~/vm_assistant/vm-assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 
 Retro68 -g -O0 -m68040 -I src \
     src/main.c \

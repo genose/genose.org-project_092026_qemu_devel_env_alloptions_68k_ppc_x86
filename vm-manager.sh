@@ -4414,6 +4414,286 @@ configure_ramdisk() {
     return 0
 }
 
+# ---------------------------------------------------------------------------
+# Retro68 Toolchain Support
+# ---------------------------------------------------------------------------
+
+# Default paths for Retro68
+RETRO68_DIR="${HOME}/vm_assistant/vm_clients_3rdparty/macos/Retro68"
+RETRO68_BIN="${RETRO68_DIR}/Build/Products/Release/Retro68"
+RETRO68_TEST_PROJECT="${HOME}/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test"
+
+# Check if Retro68 is installed
+check_retro68() {
+    if [[ -f "$RETRO68_BIN" ]]; then
+        log "Retro68 found at: $RETRO68_BIN"
+        "$RETRO68_BIN" --version 2>/dev/null
+        return 0
+    elif command -v Retro68 &>/dev/null; then
+        log "Retro68 found in PATH: $(which Retro68)"
+        Retro68 --version 2>/dev/null
+        return 0
+    else
+        warn "Retro68 not found"
+        return 1
+    fi
+}
+
+# Install Retro68 from source
+install_retro68() {
+    heading "Installing Retro68 Toolchain"
+    
+    # Check for Xcode Command Line Tools
+    if ! xcode-select -p &>/dev/null; then
+        warn "Xcode Command Line Tools required for Retro68"
+        log "Run: xcode-select --install"
+        ask "Install Xcode Command Line Tools now?" "y" | grep -iq "y" && xcode-select --install
+    fi
+    
+    # Clone Retro68 if not exists
+    if [[ ! -d "$RETRO68_DIR" ]]; then
+        log "Cloning Retro68 repository..."
+        mkdir -p "${HOME}/vm_assistant/vm_clients_3rdparty/macos/"
+        git clone https://github.com/automatedjdw/Retro68.git "$RETRO68_DIR" || {
+            die "Failed to clone Retro68 repository"
+        }
+    else
+        log "Retro68 repository already exists at: $RETRO68_DIR"
+        ask "Pull latest changes?" "y" | grep -iq "y" && cd "$RETRO68_DIR" && git pull
+    fi
+    
+    # Build Retro68
+    log "Building Retro68..."
+    cd "$RETRO68_DIR"
+    xcodebuild -scheme Retro68 -configuration Release || {
+        die "Failed to build Retro68. Check Xcode installation."
+    }
+    
+    # Verify build
+    if [[ -f "$RETRO68_BIN" ]]; then
+        log "✅ Retro68 installed successfully: $RETRO68_BIN"
+        "$RETRO68_BIN" --version
+        
+        # Add to PATH if user wants
+        ask "Add Retro68 to PATH?" "n" | grep -iq "y" && {
+            echo "export PATH=\"${RETRO68_DIR}/Build/Products/Release:\$PATH\"" >> "${HOME}/.zshrc"
+            log "Added to ~/.zshrc. Run: source ~/.zshrc"
+        }
+        return 0
+    else
+        die "Retro68 build failed. Check $RETRO68_DIR/Build/Products/Release/"
+    fi
+}
+
+# Setup Retro68 environment
+setup_retro68_environment() {
+    heading "Setting up Retro68 Development Environment"
+    
+    # Install Retro68 if not present
+    if ! check_retro68; then
+        ask "Retro68 not found. Install now?" "y" | grep -iq "y" && install_retro68
+    fi
+    
+    # Setup project directory
+    ensure_dir "${HOME}/vm_assistant/vm_clients_3rdparty/macos/"
+    
+    # Clone test project if not exists
+    if [[ ! -d "$RETRO68_TEST_PROJECT" ]]; then
+        log "Setting up MacOS71_GDB_ICMP_Test project..."
+        git clone https://github.com/automatedjdw/MacOS71_GDB_ICMP_Test.git "$RETRO68_TEST_PROJECT" 2>/dev/null || {
+            # If repo doesn't exist, create from local template
+            log "Creating project from local template..."
+            mkdir -p "$RETRO68_TEST_PROJECT/src"
+            cp -r "${SCRIPT_DIR}/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/." "$RETRO68_TEST_PROJECT/" 2>/dev/null || {
+                warn "Could not setup test project. Clone manually from GitHub."
+            }
+        }
+    else
+        log "Test project already exists at: $RETRO68_TEST_PROJECT"
+    fi
+    
+    # Check for required files
+    local missing_files=()
+    for file in "${RETRO68_DIR}/Build/Products/Release/Retro68" \
+                 "$RETRO68_TEST_PROJECT/src/main.c" \
+                 "$RETRO68_TEST_PROJECT/src/gdb_test.c" \
+                 "$RETRO68_TEST_PROJECT/src/icmp_test.c" \
+                 "$RETRO68_TEST_PROJECT/Makefile.retro68"; do
+        [[ -f "$file" ]] || missing_files+=("$(basename "$file")")
+    done
+    
+    if [[ ${#missing_files[@]} -gt 0 ]]; then
+        warn "Missing files: ${missing_files[*]}"
+        return 1
+    fi
+    
+    log "✅ Retro68 environment setup complete"
+    return 0
+}
+
+# Compile with Retro68
+compile_with_retro68() {
+    local project_dir="${1:-$RETRO68_TEST_PROJECT}"
+    local output_name="${2:-MacOS71_GDB_ICMP_Test}"
+    local target="${3:-68040}"
+    local debug="${4:-y}"  # Default to debug mode
+    
+    heading "Compiling with Retro68"
+    
+    # Check Retro68 is available
+    if ! check_retro68; then
+        ask "Retro68 not found. Install now?" "n" | grep -iq "y" && install_retro68
+        if ! check_retro68; then
+            die "Retro68 required for compilation. Install it first."
+        fi
+    fi
+    
+    # Navigate to project
+    if [[ ! -d "$project_dir" ]]; then
+        die "Project directory not found: $project_dir"
+    fi
+    
+    cd "$project_dir"
+    
+    # Build flags
+    local flags=("-m${target}")
+    [[ "$debug" == "y" ]] && flags+=("-g" "-O0") || flags+=("-O2")
+    
+    # Add include path
+    [[ -d "src" ]] && flags+=("-I" "src")
+    
+    # Find source files
+    local src_files=()
+    if [[ -d "src" ]]; then
+        while IFS= read -r file; do
+            [[ -n "$file" ]] && src_files+=("$file")
+        done < <(find src -name "*.c" | sort)
+    else
+        src_files=("*.c")
+    fi
+    
+    if [[ ${#src_files[@]} -eq 0 ]]; then
+        die "No C source files found in $project_dir"
+    fi
+    
+    # Create build directory
+    mkdir -p build
+    
+    log "Compiling ${#src_files[@]} files with Retro68..."
+    log "Target: ${target}, Debug: ${debug}"
+    
+    # Compile
+    Retro68 "${flags[@]}" -o "build/${output_name}" "${src_files[@]}" || {
+        die "Compilation failed. Check errors above."
+    }
+    
+    # Verify output
+    if [[ -f "build/${output_name}" ]]; then
+        local file_size=$(stat -f%z "build/${output_name}" 2>/dev/null || stat -c%s "build/${output_name}")
+        log "✅ Compilation successful: build/${output_name} (${file_size} bytes)"
+        return 0
+    else
+        die "Output file not created: build/${output_name}"
+    fi
+}
+
+# Compile MacOS71_GDB_ICMP_Test
+compile_macos71_test() {
+    heading "Compiling MacOS71_GDB_ICMP_Test"
+    compile_with_retro68 "$RETRO68_TEST_PROJECT" "MacOS71_GDB_ICMP_Test" "68040" "y"
+}
+
+# Debug MacOS 7.1 with Retro68
+retro68_debug_workflow() {
+    heading "Retro68 Debug Workflow for MacOS 7.1"
+    
+    # Step 1: Check environment
+    log "Step 1: Checking Retro68 environment..."
+    if ! check_retro68; then
+        ask "Retro68 not found. Install now?" "y" | grep -iq "y" && install_retro68
+    fi
+    
+    # Step 2: Setup project
+    log "Step 2: Setting up project..."
+    setup_retro68_environment
+    
+    # Step 3: Compile
+    log "Step 3: Compiling test application..."
+    compile_macos71_test
+    
+    # Step 4: Copy to shared directory
+    log "Step 4: Copying to shared directory..."
+    cp "${RETRO68_TEST_PROJECT}/build/MacOS71_GDB_ICMP_Test" "${VM_SHARED_DIR}/" || {
+        warn "Failed to copy to shared directory"
+    }
+    
+    # Step 5: Launch QEMU with GDB support
+    log "Step 5: Launching QEMU with GDB support..."
+    log "Run in another terminal: gdb-multiarch -ex 'target remote localhost:1234' -ex 'file ${RETRO68_TEST_PROJECT}/build/MacOS71_GDB_ICMP_Test'"
+    
+    # Launch QEMU with GDB
+    launch_macos_68k_debug
+}
+
+# Launch MacOS 68k with GDB debugging
+launch_macos_68k_debug() {
+    heading "Launching MacOS 68k with GDB Debugging"
+    
+    # Check for ROM
+    local rom_file=""
+    if ls "${HOME}/vm_assistant/MacROMan/TestImages/"*.ROM 1>/dev/null 2>&1; then
+        rom_file=$(ls "${HOME}/vm_assistant/MacROMan/TestImages/"*.ROM | head -1)
+    elif ls "${HOME}/vm_assistant/roms/"*.ROM 1>/dev/null 2>&1; then
+        rom_file=$(ls "${HOME}/vm_assistant/roms/"*.ROM | head -1)
+    else
+        die "No ROM file found. Place ROMs in ~/vm_assistant/MacROMan/TestImages/ or ~/vm_assistant/roms/"
+    fi
+    
+    # Check for disk image
+    local disk_file="${HOME}/vm_assistant/disks/macos71.qcow2"
+    if [[ ! -f "$disk_file" ]]; then
+        log "Creating disk image..."
+        qemu-img create -f qcow2 "$disk_file" 5G || die "Failed to create disk image"
+    fi
+    
+    # Check for NDRV loader
+    local ndrv_loader=""
+    if [[ -f "${HOME}/vm_assistant/ppc-ndrvloader" ]]; then
+        ndrv_loader="${HOME}/vm_assistant/ppc-ndrvloader"
+    elif [[ -f "/usr/local/share/qemu/ppc-ndrvloader" ]]; then
+        ndrv_loader="/usr/local/share/qemu/ppc-ndrvloader"
+    else
+        # Download NDRV loader
+        log "Downloading ppc-ndrvloader..."
+        curl -L https://github.com/automatedjdw/qemu-macOS/raw/main/ppc-ndrvloader -o "${HOME}/vm_assistant/ppc-ndrvloader" || {
+            warn "Failed to download ppc-ndrvloader. QEMU may not boot properly."
+        }
+        ndrv_loader="${HOME}/vm_assistant/ppc-ndrvloader"
+        chmod +x "$ndrv_loader"
+    fi
+    
+    # Launch QEMU
+    local qemu_bin=$(qemu_bin_or_die "qemu-system-m68k")
+    local cmd=(
+        "${qemu_bin}"
+        -M q800
+        -m 256M
+        -cpu m68040
+        -bios "${rom_file}"
+        -drive file="${disk_file}",format=qcow2,if=ide
+        -gdb tcp::1234
+        -S
+        -device loader,addr=0x4000000,file="${ndrv_loader}"
+        -fsdev local,security_model=mapped,id=fsdev0,path="${VM_SHARED_DIR}"
+        -device virtio-9p-pci,id=fsdev0,fsdev=fsdev0,mount_tag=hostshare
+        -prom-env "auto-boot?=true"
+        -display cocoa
+    )
+    
+    log "Running: ${cmd[*]}"
+    "${cmd[@]}"
+}
+
 # Test individual Samba connection with mounting
 test_samba_connection() {
     local host="$1"
@@ -7152,6 +7432,15 @@ show_main_menu() {
         echo "  [45] OpenStep x86"
         echo "  [46] Custom QEMU (any architecture)"
         echo ""
+        echo "🛠️ 68k Development Tools (Retro68):"
+        echo "  [69] Check Retro68 installation"
+        echo "  [70] Install Retro68 toolchain"
+        echo "  [71] Setup Retro68 environment"
+        echo "  [72] Compile with Retro68"
+        echo "  [73] Compile MacOS71_GDB_ICMP_Test"
+        echo "  [74] Retro68 debug workflow"
+        echo "  [75] Launch MacOS 68k debug VM"
+        echo ""
         echo "📖 Information:"
         echo "  [47] Show QEMU version"
         echo "  [48] Show available architectures"
@@ -7231,6 +7520,13 @@ show_main_menu() {
             44) launch_windows_xp ;;
             45) launch_openstep ;;
             46) launch_custom ;;
+            69) check_retro68 ;;
+            70) install_retro68 ;;
+            71) setup_retro68_environment ;;
+            72) compile_with_retro68 ;;
+            73) compile_macos71_test ;;
+            74) retro68_debug_workflow ;;
+            75) launch_macos_68k_debug ;;
             47) show_qemu_version ;;
             48) show_architectures ;;
             49) show_vm_configs ;;
@@ -7631,6 +7927,15 @@ UTM Integration:
   utm-create       Create UTM VM configuration
   utm-export <vm>  Export VM to UTM format
 
+Retro68 Development Tools:
+  retro68-check    Check Retro68 installation
+  retro68-install  Install Retro68 toolchain
+  retro68-setup    Setup Retro68 environment
+  retro68-compile  Compile with Retro68
+  retro68-compile-test Compile MacOS71_GDB_ICMP_Test project
+  retro68-debug    Full Retro68 debug workflow
+  retro68-debug-vm Launch MacOS 68k debug VM
+
 Advanced VM Management:
   stop             Stop a running VM
   edit             Edit VM configuration
@@ -7868,6 +8173,16 @@ main() {
         windows-xp) launch_windows_xp ;;
         openstep) launch_openstep ;;
         custom) launch_custom ;;
+        
+        # Retro68 Development Tools
+        retro68-check|check-retro68) check_retro68 ;;
+        retro68-install|install-retro68) install_retro68 ;;
+        retro68-setup|setup-retro68) setup_retro68_environment ;;
+        retro68-compile|compile-retro68) 
+            [[ -n "${2:-}" ]] && compile_with_retro68 "$2" || compile_with_retro68 ;;
+        retro68-compile-test|compile-macos71-test) compile_macos71_test ;;
+        retro68-debug|debug-retro68) retro68_debug_workflow ;;
+        retro68-debug-vm|launch-68k-debug) launch_macos_68k_debug ;;
         
         # Advanced VM management
         stop|stop-vm) 

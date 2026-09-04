@@ -33,11 +33,11 @@ ls ~/vm_assistant/*.ISO 2>&1 | grep -i mac | wc -l
 ## 2. Installation de Retro68
 
 ```bash
-cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/
+cd ~/vm_assistant/vm_clients_3rdparty/macos/
 git clone https://github.com/automatedjdw/Retro68.git
 cd Retro68
 xcodebuild -scheme Retro68 -configuration Release
-export PATH="~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
+export PATH="~/vm_assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
 Retro68 --version
 ```
 
@@ -46,7 +46,7 @@ Retro68 --version
 ## 3. Compilation de l'Application
 
 ```bash
-cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 make -f Makefile.retro68 clean
 make -f Makefile.retro68
 ```
@@ -120,7 +120,7 @@ qemu-system-ppc \
 ```bash
 gdb-multiarch
 target remote localhost:1234
-file ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test
+file ~/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test
 break main
 break test_gdb_function
 break test_icmp_function
@@ -206,11 +206,11 @@ info_msg() { echo -e "${BLUE}[INFO]${NC} $1"; }
 
 # Etape 1: Verification
 info_msg "Verification des prerequis..."
-command -v Retro68 &>/dev/null || { info_msg "Installation de Retro68..."; cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/ && git clone https://github.com/automatedjdw/Retro68.git && cd Retro68 && xcodebuild -scheme Retro68 -configuration Release; }
+command -v Retro68 &>/dev/null || { info_msg "Installation de Retro68..."; cd ~/vm_assistant/vm_clients_3rdparty/macos/ && git clone https://github.com/automatedjdw/Retro68.git && cd Retro68 && xcodebuild -scheme Retro68 -configuration Release; }
 
 # Etape 2: Compilation
 info_msg "Compilation..."
-cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 make -f Makefile.retro68 clean 2>/dev/null; make -f Makefile.retro68 || error_exit "Compilation echouee"
 
 # Etape 3: Copie
@@ -226,7 +226,7 @@ info_msg "INSTRUCTIONS:"
 info_msg "1. QEMU demarre avec GDB sur port 1234"
 info_msg "2. Dans un autre terminal: gdb-multiarch"
 info_msg "3. (gdb) target remote localhost:1234"
-info_msg "4. (gdb) file ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test"
+info_msg "4. (gdb) file ~/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test"
 info_msg "5. (gdb) break main; continue"
 info_msg "6. Dans VM: Ouvrir hostshare, copier app, lancer"
 
@@ -262,7 +262,7 @@ qemu-system-ppc \
 **Workflow minimal:**
 ```bash
 # Compiler
-cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 make -f Makefile.retro68
 
 # Copier
@@ -280,7 +280,7 @@ qemu-system-ppc -M mac99 -m 512M -cpu 68040 \
 # Terminal 2: GDB
 gdb-multiarch
 (gdb) target remote localhost:1234
-(gdb) file ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test
+(gdb) file ~/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test/build/MacOS71_GDB_ICMP_Test
 (gdb) break main
 (gdb) continue
 ```

@@ -18,7 +18,7 @@
 
 ```bash
 # Se placer dans le répertoire des outils 3rd party
-cd ~/vm_assistant/vm-assistant/vm_clients_3rdparty/macos/
+cd ~/vm_assistant/vm_clients_3rdparty/macos/
 
 # Cloner le dépôt Retro68
 git clone https://github.com/automatedjdw/Retro68.git
@@ -80,7 +80,7 @@ Pour une utilisation plus facile, ajoutez Retro68 à votre variable d'environnem
 nano ~/.zshrc
 
 # Ajouter cette ligne à la fin (remplacez le chemin par le vôtre)
-export PATH="~/vm_assistant/vm-assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
+export PATH="~/vm_assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
 
 # Recharger le fichier
 source ~/.zshrc
@@ -93,7 +93,7 @@ source ~/.zshrc
 nano ~/.bashrc
 
 # Ajouter cette ligne à la fin
-export PATH="~/vm_assistant/vm-assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
+export PATH="~/vm_assistant/vm_clients_3rdparty/macos/Retro68/Build/Products/Release:$PATH"
 
 # Recharger le fichier
 source ~/.bashrc
@@ -120,7 +120,7 @@ xcode-select --install
 
 ```bash
 # Se placer dans le répertoire du projet
-cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 
 # Compiler avec Retro68 (cible par défaut = 68040)
 make -f Makefile.retro68
@@ -131,7 +131,7 @@ make -f Makefile.retro68
 ### Méthode 2 : Compilation Manuelle
 
 ```bash
-cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 
 # Créer le répertoire build
 mkdir -p build
@@ -412,7 +412,7 @@ watch gTestValue
 
 ```bash
 # 1. Se placer dans le répertoire du projet
-cd ~/vm_assistant/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
+cd ~/vm_assistant/vm_clients_3rdparty/macos/MacOS71_GDB_ICMP_Test
 
 # 2. Compiler avec Retro68
 make -f Makefile.retro68
