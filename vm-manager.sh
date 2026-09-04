@@ -6524,6 +6524,238 @@ stop_vm() {
     return 0
 }
 
+# ---------------------------------------------------------------------------
+# Multi-VM Orchestration Functions
+# ---------------------------------------------------------------------------
+
+# Get list of all running VMs
+get_running_vms() {
+    local running_vms=()
+    
+    # Look for QEMU processes and extract VM names from pid files
+    for vm_dir in "${VM_DIR}"/*/; do
+        [[ -d "${vm_dir}" ]] || continue
+        local vm_name=$(basename "${vm_dir}")
+        local pid_file="${vm_dir}/pid"
+        
+        if [[ -f "${pid_file}" ]]; then
+            local pid=$(cat "${pid_file}")
+            if ps -p "${pid}" > /dev/null 2>&1; then
+                running_vms+=("${vm_name}")
+            fi
+        fi
+    done
+    
+    echo "${running_vms[@]}"
+}
+
+# Start all VMs
+start_all_vms() {
+    heading "Starting All VMs"
+    
+    local vm_confs=()
+    local started_count=0
+    local failed_count=0
+    
+    # Find all VM configuration files
+    while IFS= read -r -d '' vm_conf; do
+        vm_confs+=("${vm_conf}")
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
+    
+    if [[ ${#vm_confs[@]} -eq 0 ]]; then
+        log "No VMs found to start"
+        return 1
+    fi
+    
+    log "Found ${#vm_confs[@]} VM(s) to start"
+    
+    # Start VMs sequentially with small delay between them
+    for vm_conf in "${vm_confs[@]}"; do
+        [[ -f "${vm_conf}" ]] || continue
+        local vm_name=$(basename "${vm_conf}" .conf)
+        
+        log "Starting VM: ${vm_name}"
+        if launch_vm "${vm_name}"; then
+            started_count=$((started_count + 1))
+            log "✓ Successfully started: ${vm_name}"
+            sleep 2  # Small delay between VM starts
+        else
+            failed_count=$((failed_count + 1))
+            warn "✗ Failed to start: ${vm_name}"
+        fi
+    done
+    
+    log "Started ${started_count} VMs, ${failed_count} failed"
+    return $((failed_count > 0 ? 1 : 0))
+}
+
+# Stop all running VMs
+stop_all_vms() {
+    heading "Stopping All Running VMs"
+    
+    local running_vms=($(get_running_vms))
+    local stopped_count=0
+    local failed_count=0
+    
+    if [[ ${#running_vms[@]} -eq 0 ]]; then
+        log "No running VMs found"
+        return 0
+    fi
+    
+    log "Found ${#running_vms[@]} running VM(s) to stop"
+    
+    # Stop VMs in reverse order (often more graceful)
+    for ((i=${#running_vms[@]}-1; i>=0; i--)); do
+        local vm_name="${running_vms[i]}"
+        
+        log "Stopping VM: ${vm_name}"
+        if stop_vm "${vm_name}"; then
+            stopped_count=$((stopped_count + 1))
+            log "✓ Successfully stopped: ${vm_name}"
+        else
+            failed_count=$((failed_count + 1))
+            warn "✗ Failed to stop: ${vm_name}"
+        fi
+    done
+    
+    log "Stopped ${stopped_count} VMs, ${failed_count} failed"
+    return $((failed_count > 0 ? 1 : 0))
+}
+
+# Show status of all VMs
+status_all_vms() {
+    heading "Status of All VMs"
+    
+    local vm_confs=()
+    
+    # Find all VM configuration files
+    while IFS= read -r -d '' vm_conf; do
+        vm_confs+=("${vm_conf}")
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
+    
+    if [[ ${#vm_confs[@]} -eq 0 ]]; then
+        log "No VMs found"
+        return 1
+    fi
+    
+    printf "%-20s %-15s %-10s\n" "VM Name" "Status" "PID"
+    echo "------------------------------------------------"
+    
+    for vm_conf in "${vm_confs[@]}"; do
+        [[ -f "${vm_conf}" ]] || continue
+        local vm_name=$(basename "${vm_conf}" .conf)
+        local vm_dir=$(dirname "$(dirname "${vm_conf}")")
+        local pid_file="${vm_dir}/pid"
+        
+        if [[ -f "${pid_file}" ]]; then
+            local pid=$(cat "${pid_file}")
+            if ps -p "${pid}" > /dev/null 2>&1; then
+                printf "%-20s %-15s %-10s\n" "${vm_name}" "RUNNING" "${pid}"
+                continue
+            fi
+        fi
+        
+        printf "%-20s %-15s %-10s\n" "${vm_name}" "STOPPED" "-"
+    done
+    
+    return 0
+}
+
+# Suspend all running VMs (save state)
+suspend_all_vms() {
+    heading "Suspending All Running VMs"
+    
+    local running_vms=($(get_running_vms))
+    local suspended_count=0
+    local failed_count=0
+    
+    if [[ ${#running_vms[@]} -eq 0 ]]; then
+        log "No running VMs found"
+        return 0
+    fi
+    
+    log "Found ${#running_vms[@]} running VM(s) to suspend"
+    
+    # Suspend VMs sequentially
+    for vm_name in "${running_vms[@]}"; do
+        log "Suspending VM: ${vm_name}"
+        
+        # Find the QEMU process for this VM
+        local vm_dir=""
+        while IFS= read -r -d '' dir; do
+            if [[ -f "${dir}/${vm_name}.conf" ]]; then
+                vm_dir="${dir}"
+                break
+            fi
+        done < <(find "${CONFIG_DIR}" -type d -print0 2>/dev/null)
+        
+        local pid_file="${vm_dir}/pid"
+        if [[ -f "${pid_file}" ]]; then
+            local pid=$(cat "${pid_file}")
+            if ps -p "${pid}" > /dev/null 2>&1; then
+                # Use QEMU monitor to save VM state
+                if command -v qemu-guest-agent &>/dev/null; then
+                    # Try guest-agent first
+                    if qemu-guest-agent --save-state "${pid}" >/dev/null 2>&1; then
+                        suspended_count=$((suspended_count + 1))
+                        log "✓ Successfully suspended: ${vm_name}"
+                        continue
+                    fi
+                fi
+                
+                # Fall back to sending SIGSTOP (less graceful)
+                if kill -SIGSTOP "${pid}" 2>/dev/null; then
+                    suspended_count=$((suspended_count + 1))
+                    log "✓ Successfully suspended: ${vm_name}"
+                else
+                    failed_count=$((failed_count + 1))
+                    warn "✗ Failed to suspend: ${vm_name}"
+                fi
+            fi
+        fi
+    done
+    
+    log "Suspended ${suspended_count} VMs, ${failed_count} failed"
+    return $((failed_count > 0 ? 1 : 0))
+}
+
+# Multi-VM orchestration menu
+orchestration_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "orchestration_menu function requires interactive mode"
+        return 1
+    fi
+    
+    while true; do
+        clear || echo ""
+        heading "Multi-VM Orchestration Menu"
+        echo ""
+        echo "  [1] Start all VMs"
+        echo "  [2] Stop all running VMs"
+        echo "  [3] Show status of all VMs"
+        echo "  [4] Suspend all running VMs"
+        echo ""
+        echo "  [B] Back to main menu"
+        echo ""
+        
+        choice=$(ask "Select option" "")
+        
+        case "${choice}" in
+            1) start_all_vms ;;
+            2) stop_all_vms ;;
+            3) status_all_vms ;;
+            4) suspend_all_vms ;;
+            b|B|back|Back) return 0 ;;
+            *) echo "Invalid option. Please try again." ;;
+        esac
+        
+        if is_interactive; then
+            read -rp "Press Enter to continue..." _
+        fi
+    done
+}
+
 # Create VM configuration templates
 create_vm_template() {
     # This function requires interactive mode
@@ -7407,6 +7639,7 @@ show_main_menu() {
         echo "  [24] Create environment configuration"
         echo "  [25] List ROM files"
         echo "  [26] List disk images"
+        echo "  [80] Multi-VM orchestration"
         echo ""
         echo "💾 Backup & Restore:"
         echo "  [27] Create configuration backup"
@@ -7549,6 +7782,7 @@ show_main_menu() {
             66) test_local_share ;;
             67) list_shares ;;
             68) cleanup_menu ;;
+            80) orchestration_menu ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -7895,6 +8129,13 @@ VM Management:
   launch <name>    Launch a VM
   delete <name>    Delete a VM
 
+Multi-VM Orchestration:
+  start-all         Start all VMs
+  stop-all          Stop all running VMs
+  status-all        Show status of all VMs
+  suspend-all       Suspend all running VMs
+  orchestration     Interactive orchestration menu
+
 Platform Presets:
   macos-68k        Launch MacOS 68k VM
   macos-ppc        Launch MacOS PPC VM (G3/G4)
@@ -8156,6 +8397,13 @@ main() {
         delete|del) 
             [[ -n "${2:-}" ]] && delete_vm "$2" || delete_vm_menu
             ;;
+        
+        # Multi-VM orchestration
+        start-all) start_all_vms ;;
+        stop-all) stop_all_vms ;;
+        status-all) status_all_vms ;;
+        suspend-all) suspend_all_vms ;;
+        orchestration|orchestrate) orchestration_menu ;;
         
         # Platform presets
         macos-68k) launch_macos_68k ;;
