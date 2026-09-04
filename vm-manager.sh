@@ -970,7 +970,7 @@ debug_start() {
     log "  Status: Ready for debug connection"
     log ""
     log "Connect with GDB:"
-    log "  gdb-multiarch -ex 'target remote localhost:${port}' ${binary_path:-<binary>}"
+    log "  gdb-multiarch -ex 'target remote localhost:${port}' ${binary_path:-BINARY}"
     log ""
     
     # Check if auto-connect is requested
@@ -9341,6 +9341,941 @@ generate_gdb_config_interactive() {
 }
 
 # ---------------------------------------------------------------------------
+# Configuration Versioning & Backup System
+# ---------------------------------------------------------------------------
+
+# Directory for configuration backups
+CONFIG_BACKUP_DIR="${CONFIG_DIR}/backups"
+CONFIG_VERSION_DIR="${CONFIG_DIR}/config_versions"
+
+# Ensure backup directories exist
+ensure_config_backup_dirs() {
+    ensure_dir "${CONFIG_BACKUP_DIR}"
+    ensure_dir "${CONFIG_VERSION_DIR}"
+}
+
+# Backup VM configuration with version control
+# Usage: config_backup <vm_name> [message]
+config_backup() {
+    local vm_name="$1"
+    local message="$2"
+    
+    heading "Backing Up Configuration for VM: ${vm_name}"
+    
+    ensure_config_backup_dirs
+    
+    local config_file=$(find_vm_config_file "$vm_name")
+    if [[ ! -f "$config_file" ]]; then
+        die "Configuration file not found for VM: ${vm_name}"
+    fi
+    
+    local timestamp=$(date +%Y%m%d-%H%M%S)
+    local backup_dir="${CONFIG_BACKUP_DIR}/${vm_name}"
+    local version_dir="${CONFIG_VERSION_DIR}/${vm_name}"
+    local backup_file="${backup_dir}/${vm_name}-${timestamp}.conf"
+    local version_meta="${version_dir}/${timestamp}.meta"
+    
+    # Create directories
+    mkdir -p "${backup_dir}"
+    mkdir -p "${version_dir}"
+    
+    # Copy configuration file
+    cp "$config_file" "${backup_file}"
+    
+    # Create version metadata
+    [[ -n "$message" ]] || message="Automatic backup created on $(date)"
+    
+    cat > "${version_meta}" << EOF
+# Configuration Version Metadata
+VM_NAME="${vm_name}"
+VERSION_ID="${timestamp}"
+BACKUP_FILE="${backup_file}"
+CREATED_AT="$(date +%Y-%m-%d\ %H:%M:%S)"
+MESSAGE="${message}"
+PARENT_VERSION="$(ls -t "${version_dir}" | head -2 | tail -1 | sed 's/\.meta$//')"
+EOF
+    
+    # Update current version symlink
+    ln -sf "${backup_file}" "${backup_dir}/${vm_name}-current.conf"
+    
+    # Create history file if it doesn't exist
+    local history_file="${version_dir}/history"
+    if [[ ! -f "$history_file" ]]; then
+        echo "# Configuration History for ${vm_name}" > "$history_file"
+        echo "# Format: TIMESTAMP|MESSAGE|FILE" >> "$history_file"
+    fi
+    
+    echo "${timestamp}|${message}|${backup_file}" >> "$history_file"
+    
+    log "✅ Configuration backed up: ${backup_file}"
+    log "   Version: ${timestamp}"
+    log "   Message: ${message}"
+    
+    return 0
+}
+
+# Restore VM configuration from backup
+# Usage: config_restore <vm_name> <version_id>
+config_restore() {
+    local vm_name="$1"
+    local version_id="$2"
+    
+    heading "Restoring Configuration for VM: ${vm_name} from version ${version_id}"
+    
+    ensure_config_backup_dirs
+    
+    local version_dir="${CONFIG_VERSION_DIR}/${vm_name}"
+    local backup_dir="${CONFIG_BACKUP_DIR}/${vm_name}"
+    
+    if [[ ! -d "$version_dir" ]]; then
+        die "No version history found for VM: ${vm_name}"
+    fi
+    
+    local version_meta="${version_dir}/${version_id}.meta"
+    if [[ ! -f "$version_meta" ]]; then
+        # Try to find the version
+        local available_versions=()
+        while IFS= read -r meta_file; do
+            [[ -f "$meta_file" ]] && available_versions+=("$(basename "$meta_file" .meta)")
+        done < <(find "$version_dir" -name "*.meta" | sort -r)
+        
+        if [[ ${#available_versions[@]} -eq 0 ]]; then
+            die "No versions available for VM: ${vm_name}"
+        fi
+        
+        log "Available versions for ${vm_name}:"
+        for i in "${!available_versions[@]}"; do
+            echo "  [${i}] ${available_versions[$i]}"
+        done
+        die "Version not found: ${version_id}. Use one of the above versions."
+    fi
+    
+    local backup_file=$(grep "^BACKUP_FILE=" "$version_meta" | cut -d'=' -f2- | tr -d '"')
+    if [[ ! -f "$backup_file" ]]; then
+        die "Backup file not found: ${backup_file}"
+    fi
+    
+    local current_config=$(find_vm_config_file "$vm_name")
+    
+    # Create backup of current config before restoring
+    local current_timestamp=$(date +%Y%m%d-%H%M%S)
+    local current_backup="${backup_dir}/${vm_name}-pre-restore-${current_timestamp}.conf"
+    cp "$current_config" "$current_backup"
+    log "Backup of current config saved: ${current_backup}"
+    
+    # Restore the configuration
+    cp "$backup_file" "$current_config"
+    
+    # Record the restore in history
+    local restore_message="Restored from version ${version_id} on $(date)"
+    echo "${current_timestamp}|${restore_message}|${current_backup}" >> "${version_dir}/history"
+    
+    log "✅ Configuration restored: ${current_config}"
+    log "   Restored from: ${version_id}"
+    log "   Current config backed up to: ${current_backup}"
+    
+    return 0
+}
+
+# Show configuration history for a VM
+# Usage: config_history <vm_name>
+config_history() {
+    local vm_name="$1"
+    
+    heading "Configuration History for VM: ${vm_name}"
+    
+    ensure_config_backup_dirs
+    
+    local version_dir="${CONFIG_VERSION_DIR}/${vm_name}"
+    local history_file="${version_dir}/history"
+    
+    if [[ ! -f "$history_file" ]]; then
+        die "No configuration history found for VM: ${vm_name}"
+    fi
+    
+    log "Configuration Changes for ${vm_name}:"
+    log "="
+    
+    # Read history file (skip comments and empty lines)
+    local line_num=1
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        if [[ "$line" =~ ^#.*$ || -z "$line" ]]; then
+            continue
+        fi
+        
+        local timestamp=$(echo "$line" | cut -d'|' -f1)
+        local message=$(echo "$line" | cut -d'|' -f2)
+        local backup_file=$(echo "$line" | cut -d'|' -f3)
+        
+        echo "  [${line_num}] ${timestamp}"
+        echo "      Message: ${message}"
+        echo "      File: ${backup_file}"
+        echo ""
+        
+        line_num=$((line_num + 1))
+    done < "$history_file"
+    
+    # Show available versions
+    local versions=()
+    while IFS= read -r version_meta; do
+        [[ -f "$version_meta" ]] && versions+=("$(basename "$version_meta" .meta)")
+    done < <(find "$version_dir" -name "*.meta" | sort -r)
+    
+    if [[ ${#versions[@]} -gt 0 ]]; then
+        log "Available Versions:"
+        for i in "${!versions[@]}"; do
+            local version_id="${versions[$i]}"
+            local meta_file="${version_dir}/${version_id}.meta"
+            local created_at=$(grep "^CREATED_AT=" "$meta_file" | cut -d'=' -f2- | tr -d '"')
+            local message=$(grep "^MESSAGE=" "$meta_file" | cut -d'=' -f2- | tr -d '"')
+            
+            echo "  [v${i}] ${version_id} - ${created_at}"
+            echo "      ${message}"
+        done
+    fi
+    
+    return 0
+}
+
+# Show differences between configuration versions
+# Usage: config_diff <vm_name> [version1] [version2]
+config_diff() {
+    local vm_name="$1"
+    local version1="$2"
+    local version2="$3"
+    
+    heading "Configuration Differences for VM: ${vm_name}"
+    
+    ensure_config_backup_dirs
+    
+    local version_dir="${CONFIG_VERSION_DIR}/${vm_name}"
+    
+    if [[ ! -d "$version_dir" ]]; then
+        die "No version history found for VM: ${vm_name}"
+    fi
+    
+    # If no versions specified, show diff between current and previous
+    if [[ -z "$version1" && -z "$version2" ]]; then
+        # Find the two most recent versions
+        local versions=()
+        while IFS= read -r meta_file; do
+            [[ -f "$meta_file" ]] && versions+=("$(basename "$meta_file" .meta)")
+        done < <(find "$version_dir" -name "*.meta" | sort -r | head -2)
+        
+        if [[ ${#versions[@]} -lt 2 ]]; then
+            die "Need at least 2 versions to show diff"
+        fi
+        
+        version1="${versions[1]}"  # Second most recent
+        version2="${versions[0]}"  # Most recent
+    fi
+    
+    local meta1="${version_dir}/${version1}.meta"
+    local meta2="${version_dir}/${version2}.meta"
+    
+    if [[ ! -f "$meta1" || ! -f "$meta2" ]]; then
+        die "Version metadata not found for specified versions"
+    fi
+    
+    local backup_file1=$(grep "^BACKUP_FILE=" "$meta1" | cut -d'=' -f2- | tr -d '"')
+    local backup_file2=$(grep "^BACKUP_FILE=" "$meta2" | cut -d'=' -f2- | tr -d '"')
+    
+    local timestamp1=$(grep "^CREATED_AT=" "$meta1" | cut -d'=' -f2- | tr -d '"')
+    local timestamp2=$(grep "^CREATED_AT=" "$meta2" | cut -d'=' -f2- | tr -d '"')
+    
+    log "Comparing versions:"
+    log "  Version 1: ${version1} [${timestamp1}]"
+    log "  Version 2: ${version2} [${timestamp2}]"
+    log ""
+    
+    if command -v diff &>/dev/null; then
+        log "Configuration Differences:"
+        log "="
+        diff -u "$backup_file1" "$backup_file2" || true
+    else
+        log "diff command not found. Showing both files:"
+        log ""
+        log "=== Version ${version1} ==="
+        cat "$backup_file1"
+        log ""
+        log "=== Version ${version2} ==="
+        cat "$backup_file2"
+    fi
+    
+    return 0
+}
+
+# Commit configuration with custom message
+# Usage: config_commit <vm_name> <message>
+config_commit() {
+    local vm_name="$1"
+    local message="$2"
+    
+    heading "Committing Configuration for VM: ${vm_name}"
+    
+    if [[ -z "$message" ]]; then
+        die "Commit message is required"
+    fi
+    
+    ensure_config_backup_dirs
+    
+    local config_file=$(find_vm_config_file "$vm_name")
+    if [[ ! -f "$config_file" ]]; then
+        die "Configuration file not found for VM: ${vm_name}"
+    fi
+    
+    # This is essentially the same as backup but with a required message
+    config_backup "$vm_name" "$message"
+    
+    log "✅ Configuration committed with message: ${message}"
+    
+    return 0
+}
+
+# List all configuration backups
+# Usage: list_config_backups [vm_name]
+list_config_backups() {
+    local vm_name="$1"
+    
+    heading "Configuration Backups"
+    
+    ensure_config_backup_dirs
+    
+    if [[ -n "$vm_name" ]]; then
+        # List backups for specific VM
+        local backup_dir="${CONFIG_BACKUP_DIR}/${vm_name}"
+        
+        if [[ ! -d "$backup_dir" ]]; then
+            log "No backups found for VM: ${vm_name}"
+            return 0
+        fi
+        
+        log "Backups for VM: ${vm_name}"
+        log "="
+        
+        local backups=()
+        while IFS= read -r backup_file; do
+            [[ -f "$backup_file" ]] && backups+=("$backup_file")
+        done < <(find "$backup_dir" -name "*.conf" | sort -r)
+        
+        for i in "${!backups[@]}"; do
+            local backup_name=$(basename "${backups[$i]}")
+            local size=$(du -sh "${backups[$i]}" 2>/dev/null | cut -f1)
+            local modified=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "${backups[$i]}" 2>/dev/null || date -r "${backups[$i]}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "unknown")
+            
+            echo "  [${i}] ${backup_name} [${size}] [${modified}]"
+        done
+    else
+        # List backups for all VMs
+        log "All Configuration Backups:"
+        log "="
+        
+        local vm_dirs=()
+        while IFS= read -r vm_dir; do
+            [[ -d "$vm_dir" ]] && vm_dirs+=("$vm_dir")
+        done < <(find "$CONFIG_BACKUP_DIR" -type d -maxdepth 1 | sort)
+        
+        for vm_dir in "${vm_dirs[@]}"; do
+            local vm_name=$(basename "$vm_dir")
+            local backup_count=$(find "$vm_dir" -name "*.conf" | wc -l | tr -d ' ')
+            local dir_size=$(du -sh "$vm_dir" 2>/dev/null | cut -f1)
+            
+            echo "  📁 ${vm_name}: ${backup_count} backups [${dir_size}]"
+        done
+    fi
+    
+    return 0
+}
+
+# Interactive configuration backup
+config_backup_interactive() {
+    if ! is_interactive; then
+        warn "config_backup_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Backup VM Configuration [Interactive]"
+    
+    list_vms
+    echo ""
+    
+    local vm_name
+    vm_name=$(ask "Enter VM name to backup" "")
+    
+    if [[ -z "$vm_name" ]]; then
+        die "VM name is required"
+    fi
+    
+    local config_file=$(find_vm_config_file "$vm_name")
+    if [[ ! -f "$config_file" ]]; then
+        die "Configuration file not found for VM: ${vm_name}"
+    fi
+    
+    local message
+    message=$(ask "Enter backup message (commit message)" "Automatic backup")
+    
+    config_backup "$vm_name" "$message"
+}
+
+# Interactive configuration restore
+config_restore_interactive() {
+    if ! is_interactive; then
+        warn "config_restore_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Restore VM Configuration [Interactive]"
+    
+    list_vms
+    echo ""
+    
+    local vm_name
+    vm_name=$(ask "Enter VM name to restore" "")
+    
+    if [[ -z "$vm_name" ]]; then
+        die "VM name is required"
+    fi
+    
+    # Show available versions
+    config_history "$vm_name"
+    echo ""
+    
+    local version_id
+    version_id=$(ask "Enter version ID to restore" "")
+    
+    if [[ -z "$version_id" ]]; then
+        die "Version ID is required"
+    fi
+    
+    config_restore "$vm_name" "$version_id"
+}
+
+# Interactive configuration history
+config_history_interactive() {
+    if ! is_interactive; then
+        warn "config_history_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Configuration History [Interactive]"
+    
+    list_vms
+    echo ""
+    
+    local vm_name
+    vm_name=$(ask "Enter VM name to show history" "")
+    
+    if [[ -z "$vm_name" ]]; then
+        die "VM name is required"
+    fi
+    
+    config_history "$vm_name"
+}
+
+# Interactive configuration diff
+config_diff_interactive() {
+    if ! is_interactive; then
+        warn "config_diff_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Configuration Diff [Interactive]"
+    
+    list_vms
+    echo ""
+    
+    local vm_name
+    vm_name=$(ask "Enter VM name to show diff" "")
+    
+    if [[ -z "$vm_name" ]]; then
+        die "VM name is required"
+    fi
+    
+    local version1
+    version1=$(ask "Enter first version (leave blank for most recent)" "")
+    
+    local version2
+    version2=$(ask "Enter second version (leave blank for second most recent)" "")
+    
+    config_diff "$vm_name" "$version1" "$version2"
+}
+
+# Interactive configuration commit
+config_commit_interactive() {
+    if ! is_interactive; then
+        warn "config_commit_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Commit VM Configuration [Interactive]"
+    
+    list_vms
+    echo ""
+    
+    local vm_name
+    vm_name=$(ask "Enter VM name to commit" "")
+    
+    if [[ -z "$vm_name" ]]; then
+        die "VM name is required"
+    fi
+    
+    local config_file=$(find_vm_config_file "$vm_name")
+    if [[ ! -f "$config_file" ]]; then
+        die "Configuration file not found for VM: ${vm_name}"
+    fi
+    
+    local message
+    message=$(ask "Enter commit message" "")
+    
+    if [[ -z "$message" ]]; then
+        die "Commit message is required"
+    fi
+    
+    config_commit "$vm_name" "$message"
+}
+
+# ---------------------------------------------------------------------------
+# GDB Debugging Integration Enhancement
+# ---------------------------------------------------------------------------
+
+# Start VM in debug mode
+# Usage: debug_vm <vm_name> [binary_path] [port]
+debug_vm() {
+    local vm_name="$1"
+    local binary_path="$2"
+    local port="$3"
+    
+    heading "Starting VM in Debug Mode: ${vm_name}"
+    
+    ensure_vm_exists "$vm_name"
+    
+    # Set default port if not specified
+    [[ -n "$port" ]] || port="1234"
+    
+    # Find VM configuration
+    local config_file=$(find_vm_config_file "$vm_name")
+    if [[ ! -f "$config_file" ]]; then
+        die "Configuration file not found for VM: ${vm_name}"
+    fi
+    
+    # Check if VM is already running
+    if is_vm_running "$vm_name"; then
+        warn "VM ${vm_name} is already running"
+        return 1
+    fi
+    
+    log "Starting VM ${vm_name} in debug mode on port ${port}"
+    
+    # Load configuration
+    source_vm_config "$config_file"
+    
+    # Add debug flags
+    QEMU_ARGS+=" -gdb tcp::${port} -S"
+    
+    # If binary path is provided, add it to GDB command
+    if [[ -n "$binary_path" && -f "$binary_path" ]]; then
+        log "Debug binary: ${binary_path}"
+        log "To connect GDB: gdb-multiarch -ex 'target remote localhost:${port}' -ex 'file ${binary_path}'"
+    else
+        log "To connect GDB: gdb-multiarch -ex 'target remote localhost:${port}'"
+    fi
+    
+    # Launch VM with debug mode
+    launch_vm "$vm_name"
+    
+    log "✅ VM ${vm_name} started in debug mode on port ${port}"
+    log "GDB can now connect to: localhost:${port}"
+    
+    return 0
+}
+
+# Connect GDB to a running VM
+# Usage: debug_connect <vm_name> [binary_path] [port]
+debug_connect() {
+    local vm_name="$1"
+    local binary_path="$2"
+    local port="$3"
+    
+    heading "Connecting GDB to Running VM: ${vm_name}"
+    
+    ensure_vm_exists "$vm_name"
+    
+    # Find VM configuration to get GDB port
+    local config_file=$(find_vm_config_file "$vm_name")
+    
+    # Try to get port from configuration or use default
+    if [[ -z "$port" ]]; then
+        if [[ -f "$config_file" ]]; then
+            port=$(grep -E "^GDB_PORT|^DEBUG_PORT" "$config_file" | head -1 | cut -d'=' -f2)
+        fi
+        [[ -n "$port" ]] || port="1234"
+    fi
+    
+    # Check if VM is running
+    if ! is_vm_running "$vm_name"; then
+        die "VM ${vm_name} is not running. Start it first with debug mode."
+    fi
+    
+    # Check if port is open
+    if ! nc -z localhost "$port" 2>/dev/null; then
+        warn "GDB port ${port} is not open. Check if VM was started with debug mode."
+        return 1
+    fi
+    
+    log "Connecting GDB to VM ${vm_name} on port ${port}"
+    
+    # Build GDB command
+    local gdb_cmd=(gdb-multiarch)
+    
+    if [[ -n "$binary_path" && -f "$binary_path" ]]; then
+        gdb_cmd+=("${binary_path}")
+        log "Loading binary: ${binary_path}"
+    fi
+    
+    gdb_cmd+=(-ex "target remote localhost:${port}")
+    
+    # If this is a MacOS VM, add platform-specific settings
+    if [[ "$config_file" == *"macos"* || "$vm_name" == *"macos"* ]]; then
+        gdb_cmd+=(-ex "set architecture m68k" -ex "set m68k:split-hll on")
+    fi
+    
+    log "Executing: ${gdb_cmd[*]}"
+    log "✅ GDB connection command ready"
+    log "Tip: Run '${gdb_cmd[*]}' in a separate terminal"
+    
+    return 0
+}
+
+# Attach GDB to a specific debug port
+# Usage: debug_attach <vm_name> <port>
+debug_attach() {
+    local vm_name="$1"
+    local port="$2"
+    
+    heading "Attaching GDB to VM: ${vm_name} on port ${port}"
+    
+    if [[ -z "$port" ]]; then
+        die "Port is required. Usage: debug-attach VM_NAME PORT"
+    fi
+    
+    ensure_vm_exists "$vm_name"
+    
+    # Check if VM is running
+    if ! is_vm_running "$vm_name"; then
+        die "VM ${vm_name} is not running"
+    fi
+    
+    # Check if port is open
+    if ! nc -z localhost "$port" 2>/dev/null; then
+        die "Port ${port} is not open. Check if GDB stub is running."
+    fi
+    
+    log "Attaching to GDB stub on localhost:${port}"
+    
+    # Get VM configuration to determine architecture
+    local config_file=$(find_vm_config_file "$vm_name")
+    local arch=""
+    if [[ -f "$config_file" ]]; then
+        arch=$(grep -E "^QEMU_BIN|^ARCH|^PLATFORM" "$config_file" | head -1 | cut -d'=' -f2 | tr -d 'qemu-system-' | tr -d '-softmmu')
+    fi
+    
+    # Build architecture-specific GDB commands
+    local gdb_script=$(mktemp /tmp/debug_attach_XXXXXX.gdb)
+    
+    echo "# GDB attach script for ${vm_name} on port ${port}" > "$gdb_script"
+    echo "target remote localhost:${port}" >> "$gdb_script"
+    
+    # Add architecture-specific settings
+    case "$arch" in
+        m68k|68k) 
+            echo "set architecture m68k" >> "$gdb_script"
+            echo "set m68k:split-hll on" >> "$gdb_script"
+            echo "set m68k:assembly-flavor att" >> "$gdb_script"
+            ;;
+        ppc|powerpc) 
+            echo "set architecture powerpc" >> "$gdb_script"
+            echo "set powerpc:vector-mode auto" >> "$gdb_script"
+            ;;
+        ppc64|powerpc64) 
+            echo "set architecture powerpc:64" >> "$gdb_script"
+            ;;
+        x86_64|amd64) 
+            echo "set architecture i386:x86-64" >> "$gdb_script"
+            ;;
+        i386|x86) 
+            echo "set architecture i386" >> "$gdb_script"
+            ;;
+        sparc|sparc64) 
+            echo "set architecture sparc${arch#sparc}" >> "$gdb_script"
+            ;;
+        arm|aarch64) 
+            echo "set architecture arm${arch#arm}" >> "$gdb_script"
+            ;;
+    esac
+    
+    echo "continue" >> "$gdb_script"
+    
+    log "✅ GDB attach script created: ${gdb_script}"
+    log "To attach GDB, run: gdb-multiarch -x ${gdb_script}"
+    
+    return 0
+}
+
+# Test GDB connection to a VM
+# Usage: debug_test <vm_name> [port]
+debug_test() {
+    local vm_name="$1"
+    local port="$2"
+    
+    heading "Testing GDB Connection for VM: ${vm_name}"
+    
+    ensure_vm_exists "$vm_name"
+    
+    # Get GDB port from configuration if not specified
+    if [[ -z "$port" ]]; then
+        local config_file=$(find_vm_config_file "$vm_name")
+        if [[ -f "$config_file" ]]; then
+            port=$(grep -E "^GDB_PORT|^DEBUG_PORT" "$config_file" | head -1 | cut -d'=' -f2)
+        fi
+        [[ -n "$port" ]] || port="1234"
+    fi
+    
+    # Check if VM is running
+    if ! is_vm_running "$vm_name"; then
+        warn "VM ${vm_name} is not running. GDB connection test skipped."
+        return 1
+    fi
+    
+    # Test port connectivity
+    log "Testing GDB port: ${port}"
+    if nc -z localhost "$port" 2>/dev/null; then
+        log "✅ Port ${port} is open and accepting connections"
+        
+        # Try to get VM IP for remote debugging
+        if get_vm_ip "$vm_name"; then
+            local vm_ip=$(get_vm_ip "$vm_name")
+            log "VM IP: ${vm_ip}"
+            
+            if nc -z "${vm_ip}" "$port" 2>/dev/null; then
+                log "✅ GDB port accessible from VM IP: ${vm_ip}:${port}"
+            else
+                warn "GDB port not accessible from VM IP [may be firewall]"
+            fi
+        fi
+        
+        # Show GDB connection command
+        log ""
+        log "GDB Connection Test Successful"
+        log "To connect GDB manually:"
+        log "  gdb-multiarch"
+        log "  [gdb] target remote localhost:${port}"
+        log "  [gdb] continue"
+        
+        return 0
+    else
+        warn "❌ Port ${port} is not open or not accepting connections"
+        warn "Check if VM was started with GDB support: -gdb tcp::${port} -S"
+        return 1
+    fi
+}
+
+# List all active debug sessions
+# Usage: debug_list [filter]
+debug_list() {
+    local filter="$1"
+    
+    heading "Active Debug Sessions"
+    
+    local active_debug_vms=()
+    local debug_pids=()
+    
+    # Find VMs with active debug sessions
+    local vm_dirs=()
+    while IFS= read -r vm_dir; do
+        [[ -d "$vm_dir" ]] && vm_dirs+=("$vm_dir")
+    done < <(find "${VM_DIR}" -type d -maxdepth 1)
+    
+    local found_debug=false
+    
+    for vm_dir in "${vm_dirs[@]}"; do
+        local vm_name=$(basename "$vm_dir")
+        local config_file="${vm_dir}/${vm_name}.conf"
+        
+        if [[ ! -f "$config_file" ]]; then
+            continue
+        fi
+        
+        # Check if VM has GDB enabled
+        local gdb_enabled=$(grep -i "ENABLE_GDB\|DEBUG_MODE\|GDB_PORT" "$config_file" | head -1 | cut -d'=' -f2)
+        local gdb_port=$(grep -i "GDB_PORT" "$config_file" | head -1 | cut -d'=' -f2)
+        
+        # Check if VM is running with debug mode
+        if is_vm_running "$vm_name"; then
+            # Check for GDB processes
+            local pid=$(get_vm_pid "$vm_name")
+            if [[ -n "$pid" ]]; then
+                if pgrep -P "$pid" gdb >/dev/null 2>&1; then
+                    active_debug_vms+=("$vm_name")
+                    debug_pids+=("$pid")
+                    found_debug=true
+                elif nc -z localhost "${gdb_port:-1234}" 2>/dev/null; then
+                    active_debug_vms+=("$vm_name")
+                    found_debug=true
+                fi
+            fi
+        fi
+    done
+    
+    if [[ "$found_debug" == false ]]; then
+        log "No active debug sessions found"
+        
+        # Show VMs with debug configuration
+        log ""
+        log "VMs with GDB Configuration:"
+        for vm_dir in "${vm_dirs[@]}"; do
+            local vm_name=$(basename "$vm_dir")
+            local config_file="${vm_dir}/${vm_name}.conf"
+            
+            if grep -qi "ENABLE_GDB\|DEBUG_MODE\|GDB_PORT" "$config_file" 2>/dev/null; then
+                local gdb_port=$(grep -i "GDB_PORT" "$config_file" | head -1 | cut -d'=' -f2)
+                echo "  ${vm_name} [GDB Port: ${gdb_port:-default}]"
+            fi
+        done
+        
+        return 0
+    fi
+    
+    log "Active Debug Sessions:"
+    for i in "${!active_debug_vms[@]}"; do
+        local vm_name="${active_debug_vms[$i]}"
+        local pid="${debug_pids[$i]}"
+        local gdb_port=$(get_vm_gdb_port "$vm_name" 2>/dev/null || echo "unknown")
+        
+        echo "  [${i}] ${vm_name} [PID: ${pid}] [Port: ${gdb_port}]"
+    done
+    
+    return 0
+}
+
+# Detach from debug session
+# Usage: debug_detach <vm_name>
+debug_detach() {
+    local vm_name="$1"
+    
+    heading "Detaching from Debug Session: ${vm_name}"
+    
+    ensure_vm_exists "$vm_name"
+    
+    if [[ -z "$vm_name" ]]; then
+        die "VM name is required. Usage: debug-detach <vm_name>"
+    fi
+    
+    # Find GDB processes for this VM
+    local gdb_pids=()
+    local vm_pid=$(get_vm_pid "$vm_name")
+    
+    if [[ -n "$vm_pid" ]]; then
+        # Find child GDB processes
+        gdb_pids=($(pgrep -P "$vm_pid" gdb 2>/dev/null || true))
+        
+        # Also check for GDB processes that might be connected to this VM's ports
+        local gdb_port=$(get_vm_gdb_port "$vm_name" 2>/dev/null || echo "1234")
+        local additional_pids=($(pgrep -f "tcp::${gdb_port}\|remote localhost:${gdb_port}" 2>/dev/null || true))
+        
+        # Combine and unique
+        gdb_pids=($(printf '%s\n' "${gdb_pids[@]}" "${additional_pids[@]}" | sort -u))
+    fi
+    
+    if [[ ${#gdb_pids[@]} -eq 0 ]]; then
+        warn "No active GDB sessions found for VM: ${vm_name}"
+        return 1
+    fi
+    
+    log "Found ${#gdb_pids[@]} GDB process for VM ${vm_name}"
+    
+    for pid in "${gdb_pids[@]}"; do
+        if kill "$pid" 2>/dev/null; then
+            log "✅ Detached GDB process: ${pid}"
+        else
+            warn "❌ Failed to detach GDB process: ${pid}"
+        fi
+    done
+    
+    log "✅ Debug session detached for VM: ${vm_name}"
+    
+    return 0
+}
+
+# Debug session management menu
+debug_session_menu() {
+    if ! is_interactive; then
+        warn "debug_session_menu function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Debug Session Management"
+    
+    while true; do
+        echo ""
+        echo "Debug Session Options:"
+        echo "  [1] Start VM in debug mode"
+        echo "  [2] Connect GDB to running VM"
+        echo "  [3] Attach to specific debug port"
+        echo "  [4] Test GDB connection"
+        echo "  [5] List active debug sessions"
+        echo "  [6] Detach from debug session"
+        echo "  [B] Back to main menu"
+        echo ""
+        
+        local choice
+        choice=$(ask "Select option" "")
+        
+        case "${choice,,}" in
+            1|start)
+                list_vms
+                local vm_num
+                vm_num=$(ask "Select VM number to start in debug mode" "")
+                [[ -n "${vm_num}" ]] && debug_vm "${vm_num}" || echo "No VM selected"
+                ;;
+            2|connect)
+                list_vms
+                local vm_num
+                vm_num=$(ask "Select VM number to connect GDB" "")
+                [[ -n "${vm_num}" ]] && debug_connect "${vm_num}" || echo "No VM selected"
+                ;;
+            3|attach)
+                list_vms
+                local vm_num
+                vm_num=$(ask "Select VM number" "")
+                local port
+                port=$(ask "Enter debug port" "1234")
+                [[ -n "${vm_num}" ]] && debug_attach "${vm_num}" "$port" || echo "No VM selected"
+                ;;
+            4|test)
+                list_vms
+                local vm_num
+                vm_num=$(ask "Select VM number to test GDB connection" "")
+                [[ -n "${vm_num}" ]] && debug_test "${vm_num}" || echo "No VM selected"
+                ;;
+            5|list) debug_list ;;
+            6|detach)
+                list_vms
+                local vm_num
+                vm_num=$(ask "Select VM number to detach from debug" "")
+                [[ -n "${vm_num}" ]] && debug_detach "${vm_num}" || echo "No VM selected"
+                ;;
+            b|back) return 0 ;;
+            *) echo "Invalid option. Please try again." ;;
+        esac
+        
+        if is_interactive; then
+            read -rp "Press Enter to continue..." _
+        fi
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Retro68 Toolchain Support
 # ---------------------------------------------------------------------------
 
@@ -13119,6 +14054,10 @@ show_main_menu() {
         echo ""
         echo "🐛 Debugging:"
         echo "  [84] Debug session management"
+        echo "  [85] Start VM in debug mode"
+        echo "  [86] Connect GDB to running VM"
+        echo "  [87] Attach GDB to specific port"
+        echo "  [88] Test GDB connection"
         echo ""
         echo "💾 Backup & Restore:"
         echo "  [27] Create configuration backup"
@@ -13255,6 +14194,14 @@ show_main_menu() {
         echo "  [127] List GDB configurations"
         echo "  [128] Delete GDB configuration"
         echo ""
+        echo "📝 Configuration Versioning:"
+        echo "  [129] Backup VM configuration"
+        echo "  [130] Restore VM configuration"
+        echo "  [131] Show configuration history"
+        echo "  [132] Show configuration diff"
+        echo "  [133] Commit configuration"
+        echo "  [134] List all config backups"
+        echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
         echo ""
@@ -13361,6 +14308,27 @@ show_main_menu() {
             82) import_vm_menu ;;
             83) monitor_menu ;;
             84) debug_session_menu ;;
+            85) 
+                local vm_name binary_path port
+                vm_name=$(ask "Enter VM name to start in debug mode" "")
+                [[ -n "$vm_name" ]] && debug_vm "$vm_name" "$binary_path" "$port" || echo "VM name required"
+                ;;
+            86) 
+                local vm_name binary_path port
+                vm_name=$(ask "Enter VM name to connect GDB" "")
+                [[ -n "$vm_name" ]] && debug_connect "$vm_name" "$binary_path" "$port" || echo "VM name required"
+                ;;
+            87) 
+                local vm_name port
+                vm_name=$(ask "Enter VM name" "")
+                port=$(ask "Enter debug port" "1234")
+                [[ -n "$vm_name" ]] && debug_attach "$vm_name" "$port" || echo "VM name and port required"
+                ;;
+            88) 
+                local vm_name port
+                vm_name=$(ask "Enter VM name to test GDB connection" "")
+                [[ -n "$vm_name" ]] && debug_test "$vm_name" "$port" || echo "VM name required"
+                ;;
             90) launch_gui_application_interactive ;;
             91) configure_xquartz_optimization ;;
             92) 
@@ -13477,6 +14445,15 @@ show_main_menu() {
                 config_name=$(ask "Enter GDB config name to delete" "")
                 [[ -n "$config_name" ]] && delete_gdb_config "$config_name" || echo "Config name required"
                 ;;
+            
+            # Configuration Versioning
+            129) config_backup_interactive ;;
+            130) config_restore_interactive ;;
+            131) config_history_interactive ;;
+            132) config_diff_interactive ;;
+            133) config_commit_interactive ;;
+            134) list_config_backups ;;
+            
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -14176,7 +15153,16 @@ main() {
         # Debugging
         debug|debug-vm) 
             [[ -n "${2:-}" ]] && debug_start "$2" "$3" "$4" || debug_session_menu ;;
+        debug|start-debug) 
+            [[ -n "${2:-}" ]] && debug_vm "$2" "$3" "$4" || die "Usage: debug VM_NAME [BINARY_PATH] [PORT]"
+            ;;
         debug-connect) debug_connect "$2" "$3" "$4" ;;
+        debug-attach) 
+            [[ -n "${2:-}" && -n "${3:-}" ]] && debug_attach "$2" "$3" || die "Usage: debug-attach VM_NAME PORT"
+            ;;
+        debug-test) 
+            [[ -n "${2:-}" ]] && debug_test "$2" "$3" || die "Usage: debug-test VM_NAME [PORT]"
+            ;;
         debug-list) debug_list ;;
         debug-detach) debug_detach "$2" ;;
         deploy|deploy-binary) deploy_binary "$2" "$3" "$4" ;;
@@ -14405,6 +15391,24 @@ main() {
         delete-gdb-config|gdb-config-delete) 
             [[ -n "${2:-}" ]] && delete_gdb_config "$2" || die "Usage: delete-gdb-config <config_name>"
             ;;
+        
+        # Configuration Versioning & Backup
+        config-backup|backup-config) 
+            [[ -n "${2:-}" ]] && config_backup "$2" "$3" || die "Usage: config-backup <vm_name> [message]"
+            ;;
+        config-restore|restore-config) 
+            [[ -n "${2:-}" && -n "${3:-}" ]] && config_restore "$2" "$3" || die "Usage: config-restore <vm_name> <version_id>"
+            ;;
+        config-history|history-config) 
+            [[ -n "${2:-}" ]] && config_history "$2" || die "Usage: config-history <vm_name>"
+            ;;
+        config-diff|diff-config) 
+            [[ -n "${2:-}" ]] && config_diff "$2" "$3" "$4" || die "Usage: config-diff <vm_name> [version1] [version2]"
+            ;;
+        config-commit|commit-config) 
+            [[ -n "${2:-}" && -n "${3:-}" ]] && config_commit "$2" "$3" || die "Usage: config-commit <vm_name> <message>"
+            ;;
+        list-backups|backups-list) list_config_backups ;;
         
         # Disk/ISO management
         disk-create|create-disk) create_disk_image ;;
