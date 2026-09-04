@@ -67,6 +67,15 @@ DEFAULT_TLS_PROXY_HOST="10.0.2.2"
 DEFAULT_TLS_PROXY_PORT=8443
 DEFAULT_MACOS_SHARE_DIR="${HOME}/vm_assistant/shares"
 
+# GUI Configuration
+USE_XDIALOG=false
+HAVE_XDIALOG=false
+XDIALOG_PATH=""
+
+# Cross-Compilation Toolchain Configuration
+TOOLCHAIN_DIR="${CONFIG_DIR}/toolchains"
+DETECTED_TOOLCHAINS=()
+
 # ---------------------------------------------------------------------------
 # Colour Helpers
 # ---------------------------------------------------------------------------
@@ -4703,7 +4712,7 @@ verify_dependencies() {
     fi
     
     # Check other dependencies
-    local other_deps=("samba" "netatalk" "XQuartz")
+    local other_deps=("samba" "netatalk" "XQuartz" "xdialog")
     
     for dep in "${other_deps[@]}"; do
         case $dep in
@@ -4729,6 +4738,14 @@ verify_dependencies() {
                 else
                     warn "✗ XQuartz is not installed"
                     missing_deps+=("XQuartz")
+                fi
+                ;;
+            "xdialog")
+                if detect_xdialog &>/dev/null; then
+                    log "✓ XDialog is installed"
+                else
+                    warn "✗ XDialog is not installed"
+                    missing_deps+=("XDialog")
                 fi
                 ;;
         esac
@@ -4830,6 +4847,532 @@ configure_ramdisk() {
     [[ -n "$disk_usage" ]] && log "Available space: $disk_usage"
     log "RAMDISK configuration complete: $SHARE_DIR"
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# XDialog GUI Support
+# ---------------------------------------------------------------------------
+
+# Detect if XDialog is available
+detect_xdialog() {
+    local xdialog_cmd
+    
+    # Check for xdialog in common paths
+    if command -v xdialog &>/dev/null; then
+        XDIALOG_PATH=$(command -v xdialog)
+        HAVE_XDIALOG=true
+        log "✓ XDialog found at: ${XDIALOG_PATH}"
+        return 0
+    fi
+    
+    # Check common installation paths
+    local xdialog_paths=(
+        "/opt/X11/bin/xdialog"
+        "/usr/X11/bin/xdialog"
+        "/usr/local/bin/xdialog"
+        "/usr/bin/xdialog"
+    )
+    
+    for path in "${xdialog_paths[@]}"; do
+        if [[ -x "$path" ]]; then
+            XDIALOG_PATH="$path"
+            HAVE_XDIALOG=true
+            log "✓ XDialog found at: ${XDIALOG_PATH}"
+            return 0
+        fi
+    done
+    
+    # Check if XQuartz is installed and look in its bin directory
+    if [[ -d "/Applications/Utilities/XQuartz.app" ]]; then
+        local xquartz_bin="/Applications/Utilities/XQuartz.app/Contents/bin/xdialog"
+        if [[ -x "$xquartz_bin" ]]; then
+            XDIALOG_PATH="$xquartz_bin"
+            HAVE_XDIALOG=true
+            log "✓ XDialog found via XQuartz at: ${XDIALOG_PATH}"
+            return 0
+        fi
+    fi
+    
+    HAVE_XDIALOG=false
+    XDIALOG_PATH=""
+    warn "✗ XDialog not found"
+    return 1
+}
+
+# Enable XDialog GUI mode
+enable_xdialog() {
+    if $HAVE_XDIALOG; then
+        USE_XDIALOG=true
+        log "GUI mode enabled using XDialog"
+        return 0
+    else
+        warn "Cannot enable GUI mode: XDialog not available"
+        return 1
+    fi
+}
+
+# Disable XDialog GUI mode
+disable_xdialog() {
+    USE_XDIALOG=false
+    log "GUI mode disabled, using CLI"
+}
+
+# Check if we should use GUI mode
+is_gui_mode() {
+    [[ "$USE_XDIALOG" == "true" && "$HAVE_XDIALOG" == "true" ]]
+}
+
+# GUI file selector using XDialog
+gui_file_selector() {
+    local title="$1"
+    local directory="$2"
+    local pattern="$3"
+    
+    if ! is_gui_mode; then
+        # Fallback to CLI
+        echo "$(find "${directory:-/}" -name "${pattern:-*}" -type f 2>/dev/null | head -1)"
+        return 1
+    fi
+    
+    local result
+    result=$(${XDIALOG_PATH} --stdout --title "${title}" --fselect "${directory:-$HOME}/" 2>/dev/null)
+    
+    if [[ -n "$result" ]]; then
+        echo "$result"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# GUI directory selector using XDialog
+gui_dir_selector() {
+    local title="$1"
+    local directory="$2"
+    
+    if ! is_gui_mode; then
+        # Fallback to CLI
+        echo "${directory:-$HOME}"
+        return 1
+    fi
+    
+    local result
+    result=$(${XDIALOG_PATH} --stdout --title "${title}" --dselect "${directory:-$HOME}/" 2>/dev/null)
+    
+    if [[ -n "$result" ]]; then
+        echo "$result"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# GUI message box
+gui_msgbox() {
+    local title="$1"
+    local message="$2"
+    
+    if ! is_gui_mode; then
+        # Fallback to CLI
+        echo "${message}"
+        return 0
+    fi
+    
+    ${XDIALOG_PATH} --title "${title}" --msgbox "${message}" 10 50 2>/dev/null
+    return $?
+}
+
+# GUI input box
+gui_inputbox() {
+    local title="$1"
+    local prompt="$2"
+    local default="$3"
+    local result
+    
+    if ! is_gui_mode; then
+        # Fallback to CLI
+        read -rp "${prompt} [${default}]: " result
+        echo "${result:-${default}}"
+        return 0
+    fi
+    
+    result=$(${XDIALOG_PATH} --stdout --title "${title}" --inputbox "${prompt}" 10 50 "${default}" 2>/dev/null)
+    
+    if [[ -n "$result" ]]; then
+        echo "$result"
+        return 0
+    else
+        echo "$default"
+        return 1
+    fi
+}
+
+# GUI yes/no dialog
+gui_yesno() {
+    local title="$1"
+    local message="$2"
+    local default="$3"
+    
+    if ! is_gui_mode; then
+        # Fallback to CLI
+        local answer
+        read -rp "${message} [${default}]: " answer
+        case "${answer:-${default}}" in
+            [Yy]*) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+    
+    ${XDIALOG_PATH} --title "${title}" --defaultno --yesno "${message}" 10 50 2>/dev/null
+    return $?
+}
+
+# Configure XDialog settings
+configure_xdialog() {
+    heading "Configuring XDialog"
+    
+    # Try to detect XDialog
+    if ! detect_xdialog; then
+        log "XDialog configuration:"
+        log "  XDialog is not installed."
+        log "  Install XDialog via:"
+        log "    - MacPorts: sudo port install xdialog"
+        log "    - Homebrew: brew install xdialog"
+        log "    - Source: https://sourceforge.net/projects/xdialog/"
+        return 1
+    fi
+    
+    # Test XDialog functionality
+    if ${XDIALOG_PATH} --version &>/dev/null; then
+        local version=$(${XDIALOG_PATH} --version 2>/dev/null)
+        log "✓ XDialog version: ${version}"
+    fi
+    
+    # Enable GUI mode by default if XDialog is available
+    enable_xdialog
+    
+    log "XDialog configuration complete"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Cross-Compilation Toolchain Detection
+# ---------------------------------------------------------------------------
+
+# Known cross-compilation toolchains and their typical binaries
+declare -A TOOLCHAIN_BINARIES=(
+    ["retro68"]="m68k-elf-gcc m68k-apple-elf-gcc"
+    ["powerpc"]="powerpc-elf-gcc powerpc-linux-gnu-gcc powerpc-apple-darwin-gcc"
+    ["arm"]="arm-linux-gnueabi-gcc arm-none-eabi-gcc arm-apple-darwin-gcc"
+    ["sparc"]="sparc-elf-gcc sparc-linux-gnu-gcc"
+    ["x86_64"]="x86_64-elf-gcc x86_64-linux-gnu-gcc"
+    ["i386"]="i386-elf-gcc i686-elf-gcc"
+    ["riscv"]="riscv64-elf-gcc riscv32-elf-gcc"
+    ["mingw"]="x86_64-w64-mingw32-gcc i686-w64-mingw32-gcc"
+)
+
+# Known toolchain directories
+declare -A TOOLCHAIN_DIRS=(
+    ["retro68"]="${HOME}/vm_assistant/vm_clients_3rdparty/macos/Retro68"
+    ["powerpc"]="${HOME}/.local/cross-compilers/powerpc"
+    ["arm"]="${HOME}/.local/cross-compilers/arm"
+    ["sparc"]="${HOME}/.local/cross-compilers/sparc"
+    ["x86_64"]="${HOME}/.local/cross-compilers/x86_64"
+    ["i386"]="${HOME}/.local/cross-compilers/i386"
+)
+
+# Detect available cross-compilation toolchains
+detect_cross_compilation_toolchains() {
+    heading "Detecting Cross-Compilation Toolchains"
+    
+    DETECTED_TOOLCHAINS=()
+    local found_any=false
+    
+    log "Searching for cross-compilation toolchains..."
+    
+    # Check for Retro68 specifically
+    if [[ -f "$RETRO68_BIN" ]] || command -v Retro68 &>/dev/null; then
+        DETECTED_TOOLCHAINS+=("retro68")
+        log "✓ Found Retro68 toolchain"
+        found_any=true
+    fi
+    
+    # Check each toolchain type
+    for toolchain in "${!TOOLCHAIN_BINARIES[@]}"; do
+        local binaries="${TOOLCHAIN_BINARIES[$toolchain]}"
+        local found=false
+        
+        # Check if any of the toolchain binaries are available
+        for binary in $binaries; do
+            if command -v "$binary" &>/dev/null; then
+                found=true
+                break
+            fi
+        done
+        
+        # Check in known toolchain directories
+        if ! $found && [[ -n "${TOOLCHAIN_DIRS[$toolchain]:-}" ]]; then
+            local toolchain_dir="${TOOLCHAIN_DIRS[$toolchain]}"
+            if [[ -d "$toolchain_dir" ]]; then
+                for binary in $binaries; do
+                    if [[ -x "${toolchain_dir}/bin/${binary}" ]]; then
+                        found=true
+                        break
+                    fi
+                done
+            fi
+        fi
+        
+        if $found; then
+            DETECTED_TOOLCHAINS+=("$toolchain")
+            log "✓ Found ${toolchain} toolchain"
+            found_any=true
+        fi
+    done
+    
+    # Check for additional toolchains in PATH
+    local path_compilers=($(compgen -c | grep -E -- "-(elf|linux|apple|darwin|w64|mingw|gnueabi)-gcc$" || true))
+    for compiler in "${path_compilers[@]}"; do
+        local toolchain_name
+        case "$compiler" in
+            m68k-*) toolchain_name="retro68" ;;
+            powerpc-*) toolchain_name="powerpc" ;;
+            arm-*) toolchain_name="arm" ;;
+            sparc-*) toolchain_name="sparc" ;;
+            x86_64-*) toolchain_name="x86_64" ;;
+            i386-*) toolchain_name="i386" ;;
+            riscv-*) toolchain_name="riscv" ;;
+            *-mingw32-*) toolchain_name="mingw" ;;
+            *) continue ;;
+        esac
+        
+        # Only add if not already detected
+        if [[ " ${DETECTED_TOOLCHAINS[@]} " != *" ${toolchain_name} "* ]]; then
+            DETECTED_TOOLCHAINS+=("$toolchain_name")
+            log "✓ Found ${toolchain_name} toolchain (${compiler})"
+            found_any=true
+        fi
+    done
+    
+    # Check for toolchain management systems
+    if command -v ccache &>/dev/null; then
+        log "✓ Found ccache (compiler cache)"
+    fi
+    
+    if command -v cmake &>/dev/null; then
+        log "✓ Found CMake build system"
+    fi
+    
+    if command -v ninja &>/dev/null; then
+        log "✓ Found Ninja build system"
+    fi
+    
+    if $found_any; then
+        log "Detected toolchains: ${DETECTED_TOOLCHAINS[*]}"
+    else
+        log "No cross-compilation toolchains detected in standard locations"
+        log "Install toolchains via:"
+        log "  - MacPorts: sudo port install <toolchain>"
+        log "  - Homebrew: brew install <toolchain>"
+        log "  - Manual: Download and install from vendor websites"
+    fi
+    
+    return 0
+}
+
+# Get list of detected toolchains
+list_detected_toolchains() {
+    if [[ ${#DETECTED_TOOLCHAINS[@]} -eq 0 ]]; then
+        log "No toolchains in cache, detecting..."
+        detect_cross_compilation_toolchains
+    fi
+    
+    if [[ ${#DETECTED_TOOLCHAINS[@]} -eq 0 ]]; then
+        echo "No cross-compilation toolchains detected."
+        return 1
+    fi
+    
+    heading "Detected Cross-Compilation Toolchains"
+    echo "Found ${#DETECTED_TOOLCHAINS[@]} toolchain(s):"
+    
+    for toolchain in "${DETECTED_TOOLCHAINS[@]}"; do
+        case "$toolchain" in
+            "retro68") echo "  ✓ Retro68 (68k MacOS development)" ;;
+            "powerpc") echo "  ✓ PowerPC cross-compiler" ;;
+            "arm") echo "  ✓ ARM cross-compiler" ;;
+            "sparc") echo "  ✓ SPARC cross-compiler" ;;
+            "x86_64") echo "  ✓ x86_64 cross-compiler" ;;
+            "i386") echo "  ✓ i386 cross-compiler" ;;
+            "riscv") echo "  ✓ RISC-V cross-compiler" ;;
+            "mingw") echo "  ✓ MinGW (Windows cross-compiler)" ;;
+            *) echo "  ✓ ${toolchain} toolchain" ;;
+        esac
+    done
+    
+    echo ""
+    echo "Toolchain Details:"
+    for toolchain in "${DETECTED_TOOLCHAINS[@]}"; do
+        local binaries="${TOOLCHAIN_BINARIES[$toolchain]}"
+        echo "  ${toolchain}:"
+        for binary in $binaries; do
+            if command -v "$binary" &>/dev/null; then
+                echo "    ✓ ${binary} ($(command -v "$binary"))"
+            elif [[ -n "${TOOLCHAIN_DIRS[$toolchain]:-}" ]] && [[ -x "${TOOLCHAIN_DIRS[$toolchain]}/bin/${binary}" ]]; then
+                echo "    ✓ ${binary} (${TOOLCHAIN_DIRS[$toolchain]}/bin/${binary})"
+            else
+                echo "    ✗ ${binary} (not found)"
+            fi
+        done
+    done
+}
+
+# Check for specific toolchain
+has_toolchain() {
+    local toolchain="$1"
+    [[ " ${DETECTED_TOOLCHAINS[@]} " == *" ${toolchain} "* ]]
+}
+
+# Get compiler path for a specific toolchain
+get_toolchain_compiler() {
+    local toolchain="$1"
+    local compiler_type="$2"  # gcc, g++, cc, etc.
+    
+    local binaries="${TOOLCHAIN_BINARIES[$toolchain]}"
+    
+    for binary in $binaries; do
+        # Replace gcc with the requested compiler type
+        local target_compiler="${binary/gcc/${compiler_type:-gcc}}"
+        
+        if command -v "$target_compiler" &>/dev/null; then
+            echo "$(command -v "$target_compiler")"
+            return 0
+        elif [[ -n "${TOOLCHAIN_DIRS[$toolchain]:-}" ]] && [[ -x "${TOOLCHAIN_DIRS[$toolchain]}/bin/${target_compiler}" ]]; then
+            echo "${TOOLCHAIN_DIRS[$toolchain]}/bin/${target_compiler}"
+            return 0
+        fi
+    done
+    
+    return 1
+}
+
+# Setup toolchain environment variables
+setup_toolchain_environment() {
+    local toolchain="$1"
+    local toolchain_dir=""
+    
+    case "$toolchain" in
+        "retro68") toolchain_dir="$RETRO68_DIR" ;;
+        *) toolchain_dir="${TOOLCHAIN_DIRS[$toolchain]:-}" ;;
+    esac
+    
+    if [[ -d "$toolchain_dir" ]]; then
+        log "Setting up environment for ${toolchain} toolchain"
+        
+        # Add toolchain bin directory to PATH
+        local bin_dir="${toolchain_dir}/bin"
+        if [[ -d "$bin_dir" && "$PATH" != *"$bin_dir"* ]]; then
+            export PATH="${bin_dir}:${PATH}"
+            log "Added to PATH: ${bin_dir}"
+        fi
+        
+        # Set environment variables based on toolchain
+        case "$toolchain" in
+            "retro68")
+                export RETRO68_HOME="$toolchain_dir"
+                log "Set RETRO68_HOME: ${toolchain_dir}"
+                ;;
+            "powerpc")
+                export POWERPC_TOOLCHAIN="$toolchain_dir"
+                log "Set POWERPC_TOOLCHAIN: ${toolchain_dir}"
+                ;;
+            "arm")
+                export ARM_TOOLCHAIN="$toolchain_dir"
+                log "Set ARM_TOOLCHAIN: ${toolchain_dir}"
+                ;;
+        esac
+        
+        log "Environment setup complete for ${toolchain}"
+        return 0
+    else
+        warn "Toolchain directory not found: ${toolchain_dir}"
+        return 1
+    fi
+}
+
+# Configure cross-compilation toolchain (interactive)
+configure_toolchain() {
+    heading "Configure Cross-Compilation Toolchain"
+    
+    # First detect what's available
+    detect_cross_compilation_toolchains
+    
+    if [[ ${#DETECTED_TOOLCHAINS[@]} -eq 0 ]]; then
+        log "No cross-compilation toolchains detected."
+        ask "Would you like to install Retro68 toolchain for 68k development?" "no" | grep -iq "y" && {
+            install_retro68
+        }
+        return 0
+    fi
+    
+    # Show detected toolchains
+    list_detected_toolchains
+    
+    # Ask user to select a toolchain to configure
+    local options=()
+    for toolchain in "${DETECTED_TOOLCHAINS[@]}"; do
+        options+=("$toolchain" "$toolchain")
+    done
+    options+=("all" "Configure all detected toolchains")
+    options+=("none" "Skip configuration")
+    
+    if is_gui_mode; then
+        # GUI selection
+        local choice
+        choice=$(gui_inputbox "Select Toolchain" "Choose a toolchain to configure:" "${DETECTED_TOOLCHAINS[0]}")
+    else
+        # CLI selection
+        local choice
+        echo "Available toolchains:"
+        for i in "${!DETECTED_TOOLCHAINS[@]}"; do
+            echo "  [$((i+1))] ${DETECTED_TOOLCHAINS[$i]}"
+        done
+        echo "  [A] Configure all"
+        echo "  [S] Skip"
+        choice=$(ask "Select toolchain" "")
+        
+        case "${choice}" in
+            [Aa]) choice="all" ;;
+            [Ss]) choice="none" ;;
+            [1-9]*) 
+                local index=$((choice - 1))
+                if [[ $index -lt ${#DETECTED_TOOLCHAINS[@]} ]]; then
+                    choice="${DETECTED_TOOLCHAINS[$index]}"
+                fi
+                ;;
+        esac
+    fi
+    
+    case "$choice" in
+        "none")
+            log "Skipped toolchain configuration"
+            ;;
+        "all")
+            for toolchain in "${DETECTED_TOOLCHAINS[@]}"; do
+                setup_toolchain_environment "$toolchain"
+            done
+            ;;
+        "")
+            # Default to first toolchain
+            setup_toolchain_environment "${DETECTED_TOOLCHAINS[0]}"
+            ;;
+        *)
+            if has_toolchain "$choice"; then
+                setup_toolchain_environment "$choice"
+            else
+                warn "Toolchain not detected: $choice"
+            fi
+            ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
@@ -8656,20 +9199,26 @@ show_main_menu() {
         echo "  [52] Configure Samba file sharing"
         echo "  [53] Verify all dependencies"
         echo "  [54] Configure XQuartz for X11 display"
-        echo "  [55] Configure RAMDISK for sharing"
-        echo "  [56] Test Samba connection"
-        echo "  [57] Test Netatalk connection"
-        echo "  [58] Test SSH connection"
-        echo "  [59] Test GDB connection"
-        echo "  [60] Show QEMU command (debugging)"
-        echo "  [61] VM Snapshot Management"
-        echo "  [62] Check MacPorts installation"
-        echo "  [63] Check Homebrew installation"
-        echo "  [64] Update package manager"
-        echo "  [65] Install VM dependencies"
-        echo "  [66] Test local share directory"
-        echo "  [67] List all shares and directories"
-        echo "  [68] Cleanup menu"
+        echo "  [55] Configure XDialog for GUI"
+        echo "  [56] Configure RAMDISK for sharing"
+        echo "  [57] Test Samba connection"
+        echo "  [58] Test Netatalk connection"
+        echo "  [59] Test SSH connection"
+        echo "  [60] Test GDB connection"
+        echo "  [61] Show QEMU command (debugging)"
+        echo "  [62] VM Snapshot Management"
+        echo "  [63] Check MacPorts installation"
+        echo "  [64] Check Homebrew installation"
+        echo "  [65] Update package manager"
+        echo "  [66] Install VM dependencies"
+        echo "  [67] Test local share directory"
+        echo "  [68] List all shares and directories"
+        echo "  [69] Cleanup menu"
+        echo ""
+        echo "🔧 Toolchain Management:"
+        echo "  [70] Detect cross-compilation toolchains"
+        echo "  [71] List detected toolchains"
+        echo "  [72] Configure toolchain environment"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -8739,20 +9288,24 @@ show_main_menu() {
             52) configure_samba ;;
             53) verify_dependencies ;;
             54) configure_xquartz ;;
-            55) configure_ramdisk ;;
-            56) test_samba_connection localhost VM_Shares ;;
-            57) test_netatalk_connection localhost VM_Shares ;;
-            58) test_ssh_connection localhost 22 ;;
-            59) test_gdb_connection ;;
-            60) show_qemu_command_menu ;;
-            61) snapshot_menu ;;
-            62) check_macports ;;
-            63) check_homebrew ;;
-            64) update_package_manager ;;
-            65) install_vm_dependencies ;;
-            66) test_local_share ;;
-            67) list_shares ;;
-            68) cleanup_menu ;;
+            55) configure_xdialog ;;
+            56) configure_ramdisk ;;
+            57) test_samba_connection localhost VM_Shares ;;
+            58) test_netatalk_connection localhost VM_Shares ;;
+            59) test_ssh_connection localhost 22 ;;
+            60) test_gdb_connection ;;
+            61) show_qemu_command_menu ;;
+            62) snapshot_menu ;;
+            63) check_macports ;;
+            64) check_homebrew ;;
+            65) update_package_manager ;;
+            66) install_vm_dependencies ;;
+            67) test_local_share ;;
+            68) list_shares ;;
+            69) cleanup_menu ;;
+            70) detect_cross_compilation_toolchains ;;
+            71) list_detected_toolchains ;;
+            72) configure_toolchain ;;
             80) orchestration_menu ;;
             81) export_vm_menu ;;
             82) import_vm_menu ;;
@@ -9200,6 +9753,7 @@ Information:
   configure-netatalk Configure Netatalk (AFP) file sharing
   configure-samba   Configure Samba file sharing
   configure-xquartz Configure XQuartz for X11 display
+  configure-xdialog Configure XDialog for GUI
   configure-ramdisk Configure RAMDISK for sharing
   test-samba        Test Samba connection with mounting
   test-netatalk    Test Netatalk connection with mounting
@@ -9217,6 +9771,11 @@ Information:
   test-local-share  Test local share directory functionality
   list-shares      List all configured shares and directories
   cleanup          Cleanup old snapshots and unused files (interactive menu)
+
+Toolchain Management:
+  detect-toolchains  Detect available cross-compilation toolchains
+  list-toolchains    List detected cross-compilation toolchains
+  configure-toolchain Configure toolchain environment
   cleanup-snapshots Cleanup old VM snapshots
   cleanup-disks    Find and remove unused disk images
   menu             Interactive menu (default)
@@ -9481,6 +10040,7 @@ main() {
         configure-netatalk|setup-netatalk) configure_netatalk ;;
         configure-samba|setup-samba) configure_samba ;;
         configure-xquartz|setup-xquartz) configure_xquartz ;;
+        configure-xdialog|setup-xdialog) configure_xdialog ;;
         configure-ramdisk|setup-ramdisk) configure_ramdisk ;;
         test-samba|test-samba-connection) test_samba_connection ;;
         test-netatalk|test-netatalk-connection) test_netatalk_connection ;;
@@ -9503,6 +10063,12 @@ main() {
         cleanup-snapshots) 
             [[ -n "${2:-}" ]] && cleanup_vm_snapshots "$2" "${3:-30}" || cleanup_all_snapshots ;;
         cleanup-disks) cleanup_unused_disks "${2:-true}" ;;
+        
+        # Toolchain management
+        detect-toolchains|toolchains-detect) detect_cross_compilation_toolchains ;;
+        list-toolchains|toolchains-list) list_detected_toolchains ;;
+        configure-toolchain|toolchain-configure) 
+            [[ -n "${2:-}" ]] && setup_toolchain_environment "$2" || configure_toolchain ;;
         
         # Disk/ISO management
         disk-create|create-disk) create_disk_image ;;
