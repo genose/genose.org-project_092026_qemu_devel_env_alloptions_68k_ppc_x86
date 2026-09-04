@@ -17,6 +17,11 @@ resources/roms/MacROMan/DMG Canvas/
 *~
 .DS_Store
 
+# Backup files
+backups/
+*.tar.gz
+*.tar.bz2
+
 # Ignorer les fichiers de build
 *.o
 *.exe
