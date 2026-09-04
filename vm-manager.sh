@@ -453,6 +453,24 @@ validate_display_backend() {
     return 1
 }
 
+# Check if a QEMU device is available for a specific architecture
+qemu_device_exists() {
+    local device="$1"
+    local arch="$2"
+    local qemu_bin_path
+    
+    # Default to ppc if not specified
+    [[ -z "${arch}" ]] && arch="ppc"
+    
+    qemu_bin_path=$(qemu_bin "qemu-system-${arch}" 2>/dev/null) || return 1
+    
+    if "${qemu_bin_path}" -device help 2>/dev/null | grep -q "${device}"; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Ensure directory exists
 ensure_dir() {
     [[ -d "$1" ]] || mkdir -p "$1"
@@ -1049,6 +1067,154 @@ detect_qemu_capabilities() {
 detect_dependencies() {
     # Alias for verify_dependencies
     verify_dependencies "$@"
+}
+
+# ---------------------------------------------------------------------------
+# Package Manager Functions (MacPorts & Homebrew for macOS)
+# ---------------------------------------------------------------------------
+
+# Check if MacPorts is installed
+check_macports() {
+    if command -v port &>/dev/null; then
+        log "MacPorts is installed"
+        return 0
+    else
+        log "MacPorts is not installed"
+        return 1
+    fi
+}
+
+# Check if Homebrew is installed
+check_homebrew() {
+    if command -v brew &>/dev/null; then
+        log "Homebrew is installed"
+        return 0
+    else
+        log "Homebrew is not installed"
+        return 1
+    fi
+}
+
+# Install packages using MacPorts
+install_macports_packages() {
+    if ! check_macports; then
+        warn "MacPorts is not installed. Cannot install packages."
+        return 1
+    fi
+    
+    local packages=("$@")
+    local failed_packages=()
+    
+    log "Installing packages with MacPorts: ${packages[*]}"
+    
+    for pkg in "${packages[@]}"; do
+        if ! sudo port install "$pkg" 2>/dev/null; then
+            failed_packages+=("$pkg")
+            warn "Failed to install: $pkg"
+        else
+            log "✓ Installed: $pkg"
+        fi
+    done
+    
+    if [[ ${#failed_packages[@]} -gt 0 ]]; then
+        warn "Failed to install: ${failed_packages[*]}"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Install packages using Homebrew
+install_homebrew_packages() {
+    if ! check_homebrew; then
+        warn "Homebrew is not installed. Cannot install packages."
+        return 1
+    fi
+    
+    local packages=("$@")
+    local failed_packages=()
+    
+    log "Installing packages with Homebrew: ${packages[*]}"
+    
+    for pkg in "${packages[@]}"; do
+        if ! brew install "$pkg" 2>/dev/null; then
+            failed_packages+=("$pkg")
+            warn "Failed to install: $pkg"
+        else
+            log "✓ Installed: $pkg"
+        fi
+    done
+    
+    if [[ ${#failed_packages[@]} -gt 0 ]]; then
+        warn "Failed to install: ${failed_packages[*]}"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Install VM dependencies using available package manager
+install_vm_dependencies() {
+    heading "Installing VM Dependencies"
+    
+    local dependencies=()
+    local package_manager=""
+    
+    # Platform-specific dependencies
+    case "$(uname -s)" in
+        Darwin)
+            dependencies=("qemu" "wget" "curl" "sdl2" "pixman" "libpng" "jpeg" "glib2")
+            if check_macports; then
+                package_manager="macports"
+            elif check_homebrew; then
+                package_manager="homebrew"
+            else
+                warn "No supported package manager found (MacPorts or Homebrew)"
+                return 1
+            fi
+            ;;
+        Linux)
+            dependencies=("qemu" "wget" "curl" "libsdl2-dev" "libpixman-1-dev" "libpng-dev" "libjpeg-dev" "libglib2.0-dev")
+            package_manager="apt"  # Could be extended for other Linux distros
+            ;;
+        *)
+            warn "Unsupported platform for dependency installation"
+            return 1
+            ;;
+    esac
+    
+    case "${package_manager}" in
+        macports)
+            install_macports_packages "${dependencies[@]}"
+            ;;
+        homebrew)
+            install_homebrew_packages "${dependencies[@]}"
+            ;;
+        *)
+            warn "Package manager not supported: ${package_manager}"
+            return 1
+            ;;
+    esac
+    
+    return 0
+}
+
+# Update package manager databases
+update_package_manager() {
+    heading "Updating Package Manager"
+    
+    if check_macports; then
+        log "Updating MacPorts..."
+        sudo port selfupdate
+    elif check_homebrew; then
+        log "Updating Homebrew..."
+        brew update
+    else
+        warn "No supported package manager found"
+        return 1
+    fi
+    
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -5864,6 +6030,10 @@ show_main_menu() {
         echo "  [52] Test SSH connection"
         echo "  [53] Show QEMU command (debugging)"
         echo "  [54] VM Snapshot Management"
+        echo "  [55] Check MacPorts installation"
+        echo "  [56] Check Homebrew installation"
+        echo "  [57] Update package manager"
+        echo "  [58] Install VM dependencies"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -5926,6 +6096,10 @@ show_main_menu() {
             52) test_ssh_connection localhost 22 ;;
             53) show_qemu_command_menu ;;
             54) snapshot_menu ;;
+            55) check_macports ;;
+            56) check_homebrew ;;
+            57) update_package_manager ;;
+            58) install_vm_dependencies ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -6332,6 +6506,10 @@ Information:
   restore-config    Restore from backup
   show-command      Show QEMU command for a VM (debugging)
   snapshot          VM Snapshot Management
+  check-macports    Check if MacPorts is installed
+  check-homebrew    Check if Homebrew is installed
+  update-packages   Update MacPorts or Homebrew
+  install-deps      Install VM dependencies using package manager
   menu             Interactive menu (default)
   help             Show this help
 
@@ -6549,6 +6727,10 @@ main() {
         show-command|show-qemu-command) 
             [[ -n "${2:-}" ]] && show_qemu_command "$2" || die "Please specify VM name"
             ;;
+        check-macports) check_macports ;;
+        check-homebrew) check_homebrew ;;
+        update-packages|update-pkg) update_package_manager ;;
+        install-deps|install-dependencies) install_vm_dependencies ;;
         
         # Disk/ISO management
         disk-create|create-disk) create_disk_image ;;
