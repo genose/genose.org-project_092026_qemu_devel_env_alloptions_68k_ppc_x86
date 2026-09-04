@@ -39,7 +39,7 @@ QEMU_BUILD_DIR="${QEMU_BUILD_DIR:-${QEMU_SRC_DIR}/build}"
 # Each VM directory contains subdirectories: conf/, qcow2/, sh/, rom/
 VM_DIR="${CONFIG_DIR}/vms"
 DISK_DIR="${VM_DIR}"  # Disks are now bundled within VM directories
-ISO_DIR="${CONFIG_DIR}/isos"
+IMAGES_DIR="${CONFIG_DIR}/images"
 SHARE_DIR="${CONFIG_DIR}/shares"
 ROM_DIR="${CONFIG_DIR}/roms"
 VM_IMAGE_DIR="${VM_IMAGE_DIR:-${HOME}/vm_assistant/images}"
@@ -987,7 +987,7 @@ init_directories() {
         "${VM_CONFIG_DIR}"
         "${VM_DIR}"
         "${DISK_DIR}"
-        "${ISO_DIR}"
+        "${IMAGES_DIR}"
         "${VM_IMAGE_DIR}"
         "${VM_SHARED_DIR}"
         "${VM_LOG_DIR}"
@@ -1623,19 +1623,19 @@ create_disk() {
     log "Disk created successfully."
 }
 
-# List available ISOs
-list_isos() {
+# List available Images
+list_images() {
     local start_dir=""
     
     # Non-interactive mode: use default directory and auto-scan
     if ! is_interactive; then
-        start_dir="${ISO_DIR}"
-        heading "Available ISOs in ${start_dir}"
+        start_dir="${IMAGES_DIR}"
+        heading "Available Images in ${start_dir}"
         
         local found=0
-        local iso_dirs=("${start_dir}")
+        local image_dirs=("${start_dir}")
         
-        for dir in "${iso_dirs[@]}"; do
+        for dir in "${image_dirs[@]}"; do
             [[ -d "${dir}" ]] || continue
             log "Directory: ${dir}"
             while IFS= read -r -d '' iso_file; do
@@ -1647,8 +1647,8 @@ list_isos() {
         [[ $found -eq 0 ]] && warn "No ISOs found in ${start_dir}"
     else
         # Interactive mode: ask user for input
-        read -rp "Enter directory to scan for ISOs [${ISO_DIR}]: " start_dir
-        start_dir="${start_dir:-${ISO_DIR}}"
+        read -rp "Enter directory to scan for Images [${IMAGES_DIR}]: " start_dir
+        start_dir="${start_dir:-${IMAGES_DIR}}"
         
         # Validate directory exists and user wants to proceed
         if [[ ! -d "${start_dir}" ]]; then
@@ -1656,7 +1656,7 @@ list_isos() {
             read -rp "Do you want to navigate to another directory? (y/n) [y]: " navigate_choice
             navigate_choice="${navigate_choice:-y}"
             if [[ "${navigate_choice}" =~ ^[yY] ]]; then
-                list_isos
+                list_images
             fi
             return 1
         fi
@@ -1686,7 +1686,7 @@ list_isos() {
                 read -rp "Scan another directory? (y/n) [n]: " scan_another
                 scan_another="${scan_another:-n}"
                 if [[ "${scan_another}" =~ ^[yY] ]]; then
-                    list_isos
+                    list_images
                 fi
             fi
         else
@@ -1703,13 +1703,13 @@ select_iso() {
     
     # Non-interactive mode: use default directory
     if ! is_interactive; then
-        start_dir="${ISO_DIR}"
+        start_dir="${IMAGES_DIR}"
     else
         # Enhanced UX: Ask user which directory to start with
         log "Select ISO file for VM"
         log "------------------------"
-        read -rp "Enter directory to scan for ISOs [${ISO_DIR}]: " start_dir
-        start_dir="${start_dir:-${ISO_DIR}}"
+        read -rp "Enter directory to scan for Images [${IMAGES_DIR}]: " start_dir
+        start_dir="${start_dir:-${IMAGES_DIR}}"
     fi
     
     # Validate directory exists
@@ -2869,7 +2869,7 @@ create_and_launch_macos_10_6_ppc() {
     local iso_list=()
     while IFS= read -r -d '' iso_file; do
         iso_list+=("${iso_file}")
-    done < <(find "${ISO_DIR}" -name "*Mac*10.6*" -o -name "*Snow*Leopard*" | grep -i ".iso" | head -5 | xargs -0 find 2>/dev/null)
+    done < <(find "${IMAGES_DIR}" -name "*Mac*10.6*" -o -name "*Snow*Leopard*" | grep -i ".iso" | head -5 | xargs -0 find 2>/dev/null)
     
     if [[ ${#iso_list[@]} -gt 0 ]]; then
         echo "Available MacOS 10.6 ISOs:"
@@ -4024,8 +4024,8 @@ configure_netatalk() {
    valid users = ${current_user}
    rwlist = ${current_user}
 
-[VM_ISOs]
-   path = ${ISO_DIR}
+[VM_Images]
+   path = ${IMAGES_DIR}
    cnidscheme = dbd
    vol size limit = 0
    valid users = ${current_user}
@@ -4040,7 +4040,7 @@ EOF
     cat > "$apple_volumes" << EOF
 ${VM_SHARED_DIR} "VM RAMDISK" options:usedots,noadouble
 ${VM_DIR} "VM Disques" options:usedots,noadouble
-${ISO_DIR} "VM ISOs" options:usedots,noadouble,ro
+${IMAGES_DIR} "VM Images" options:usedots,noadouble,ro
 EOF
     
     log "Netatalk configuration created: $netatalk_config"
@@ -4200,9 +4200,9 @@ configure_samba() {
    directory mask = 0777
    force user = ${current_user}
 
-[VM_ISOs]
-   comment = VM ISOs
-   path = ${ISO_DIR}
+[VM_Images]
+   comment = VM Images
+   path = ${IMAGES_DIR}
    browsable = yes
    read only = yes
    guest ok = yes
@@ -5470,7 +5470,7 @@ test_local_share() {
     # Test 6: List all share directories
     echo ""
     echo "[6] All share directories:"
-    local all_dirs=("${VM_SHARED_DIR}" "${VM_DIR}" "${ISO_DIR}" "${ROM_DIR}")
+    local all_dirs=("${VM_SHARED_DIR}" "${VM_DIR}" "${IMAGES_DIR}" "${ROM_DIR}")
     for dir in "${all_dirs[@]}"; do
         if [[ -d "${dir}" ]]; then
             local dir_size
@@ -5535,7 +5535,7 @@ list_shares() {
     echo "=== Local Directories ==="
     
     # List all VM assistant directories
-    local all_dirs=("${VM_SHARED_DIR}" "${VM_DIR}" "${ISO_DIR}" "${ROM_DIR}" "${VM_LOG_DIR}" "${CONFIG_DIR}")
+    local all_dirs=("${VM_SHARED_DIR}" "${VM_DIR}" "${IMAGES_DIR}" "${ROM_DIR}" "${VM_LOG_DIR}" "${CONFIG_DIR}")
     for dir in "${all_dirs[@]}"; do
         if [[ -d "${dir}" ]]; then
             local dir_size
@@ -5551,7 +5551,7 @@ list_shares() {
     # List recent files in key directories
     echo ""
     echo "=== Recent Files ==="
-    for dir in "${VM_SHARED_DIR}" "${ISO_DIR}"; do
+    for dir in "${VM_SHARED_DIR}" "${IMAGES_DIR}"; do
         if [[ -d "${dir}" ]]; then
             echo "${dir}:"
             find "${dir}" -type f -name "*.iso" -o -name "*.qcow2" -o -name "*.img" 2>/dev/null | sort | tail -3 | sed 's/^/  /' || echo "  No image files found"
@@ -5571,7 +5571,7 @@ download_iso() {
     
     heading "Download ISO Image"
     
-    ensure_dir "${ISO_DIR}"
+    ensure_dir "${IMAGES_DIR}"
     
     local iso_urls=(
         "https://cdimage.debian.org/mirror/cdimage/archive/11.6.0/amd64/iso-dvd/debian-11.6.0-amd64-DVD-1.iso|Debian 11.6.0 amd64"
@@ -5612,7 +5612,7 @@ download_iso() {
         return 1
     fi
     
-    local output_file="${ISO_DIR}/${iso_name}"
+    local output_file="${IMAGES_DIR}/${iso_name}"
     
     # Check if file already exists
     if [[ -f "$output_file" ]]; then
@@ -5642,12 +5642,12 @@ download_iso() {
     return 0
 }
 
-# Detect available ISOs across multiple directories
-detect_available_isos() {
-    heading "Detecting Available ISOs"
+# Detect available Images across multiple directories
+detect_available_images() {
+    heading "Detecting Available Images"
     
     local search_dirs=(
-        "${ISO_DIR}"
+        "${IMAGES_DIR}"
         "${VM_IMAGE_DIR}"
         "${HOME}/Downloads"
         "${SCRIPT_DIR}"
@@ -8168,16 +8168,16 @@ show_main_menu() {
         echo "  [8]  Launch VM"
         echo "  [9]  Delete VM"
         echo ""
-        echo "💾 Disk & ISO Management:"
+        echo "💾 Disk & Image Management:"
         echo "  [10] Create disk image"
         echo "  [11] Convert disk image"
         echo "  [12] Resize disk image"
-        echo "  [13] List available ISOs"
-        echo "  [14] Download ISO from URL"
-        echo "  [15] Detect ISOs in all directories"
+        echo "  [13] List available Images"
+        echo "  [14] Download Image from URL"
+        echo "  [15] Detect Images in all directories"
         echo "  [16] Detect ROMs in all directories"
-        echo "  [17] Insert ISO into VM"
-        echo "  [18] Eject ISO from VM"
+        echo "  [17] Insert Image into VM"
+        echo "  [18] Eject Image from VM"
         echo ""
         echo "🍎 UTM.app Integration:"
         echo "  [19] Create UTM VM configuration"
@@ -8275,9 +8275,9 @@ show_main_menu() {
             10) create_disk_image ;;
             11) convert_disk_image ;;
             12) resize_disk_image ;;
-            13) list_isos ;;
+            13) list_images ;;
             14) download_iso ;;
-            15) detect_available_isos ;;
+            15) detect_available_images ;;
             16) detect_available_roms ;;
             17) insert_iso_menu ;;
             18) eject_iso_menu ;;
@@ -8729,13 +8729,13 @@ Platform Presets:
   openstep         Launch OpenStep x86 VM
   custom           Launch custom QEMU with any architecture
 
-ISO Management:
-  iso-list         List available ISOs
-  iso-download     Download ISO from URL
-  iso-detect      Detect ISOs in all directories
+Image Management:
+  image-list       List available Images
+  image-download   Download Image from URL
+  image-detect    Detect Images in all directories
   rom-detect      Detect ROMs in all directories
-  iso-insert <vm>  Insert ISO into VM
-  iso-eject <vm>  Eject ISO from VM
+  image-insert <vm>  Insert Image into VM
+  image-eject <vm>  Eject Image from VM
 
 Architecture Detection:
   arch-detect      Detect available QEMU architectures
@@ -8928,7 +8928,7 @@ main() {
     ensure_dir "${CONFIG_DIR}"
     ensure_dir "${VM_DIR}"
     ensure_dir "${DISK_DIR}"
-    ensure_dir "${ISO_DIR}"
+    ensure_dir "${IMAGES_DIR}"
     ensure_dir "${VM_LOG_DIR}"
     ensure_dir "${SHARE_DIR}"
     
@@ -9075,14 +9075,14 @@ main() {
         disk-create|create-disk) create_disk_image ;;
         disk-convert|convert-disk) convert_disk_image ;;
         disk-resize|resize-disk) resize_disk_image ;;
-        iso-list|list-isos) list_isos ;;
-        iso-download|download-iso) download_iso ;;
-        iso-detect|detect-isos) detect_available_isos ;;
+        image-list|list-images) list_images ;;
+        image-download|download-image) download_iso ;;
+        image-detect|detect-images) detect_available_images ;;
         rom-detect|detect-roms) detect_available_roms ;;
         arch-detect|detect-architectures) detect_available_architectures ;;
-        iso-insert|insert-iso) 
+        image-insert|insert-image) 
             [[ -n "${2:-}" ]] && insert_iso "$2" || insert_iso_menu ;;
-        iso-eject|eject-iso) 
+        image-eject|eject-image) 
             [[ -n "${2:-}" ]] && eject_iso "$2" || eject_iso_menu ;;
         
         # UTM integration
