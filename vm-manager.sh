@@ -3921,6 +3921,37 @@ test_ssh_connection() {
     fi
 }
 
+# Test GDB debug connection to a specific port
+test_gdb_connection() {
+    local host="${1:-localhost}"
+    local port="${2:-${DEFAULT_GDB_PORT}}"
+    
+    heading "Testing GDB Connection: ${host}:${port}"
+    
+    # Check if gdb or ggdb is available
+    if ! command -v gdb &>/dev/null && ! command -v ggdb &>/dev/null; then
+        warn "GDB not found. Install gdb or ggdb (GNU Debugger)."
+        return 1
+    fi
+    
+    # Check if netcat is available for port testing
+    if ! command -v nc &>/dev/null && ! command -v netcat &>/dev/null; then
+        warn "netcat not found. Install netcat for port testing."
+        return 1
+    fi
+    
+    # Test if the port is open
+    if nc -z "${host}" "${port}" 2>/dev/null; then
+        log "✓ GDB port ${port} is open and accepting connections"
+        log "✓ Connect with: gdb-multiarch -ex 'target remote ${host}:${port}'"
+        return 0
+    else
+        warn "✗ GDB port ${port} is not open or not accepting connections"
+        warn "Make sure QEMU is running with -gdb tcp::${port} flag"
+        return 1
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Backup and Restore Functions (from vm-assistant.sh)
 # ---------------------------------------------------------------------------
@@ -6196,14 +6227,15 @@ show_main_menu() {
         echo "  [50] Test Samba connection"
         echo "  [51] Test Netatalk connection"
         echo "  [52] Test SSH connection"
-        echo "  [53] Show QEMU command (debugging)"
-        echo "  [54] VM Snapshot Management"
-        echo "  [55] Check MacPorts installation"
-        echo "  [56] Check Homebrew installation"
-        echo "  [57] Update package manager"
-        echo "  [58] Install VM dependencies"
-        echo "  [59] Test local share directory"
-        echo "  [60] List all shares and directories"
+        echo "  [53] Test GDB connection"
+        echo "  [54] Show QEMU command (debugging)"
+        echo "  [55] VM Snapshot Management"
+        echo "  [56] Check MacPorts installation"
+        echo "  [57] Check Homebrew installation"
+        echo "  [58] Update package manager"
+        echo "  [59] Install VM dependencies"
+        echo "  [60] Test local share directory"
+        echo "  [61] List all shares and directories"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -6264,14 +6296,15 @@ show_main_menu() {
             50) test_samba_connection localhost VM_Shares ;;
             51) test_netatalk_connection localhost VM_Shares ;;
             52) test_ssh_connection localhost 22 ;;
-            53) show_qemu_command_menu ;;
-            54) snapshot_menu ;;
-            55) check_macports ;;
-            56) check_homebrew ;;
-            57) update_package_manager ;;
-            58) install_vm_dependencies ;;
-            59) test_local_share ;;
-            60) list_shares ;;
+            53) test_gdb_connection ;;
+            54) show_qemu_command_menu ;;
+            55) snapshot_menu ;;
+            56) check_macports ;;
+            57) check_homebrew ;;
+            58) update_package_manager ;;
+            59) install_vm_dependencies ;;
+            60) test_local_share ;;
+            61) list_shares ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -6673,6 +6706,7 @@ Information:
   test-samba        Test Samba connection with mounting
   test-netatalk    Test Netatalk connection with mounting
   test-ssh         Test SSH connection
+  test-gdb         Test GDB debug connection
   backup-config     Create backup of configurations
   list-backups      List available backups
   restore-config    Restore from backup
@@ -6894,6 +6928,7 @@ main() {
         test-samba|test-samba-connection) test_samba_connection ;;
         test-netatalk|test-netatalk-connection) test_netatalk_connection ;;
         test-ssh|test-ssh-connection) test_ssh_connection ;;
+        test-gdb|test-gdb-connection) test_gdb_connection ;;
         backup-config|backup) backup_configurations ;;
         list-backups) list_backups ;;
         restore-config|restore) 
