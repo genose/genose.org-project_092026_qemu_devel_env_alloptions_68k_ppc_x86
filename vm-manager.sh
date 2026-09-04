@@ -6170,6 +6170,618 @@ build_deploy_debug_interactive() {
 }
 
 # ---------------------------------------------------------------------------
+# GUI Application Launcher
+# ---------------------------------------------------------------------------
+
+# Launch GUI application from VM via XQuartz
+launch_gui_application() {
+    local vm_name="$1"
+    local app_path="$2"
+    local display="$3"
+    local use_xquartz="$4"
+    
+    heading "Launching GUI Application from VM: ${vm_name}"
+    
+    # Validate VM exists
+    if ! find_vm_config "$vm_name"; then
+        die "VM not found: ${vm_name}"
+    fi
+    
+    # Check if VM is running
+    if ! is_vm_running "$vm_name"; then
+        warn "VM is not running: ${vm_name}"
+        ask "Start VM now?" "yes" | grep -iq "y" && launch_vm "$vm_name" || return 1
+        
+        # Wait a bit for VM to start
+        sleep 5
+        
+        if ! is_vm_running "$vm_name"; then
+            die "Failed to start VM: ${vm_name}"
+        fi
+    fi
+    
+    # Validate application path
+    if [[ -z "$app_path" ]]; then
+        die "Application path is required"
+    fi
+    
+    # Setup XQuartz if requested
+    if is_yes "$use_xquartz" && ! configure_xquartz; then
+        warn "XQuartz configuration failed"
+        # Continue anyway, might work without explicit configuration
+    fi
+    
+    # Set display if not provided
+    if [[ -z "$display" ]]; then
+        if $USE_XDIALOG && $HAVE_XDIALOG; then
+            display=":0"
+        else
+            display=":0"
+        fi
+    fi
+    
+    log "Using display: ${display}"
+    log "Launching application: ${app_path}"
+    
+    # Get VM IP address or use hostname
+    local vm_ip=""
+    if get_vm_ip "$vm_name"; then
+        vm_ip=$(get_vm_ip "$vm_name")
+    else
+        # Try to get IP from VM config
+        local config_file="$(find_vm_config_file "$vm_name")"
+        if [[ -f "$config_file" ]]; then
+            vm_ip=$(grep -E "^IP_ADDRESS|^GUEST_IP" "$config_file" | head -1 | cut -d'=' -f2)
+        fi
+    fi
+    
+    if [[ -z "$vm_ip" ]]; then
+        # Fallback to using VM name as hostname
+        vm_ip="$vm_name"
+        log "Using VM name as hostname: ${vm_ip}"
+    else
+        log "VM IP address: ${vm_ip}"
+    fi
+    
+    # Check if we can SSH to the VM
+    if command -v ssh &>/dev/null; then
+        # Try to launch the application via SSH with X11 forwarding
+        local ssh_cmd="ssh -X ${vm_ip} 'DISPLAY=${display} ${app_path} &'"
+        log "Launching via SSH with X11 forwarding..."
+        log "Command: ${ssh_cmd}"
+        
+        if eval "$ssh_cmd"; then
+            log "✅ GUI application launched successfully"
+            return 0
+        else
+            warn "Failed to launch GUI application via SSH"
+            return 1
+        fi
+    else
+        warn "SSH not available, cannot launch GUI application remotely"
+        return 1
+    fi
+}
+
+# Launch GUI application with file selection
+launch_gui_application_interactive() {
+    if ! is_interactive; then
+        warn "launch_gui_application_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Launch GUI Application from VM"
+    
+    # List running VMs
+    log "Available VMs:"
+    list_vms
+    
+    local vm_name=$(ask "Select VM name" "")
+    if [[ -z "$vm_name" ]]; then
+        warn "VM name is required"
+        return 1
+    fi
+    
+    # Ask for application path
+    local app_path
+    if is_gui_mode; then
+        app_path=$(gui_file_selector "Select Application" "" "*.app")
+    else
+        app_path=$(ask "Enter application path in VM" "")
+    fi
+    
+    if [[ -z "$app_path" ]]; then
+        warn "Application path is required"
+        return 1
+    fi
+    
+    local use_xquartz=$(ask "Use XQuartz for display?" "yes")
+    local display=$(ask "Display to use" "$DISPLAY")
+    
+    launch_gui_application "$vm_name" "$app_path" "$display" "$use_xquartz"
+}
+
+# Configure XQuartz optimization
+configure_xquartz_optimization() {
+    heading "Configuring XQuartz Optimization"
+    
+    # Check if XQuartz is installed
+    if [[ ! -d "/Applications/Utilities/XQuartz.app" ]]; then
+        warn "XQuartz not installed"
+        log "Download XQuartz from: https://www.xquartz.org"
+        return 1
+    fi
+    
+    # Check if XQuartz is running
+    if ! pgrep -x "Xquartz" &>/dev/null; then
+        warn "XQuartz is not running"
+        log "Starting XQuartz..."
+        if open -a XQuartz; then
+            sleep 3
+        else
+            warn "Failed to start XQuartz"
+            return 1
+        fi
+    fi
+    
+    # Configure XQuartz security settings
+    if [[ -f "/etc/X11/xinit/xserverrc" ]]; then
+        log "Configuring XQuartz security..."
+        echo "allowed_users=anybody" | sudo tee /etc/X11/xinit/xserverrc >/dev/null
+        log "✅ XQuartz security configured for all users"
+    else
+        warn "XQuartz security config not found"
+    fi
+    
+    # Configure xhost for local connections
+    if xhost +local: &>/dev/null; then
+        log "✅ xhost configured for local connections"
+    else
+        warn "✗ Failed to configure xhost"
+    fi
+    
+    # Test X11 forwarding
+    local test_result
+    if xclock -display "$DISPLAY" &>/dev/null; then
+        log "✅ X11 display is working"
+        pkill xclock
+    else
+        warn "✗ X11 display test failed"
+    fi
+    
+    log "XQuartz optimization complete"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Testing Framework Integration
+# ---------------------------------------------------------------------------
+
+# Test directory structure
+TESTS_DIR="${CONFIG_DIR}/tests"
+TEST_RESULTS_DIR="${VM_LOG_DIR}/test_results"
+
+# Ensure test directories exist
+ensure_test_directories() {
+    ensure_dir "$TESTS_DIR"
+    ensure_dir "$TEST_RESULTS_DIR"
+}
+
+# Run automated tests in target VM
+run_vm_tests() {
+    local vm_name="$1"
+    local test_script="$2"
+    local test_type="$3"
+    local output_dir="$4"
+    
+    heading "Running Tests in VM: ${vm_name}"
+    
+    # Validate VM exists and is running
+    if ! find_vm_config "$vm_name"; then
+        die "VM not found: ${vm_name}"
+    fi
+    
+    if ! is_vm_running "$vm_name"; then
+        die "VM is not running: ${vm_name}"
+    fi
+    
+    ensure_test_directories
+    
+    # Set default output directory
+    [[ -n "$output_dir" ]] || output_dir="${TEST_RESULTS_DIR}/${vm_name}_$(date +%Y%m%d-%H%M%S)"
+    ensure_dir "$output_dir"
+    
+    log "Test type: ${test_type:-unit}"
+    log "Output directory: ${output_dir}"
+    
+    if [[ -z "$test_script" ]]; then
+        # Use default test script
+        test_script="${TESTS_DIR}/default_tests.sh"
+        if [[ ! -f "$test_script" ]]; then
+            warn "No test script specified and default not found"
+            return 1
+        fi
+    fi
+    
+    # Check if test script exists locally
+    if [[ -f "$test_script" ]]; then
+        # Copy test script to VM
+        log "Copying test script to VM..."
+        if ! deploy_file_to_vm "$vm_name" "$test_script" "/tmp/test_script.sh"; then
+            warn "Failed to copy test script to VM"
+            return 1
+        fi
+        
+        # Run the test script in the VM
+        log "Running test script in VM..."
+        local test_cmd="chmod +x /tmp/test_script.sh && /tmp/test_script.sh"
+        
+        if execute_in_vm "$vm_name" "$test_cmd"; then
+            log "✅ Tests completed successfully"
+        else
+            warn "❌ Tests failed"
+            return 1
+        fi
+    else
+        # Try to run command directly in VM
+        log "Running test command directly in VM..."
+        if execute_in_vm "$vm_name" "$test_script"; then
+            log "✅ Test command completed successfully"
+        else
+            warn "❌ Test command failed"
+            return 1
+        fi
+    fi
+    
+    # Collect test results
+    if [[ -d "$output_dir" ]]; then
+        log "Collecting test results..."
+        collect_test_results "$vm_name" "$output_dir"
+    fi
+    
+    return 0
+}
+
+# Execute command in VM
+execute_in_vm() {
+    local vm_name="$1"
+    local command="$2"
+    local timeout="$3"
+    
+    # Get VM IP address
+    local vm_ip
+    if get_vm_ip "$vm_name"; then
+        vm_ip=$(get_vm_ip "$vm_name")
+    else
+        # Try to get from config
+        local config_file="$(find_vm_config_file "$vm_name")"
+        if [[ -f "$config_file" ]]; then
+            vm_ip=$(grep -E "^IP_ADDRESS|^GUEST_IP" "$config_file" | head -1 | cut -d'=' -f2)
+        fi
+    fi
+    
+    if [[ -z "$vm_ip" ]]; then
+        die "Could not determine VM IP address for: ${vm_name}"
+    fi
+    
+    # Check SSH connectivity
+    if ! ssh -o ConnectTimeout=5 "${vm_ip}" "echo SSH_OK" &>/dev/null; then
+        warn "SSH connection to VM failed: ${vm_ip}"
+        return 1
+    fi
+    
+    # Execute command with timeout
+    [[ -n "$timeout" ]] || timeout=300  # 5 minutes default
+    
+    log "Executing in VM ${vm_name} [${vm_ip}]: ${command}"
+    
+    if timeout "$timeout" ssh "${vm_ip}" "$command"; then
+        return 0
+    else
+        warn "Command timed out after ${timeout} seconds"
+        return 1
+    fi
+}
+
+# Deploy file to VM
+deploy_file_to_vm() {
+    local vm_name="$1"
+    local source_file="$2"
+    local dest_path="$3"
+    
+    # Validate file exists
+    if [[ ! -f "$source_file" ]]; then
+        die "Source file not found: ${source_file}"
+    fi
+    
+    # Get VM IP
+    local vm_ip
+    if get_vm_ip "$vm_name"; then
+        vm_ip=$(get_vm_ip "$vm_name")
+    else
+        local config_file="$(find_vm_config_file "$vm_name")"
+        if [[ -f "$config_file" ]]; then
+            vm_ip=$(grep -E "^IP_ADDRESS|^GUEST_IP" "$config_file" | head -1 | cut -d'=' -f2)
+        fi
+    fi
+    
+    if [[ -z "$vm_ip" ]]; then
+        die "Could not determine VM IP address for: ${vm_name}"
+    fi
+    
+    # Use scp to copy file
+    log "Copying ${source_file} to VM ${vm_name}:${dest_path}"
+    
+    if scp -q "$source_file" "${vm_ip}:${dest_path}"; then
+        log "✅ File copied successfully"
+        return 0
+    else
+        warn "Failed to copy file to VM"
+        return 1
+    fi
+}
+
+# Collect test results from VM
+collect_test_results() {
+    local vm_name="$1"
+    local output_dir="$2"
+    
+    heading "Collecting Test Results from VM: ${vm_name}"
+    
+    ensure_dir "$output_dir"
+    
+    # Get VM IP
+    local vm_ip
+    if get_vm_ip "$vm_name"; then
+        vm_ip=$(get_vm_ip "$vm_name")
+    else
+        local config_file="$(find_vm_config_file "$vm_name")"
+        if [[ -f "$config_file" ]]; then
+            vm_ip=$(grep -E "^IP_ADDRESS|^GUEST_IP" "$config_file" | head -1 | cut -d'=' -f2)
+        fi
+    fi
+    
+    if [[ -z "$vm_ip" ]]; then
+        warn "Could not determine VM IP address for: ${vm_name}"
+        return 1
+    fi
+    
+    # Copy test results from common locations
+    local result_files=(
+        "/tmp/test_results_*.xml"
+        "/tmp/test_results_*.json"
+        "/tmp/test_output_*.txt"
+        "/tmp/test_log_*.log"
+    )
+    
+    local files_copied=0
+    
+    for pattern in "${result_files[@]}"; do
+        local files
+        if ssh "$vm_ip" "ls $pattern 2>/dev/null"; then
+            files=$(ssh "$vm_ip" "ls $pattern 2>/dev/null")
+            for file in $files; do
+                local filename=$(basename "$file")
+                if scp -q "${vm_ip}:${file}" "${output_dir}/" 2>/dev/null; then
+                    log "✓ Collected: ${filename}"
+                    files_copied=$((files_copied + 1))
+                else
+                    warn "✗ Failed to collect: ${filename}"
+                fi
+            done
+        fi
+    done
+    
+    if [[ $files_copied -eq 0 ]]; then
+        log "No test result files found in common locations"
+    else
+        log "✅ Collected ${files_copied} test result files"
+        log "Test results saved to: ${output_dir}"
+    fi
+    
+    return 0
+}
+
+# Create test configuration
+create_test_config() {
+    local test_name="$1"
+    local vm_name="$2"
+    local test_type="$3"
+    local config_file="${TESTS_DIR}/${test_name}.testcfg"
+    
+    heading "Creating Test Configuration: ${test_name}"
+    
+    ensure_test_directories
+    
+    if [[ -f "$config_file" ]]; then
+        die "Test configuration already exists: ${config_file}"
+    fi
+    
+    # Create test configuration file
+    cat > "$config_file" << EOF
+# Test Configuration: ${test_name}
+TEST_NAME=${test_name}
+VM_TARGET=${vm_name:-}
+TEST_TYPE=${test_type:-unit}
+COMMAND=
+ARGS=
+TIMEOUT=300
+RETRY_ON_FAIL=3
+OUTPUT_DIR=
+
+# Environment variables for test
+ENV_VARS=
+
+# Dependencies
+DEPENDENCIES=
+EOF
+    
+    log "✅ Test configuration created: ${config_file}"
+    log "Edit the configuration file to customize test settings"
+    return 0
+}
+
+# List test configurations
+list_test_configs() {
+    ensure_test_directories
+    
+    heading "Test Configurations"
+    
+    if [[ -d "$TESTS_DIR" ]]; then
+        local configs=()
+        local config
+        
+        for config_file in "${TESTS_DIR}"/*.testcfg; do
+            if [[ -f "$config_file" ]]; then
+                local test_name=$(grep -E "^TEST_NAME=" "$config_file" | cut -d'=' -f2)
+                local vm_target=$(grep -E "^VM_TARGET=" "$config_file" | cut -d'=' -f2)
+                local test_type=$(grep -E "^TEST_TYPE=" "$config_file" | cut -d'=' -f2)
+                
+                echo "  ✓ $(basename "$config_file" .testcfg) [${test_type:-unknown}] -> VM: ${vm_target:-any}"
+                configs+=("$(basename "$config_file")")
+            fi
+        done
+        
+        if [[ ${#configs[@]} -gt 0 ]]; then
+            local count=${#configs[@]}
+            log "Found ${count} test configurations"
+        else
+            log "No test configurations found in ${TESTS_DIR}"
+        fi
+    else
+        log "Test directory not found: ${TESTS_DIR}"
+    fi
+}
+
+# Run test configuration
+run_test_config() {
+    local config_file="$1"
+    local vm_name="$2"
+    
+    heading "Running Test Configuration: $(basename "$config_file")"
+    
+    if [[ ! -f "$config_file" ]]; then
+        die "Test configuration not found: ${config_file}"
+    fi
+    
+    # Load configuration
+    source "$config_file"
+    
+    local test_name=${TEST_NAME:-"unknown"}
+    local target_vm=${VM_TARGET:-$vm_name}
+    local test_type=${TEST_TYPE:-"unit"}
+    local command=${COMMAND:-}
+    local timeout=${TIMEOUT:-300}
+    local retry_on_fail=${RETRY_ON_FAIL:-1}
+    local output_dir=${OUTPUT_DIR:-${TEST_RESULTS_DIR}/${test_name}_$(date +%Y%m%d-%H%M%S)}
+    
+    if [[ -z "$target_vm" && -z "$vm_name" ]]; then
+        die "No target VM specified in config or as parameter"
+    fi
+    
+    [[ -n "$vm_name" ]] && target_vm="$vm_name"
+    
+    if [[ -z "$command" ]]; then
+        die "No test command specified in configuration"
+    fi
+    
+    log "Test: ${test_name}"
+    log "Target VM: ${target_vm}"
+    log "Test type: ${test_type}"
+    log "Command: ${command}"
+    log "Timeout: ${timeout}s"
+    
+    # Run the test with retries
+    local attempt=1
+    local success=0
+    
+    while [[ $attempt -le $retry_on_fail ]]; do
+        log "Test attempt ${attempt}/${retry_on_fail}"
+        
+        if run_vm_tests "$target_vm" "$command" "$test_type" "$output_dir"; then
+            success=1
+            break
+        fi
+        
+        attempt=$((attempt + 1))
+        log "Retrying in 5 seconds..."
+        sleep 5
+    done
+    
+    if [[ $success -eq 1 ]]; then
+        log "✅ Test configuration executed successfully"
+    else
+        warn "❌ Test configuration failed after ${retry_on_fail} attempts"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Create test configuration interactive
+create_test_config_interactive() {
+    if ! is_interactive; then
+        warn "create_test_config_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Create Test Configuration"
+    
+    local test_name=$(ask "Test configuration name" "")
+    if [[ -z "$test_name" ]]; then
+        warn "Test name is required"
+        return 1
+    fi
+    
+    # List VMs
+    list_vms
+    
+    local vm_name=$(ask "Target VM name (leave empty for any)" "")
+    local test_type=$(ask "Test type (unit, integration, performance, regression)" "unit")
+    
+    create_test_config "$test_name" "$vm_name" "$test_type"
+    
+    # Offer to edit the configuration
+    local config_file="${TESTS_DIR}/${test_name}.testcfg"
+    if [[ -f "$config_file" ]]; then
+        ask "Edit test configuration now?" "no" | grep -iq "y" && {
+            ${EDITOR:-nano} "$config_file"
+        }
+    fi
+}
+
+# Run test configuration interactive
+run_test_config_interactive() {
+    if ! is_interactive; then
+        warn "run_test_config_interactive function requires interactive mode"
+        return 1
+    fi
+    
+    heading "Run Test Configuration"
+    
+    # List test configurations
+    list_test_configs
+    
+    local config_file=$(ask "Select test configuration file" "")
+    if [[ -z "$config_file" ]]; then
+        warn "Test configuration file is required"
+        return 1
+    fi
+    
+    # If it's just a name, add the directory
+    if [[ "$config_file" != /* && "$config_file" != ${TESTS_DIR}/* ]]; then
+        config_file="${TESTS_DIR}/${config_file}"
+    fi
+    
+    # List VMs
+    list_vms
+    
+    local vm_name=$(ask "Target VM name (leave empty to use config default)" "")
+    
+    run_test_config "$config_file" "$vm_name"
+}
+
+# ---------------------------------------------------------------------------
 # Retro68 Toolchain Support
 # ---------------------------------------------------------------------------
 
@@ -10025,6 +10637,16 @@ show_main_menu() {
         echo "  [78] Unmount source code from VM"
         echo "  [79] List source code mounts"
         echo ""
+        echo "🎨 GUI Application Management:"
+        echo "  [90] Launch GUI application from VM"
+        echo "  [91] Configure XQuartz optimization"
+        echo ""
+        echo "🧪 Testing Framework:"
+        echo "  [92] Run tests in VM"
+        echo "  [93] Create test configuration"
+        echo "  [94] List test configurations"
+        echo "  [95] Run test configuration"
+        echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
         echo ""
@@ -10131,6 +10753,16 @@ show_main_menu() {
             82) import_vm_menu ;;
             83) monitor_menu ;;
             84) debug_session_menu ;;
+            90) launch_gui_application_interactive ;;
+            91) configure_xquartz_optimization ;;
+            92) 
+                local vm_name
+                vm_name=$(ask "Enter VM name" "")
+                [[ -n "$vm_name" ]] && run_vm_tests "$vm_name" "" "" "" || echo "VM name required"
+                ;;
+            93) create_test_config_interactive ;;
+            94) list_test_configs ;;
+            95) run_test_config_interactive ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -10607,6 +11239,16 @@ Source Code Mounting:
   mount-source    Mount source code directory to VM
   unmount-source  Unmount source code directory from VM
   list-mounts     List mounted source code directories
+
+GUI Application Management:
+  launch-gui     Launch GUI application from VM
+  xquartz-opt    Configure XQuartz optimization
+
+Testing Framework:
+  run-tests      Run tests in VM
+  create-test    Create test configuration
+  list-tests     List test configurations
+  run-test       Run test configuration
   cleanup-snapshots Cleanup old VM snapshots
   cleanup-disks    Find and remove unused disk images
   menu             Interactive menu (default)
@@ -10922,6 +11564,22 @@ main() {
             ;;
         list-mounts|mounts-list) 
             [[ -n "${2:-}" ]] && list_source_mounts "$2" || die "Usage: list-mounts <vm_name>"
+            ;;
+        
+        # GUI Application Management
+        launch-gui|gui-launch) 
+            [[ -n "${2:-}" && -n "${3:-}" ]] && launch_gui_application "$2" "$3" "$4" "$5" || die "Usage: launch-gui <vm_name> <app_path> [display] [use_xquartz]"
+            ;;
+        xquartz-opt|xquartz-optimize) configure_xquartz_optimization ;;
+        
+        # Testing Framework
+        run-tests|tests-run) 
+            [[ -n "${2:-}" ]] && run_vm_tests "$2" "$3" "$4" "$5" || die "Usage: run-tests <vm_name> [test_script] [test_type] [output_dir]"
+            ;;
+        create-test|test-create) create_test_config_interactive ;;
+        list-tests|tests-list) list_test_configs ;;
+        run-test|test-run) 
+            [[ -n "${2:-}" ]] && run_test_config "$2" "$3" || die "Usage: run-test <config_file> [vm_name]"
             ;;
         
         # Disk/ISO management
