@@ -4142,6 +4142,174 @@ test_sharing_services() {
     return 0
 }
 
+# Test local share directory functionality
+test_local_share() {
+    heading "Testing Local Share Directory"
+    
+    ensure_dir "${VM_SHARED_DIR}"
+    
+    local results=()
+    local success=true
+    
+    # Test 1: Directory exists
+    echo "[1] Directory existence..."
+    if [[ -d "${VM_SHARED_DIR}" ]]; then
+        log "✓ Share directory exists: ${VM_SHARED_DIR}"
+        results+=("✓ Share directory exists")
+    else
+        warn "✗ Share directory does not exist"
+        results+=("✗ Share directory does not exist")
+        success=false
+    fi
+    
+    # Test 2: Write permissions
+    echo ""
+    echo "[2] Write permissions..."
+    if [[ -w "${VM_SHARED_DIR}" ]]; then
+        log "✓ Write permissions: OK"
+        results+=("✓ Write permissions: OK")
+    else
+        warn "✗ Write permissions: FAILED"
+        warn "Fix with: sudo chmod u+rwx ${VM_SHARED_DIR}"
+        results+=("✗ Write permissions: FAILED")
+        success=false
+    fi
+    
+    # Test 3: Read permissions
+    echo ""
+    echo "[3] Read permissions..."
+    if [[ -r "${VM_SHARED_DIR}" ]]; then
+        log "✓ Read permissions: OK"
+        results+=("✓ Read permissions: OK")
+    else
+        warn "✗ Read permissions: FAILED"
+        warn "Fix with: sudo chmod u+rx ${VM_SHARED_DIR}"
+        results+=("✗ Read permissions: FAILED")
+        success=false
+    fi
+    
+    # Test 4: File creation
+    echo ""
+    echo "[4] File creation test..."
+    local test_file="${VM_SHARED_DIR}/.vm_test_$$"
+    if touch "${test_file}" 2>/dev/null; then
+        log "✓ File creation: OK"
+        results+=("✓ File creation: OK")
+        rm -f "${test_file}"
+    else
+        warn "✗ File creation: FAILED"
+        results+=("✗ File creation: FAILED")
+        success=false
+    fi
+    
+    # Test 5: Disk usage
+    echo ""
+    echo "[5] Disk usage..."
+    local disk_usage
+    disk_usage=$(df -h "${VM_SHARED_DIR}" 2>/dev/null | tail -1 | awk '{print $4}')
+    if [[ -n "${disk_usage}" ]]; then
+        log "Available space: ${disk_usage}"
+        results+=("✓ Available space: ${disk_usage}")
+    else
+        warn "✗ Could not determine disk usage"
+        results+=("✗ Could not determine disk usage")
+        success=false
+    fi
+    
+    # Test 6: List all share directories
+    echo ""
+    echo "[6] All share directories:"
+    local all_dirs=("${VM_SHARED_DIR}" "${VM_DIR}" "${ISO_DIR}" "${ROM_DIR}")
+    for dir in "${all_dirs[@]}"; do
+        if [[ -d "${dir}" ]]; then
+            local dir_size
+            dir_size=$(du -sh "${dir}" 2>/dev/null | cut -f1)
+            log "  ✓ ${dir} (${dir_size})"
+        else
+            warn "  ✗ ${dir} (not found)"
+            success=false
+        fi
+    done
+    
+    # Summary
+    echo ""
+    heading "Share Directory Test Summary"
+    for result in "${results[@]}"; do
+        echo "  ${result}"
+    done
+    
+    if ${success}; then
+        log "✅ All share directory tests passed"
+        return 0
+    else
+        warn "❌ Some share directory tests failed"
+        return 1
+    fi
+}
+
+# List all configured shares and directories
+list_shares() {
+    heading "List of Configured Shares and Directories"
+    
+    echo ""
+    echo "=== Network Shares (Samba/Netatalk) ==="
+    
+    # Test Samba shares
+    if command -v smbclient &>/dev/null; then
+        echo "Samba shares:"
+        if smbclient -g -L localhost 2>/dev/null | grep -E "VM_|Shares" | head -5; then
+            : # Shares were listed
+        else
+            echo "  No Samba shares found or Samba not configured"
+        fi
+    else
+        echo "  Samba client not installed"
+    fi
+    
+    echo ""
+    
+    # Test Netatalk shares
+    if command -v afpclient &>/dev/null; then
+        echo "Netatalk shares:"
+        if afpclient -l localhost 2>/dev/null | grep -v "afp" | head -5; then
+            : # Shares were listed
+        else
+            echo "  No Netatalk shares found or Netatalk not configured"
+        fi
+    else
+        echo "  Netatalk client not installed"
+    fi
+    
+    echo ""
+    echo "=== Local Directories ==="
+    
+    # List all VM assistant directories
+    local all_dirs=("${VM_SHARED_DIR}" "${VM_DIR}" "${ISO_DIR}" "${ROM_DIR}" "${VM_LOG_DIR}" "${CONFIG_DIR}")
+    for dir in "${all_dirs[@]}"; do
+        if [[ -d "${dir}" ]]; then
+            local dir_size
+            dir_size=$(du -sh "${dir}" 2>/dev/null | cut -f1)
+            local file_count
+            file_count=$(find "${dir}" -type f 2>/dev/null | wc -l)
+            echo "  ✓ ${dir} (${dir_size}, ${file_count} files)"
+        else
+            echo "  ✗ ${dir} (not found)"
+        fi
+    done
+    
+    # List recent files in key directories
+    echo ""
+    echo "=== Recent Files ==="
+    for dir in "${VM_SHARED_DIR}" "${ISO_DIR}"; do
+        if [[ -d "${dir}" ]]; then
+            echo "${dir}:"
+            find "${dir}" -type f -name "*.iso" -o -name "*.qcow2" -o -name "*.img" 2>/dev/null | sort | tail -3 | sed 's/^/  /' || echo "  No image files found"
+        fi
+    done
+    
+    return 0
+}
+
 # Download ISO from predefined URLs or custom URL
 download_iso() {
     # This function requires interactive mode
@@ -6034,6 +6202,8 @@ show_main_menu() {
         echo "  [56] Check Homebrew installation"
         echo "  [57] Update package manager"
         echo "  [58] Install VM dependencies"
+        echo "  [59] Test local share directory"
+        echo "  [60] List all shares and directories"
         echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
@@ -6100,6 +6270,8 @@ show_main_menu() {
             56) check_homebrew ;;
             57) update_package_manager ;;
             58) install_vm_dependencies ;;
+            59) test_local_share ;;
+            60) list_shares ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -6510,6 +6682,8 @@ Information:
   check-homebrew    Check if Homebrew is installed
   update-packages   Update MacPorts or Homebrew
   install-deps      Install VM dependencies using package manager
+  test-local-share  Test local share directory functionality
+  list-shares      List all configured shares and directories
   menu             Interactive menu (default)
   help             Show this help
 
@@ -6731,6 +6905,8 @@ main() {
         check-homebrew) check_homebrew ;;
         update-packages|update-pkg) update_package_manager ;;
         install-deps|install-dependencies) install_vm_dependencies ;;
+        test-local-share) test_local_share ;;
+        list-shares) list_shares ;;
         
         # Disk/ISO management
         disk-create|create-disk) create_disk_image ;;
