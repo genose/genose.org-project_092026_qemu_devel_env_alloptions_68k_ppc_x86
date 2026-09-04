@@ -7068,6 +7068,245 @@ orchestration_menu() {
     done
 }
 
+# ---------------------------------------------------------------------------
+# VM Resource Monitoring Functions
+# ---------------------------------------------------------------------------
+
+# Get resource usage for a specific VM
+monitor_vm() {
+    local vm_name="$1"
+    
+    heading "Resource Monitoring: ${vm_name}"
+    
+    # Find VM directory
+    local vm_dir=""
+    while IFS= read -r -d '' dir; do
+        if [[ -f "${dir}/${vm_name}.conf" ]]; then
+            vm_dir="${dir}"
+            break
+        fi
+    done < <(find "${CONFIG_DIR}" -type d -print0 2>/dev/null)
+    
+    [[ -d "${vm_dir}" ]] || die "VM directory not found: ${vm_name}"
+    
+    local pid_file="${vm_dir}/pid"
+    if [[ -f "${pid_file}" ]]; then
+        local pid=$(cat "${pid_file}")
+        if ps -p "${pid}" > /dev/null 2>&1; then
+            log "VM Process: PID ${pid}"
+            
+            # Get process info
+            local process_info=$(ps -p "${pid}" -o pid,ppid,cmd,%cpu,%mem,etime,start_time --no-headers 2>/dev/null)
+            if [[ -n "${process_info}" ]]; then
+                echo "Process Info: ${process_info}"
+            fi
+            
+            # Get memory usage
+            local mem_info=$(ps -p "${pid}" -o rss,vsz --no-headers 2>/dev/null)
+            if [[ -n "${mem_info}" ]]; then
+                local rss=$(echo "${mem_info}" | awk '{print $1}')
+                local vsz=$(echo "${mem_info}" | awk '{print $2}')
+                log "Memory: RSS=${rss}KB, VSZ=${vsz}KB"
+            fi
+            
+            # Get CPU usage
+            local cpu_usage=$(ps -p "${pid}" -o %cpu --no-headers 2>/dev/null)
+            if [[ -n "${cpu_usage}" ]]; then
+                log "CPU Usage: ${cpu_usage}%"
+            fi
+            
+            # Get disk usage for VM directory
+            local disk_usage=$(du -sh "${vm_dir}" 2>/dev/null | awk '{print $1}')
+            log "Disk Usage: ${disk_usage}"
+            
+            # Check for disk images
+            local disk_images=()
+            while IFS= read -r -d '' disk_file; do
+                [[ "${disk_file}" == *.qcow2 || "${disk_file}" == *.qcow || "${disk_file}" == *.raw ]] && disk_images+=("${disk_file}")
+            done < <(find "${vm_dir}/qcow2" -type f -print0 2>/dev/null)
+            
+            if [[ ${#disk_images[@]} -gt 0 ]]; then
+                log "Disk Images:"
+                for disk in "${disk_images[@]}"; do
+                    local disk_size=$(du -sh "${disk}" 2>/dev/null | awk '{print $1}')
+                    log "  - $(basename "${disk}"): ${disk_size}"
+                done
+            fi
+            
+            return 0
+        else
+            log "VM process ${pid} is not running"
+            return 1
+        fi
+    else
+        log "No PID file found - VM not running"
+        return 1
+    fi
+}
+
+# Monitor all VMs
+monitor_all_vms() {
+    heading "Resource Monitoring: All VMs"
+    
+    local vm_confs=()
+    local running_count=0
+    local stopped_count=0
+    local total_cpu=0
+    local total_mem=0
+    
+    # Find all VM configuration files
+    while IFS= read -r -d '' vm_conf; do
+        vm_confs+=("${vm_conf}")
+    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
+    
+    if [[ ${#vm_confs[@]} -eq 0 ]]; then
+        log "No VMs found"
+        return 1
+    fi
+    
+    printf "%-20s %-12s %-10s %-10s %-15s\n" "VM Name" "Status" "CPU %" "Memory" "Disk Usage"
+    echo "--------------------------------------------------------------------------------"
+    
+    for vm_conf in "${vm_confs[@]}"; do
+        [[ -f "${vm_conf}" ]] || continue
+        local vm_name=$(basename "${vm_conf}" .conf)
+        local vm_dir=$(dirname "$(dirname "${vm_conf}")")
+        local pid_file="${vm_dir}/pid"
+        
+        local status="STOPPED"
+        local cpu_percent="-"
+        local memory_kb="-"
+        local disk_usage="-"
+        
+        if [[ -f "${pid_file}" ]]; then
+            local pid=$(cat "${pid_file}")
+            if ps -p "${pid}" > /dev/null 2>&1; then
+                status="RUNNING"
+                running_count=$((running_count + 1))
+                
+                # Get CPU usage
+                cpu_percent=$(ps -p "${pid}" -o %cpu --no-headers 2>/dev/null | tr -d ' ')
+                [[ -z "${cpu_percent}" ]] && cpu_percent="0"
+                
+                # Get memory usage
+                memory_kb=$(ps -p "${pid}" -o rss --no-headers 2>/dev/null | tr -d ' ')
+                [[ -z "${memory_kb}" ]] && memory_kb="0"
+                
+                total_cpu=$((total_cpu + ${cpu_percent%.*} ))
+                total_mem=$((total_mem + memory_kb))
+            else
+                stopped_count=$((stopped_count + 1))
+            fi
+        else
+            stopped_count=$((stopped_count + 1))
+        fi
+        
+        # Get disk usage
+        disk_usage=$(du -sh "${vm_dir}" 2>/dev/null | awk '{print $1}')
+        [[ -z "${disk_usage}" ]] && disk_usage="-"
+        
+        printf "%-20s %-12s %-10s %-10s %-15s\n" "${vm_name}" "${status}" "${cpu_percent}" "${memory_kb}KB" "${disk_usage}"
+    done
+    
+    echo ""
+    log "Summary: ${running_count} running, ${stopped_count} stopped"
+    log "Total CPU: ${total_cpu}%, Total Memory: ${total_mem}KB"
+    return 0
+}
+
+# Show VM statistics
+stats_vm() {
+    local vm_name="$1"
+    monitor_vm "${vm_name}"
+}
+
+# Real-time monitoring dashboard
+monitor_dashboard() {
+    heading "Real-time VM Monitoring Dashboard"
+    
+    log "Starting real-time monitoring (Ctrl+C to stop)..."
+    log "Press any key to refresh immediately"
+    
+    # Check if watch command is available
+    if command -v watch &>/dev/null; then
+        watch -n 2 "${SCRIPT_NAME} monitor-all"
+    else
+        # Fallback: manual refresh loop
+        while true; do
+            clear
+            monitor_all_vms
+            echo ""
+            log "Refreshing in 2 seconds... (Ctrl+C to stop)"
+            sleep 2
+        done
+    fi
+}
+
+# Monitoring menu
+monitor_menu() {
+    # This function requires interactive mode
+    if ! is_interactive; then
+        warn "monitor_menu function requires interactive mode"
+        return 1
+    fi
+    
+    while true; do
+        clear || echo ""
+        heading "VM Resource Monitoring Menu"
+        echo ""
+        echo "  [1] Monitor specific VM"
+        echo "  [2] Monitor all VMs"
+        echo "  [3] Show VM statistics"
+        echo "  [4] Real-time dashboard"
+        echo ""
+        echo "  [B] Back to main menu"
+        echo ""
+        
+        choice=$(ask "Select option" "")
+        
+        case "${choice}" in
+            1) 
+                list_vms || return 1
+                vm_num=$(ask "Select VM number to monitor" "")
+                if [[ -n "$vm_num" && "$vm_num" =~ ^[0-9]+$ ]]; then
+                    local vm_confs=()
+                    while IFS= read -r -d '' vm_conf; do
+                        vm_confs+=("$vm_conf")
+                    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
+                    
+                    if [[ $vm_num -ge 1 && $vm_num -le ${#vm_confs[@]} ]]; then
+                        local selected_vm=$(basename "${vm_confs[$((vm_num-1))]}" .conf)
+                        monitor_vm "${selected_vm}"
+                    fi
+                fi
+                ;;
+            2) monitor_all_vms ;;
+            3) 
+                list_vms || return 1
+                vm_num=$(ask "Select VM number for statistics" "")
+                if [[ -n "$vm_num" && "$vm_num" =~ ^[0-9]+$ ]]; then
+                    local vm_confs=()
+                    while IFS= read -r -d '' vm_conf; do
+                        vm_confs+=("$vm_conf")
+                    done < <(find "${VM_DIR}" -path "*/conf/*.conf" -print0 2>/dev/null | sort -z)
+                    
+                    if [[ $vm_num -ge 1 && $vm_num -le ${#vm_confs[@]} ]]; then
+                        local selected_vm=$(basename "${vm_confs[$((vm_num-1))]}" .conf)
+                        stats_vm "${selected_vm}"
+                    fi
+                fi
+                ;;
+            4) monitor_dashboard ;;
+            b|B|back|Back) return 0 ;;
+            *) echo "Invalid option. Please try again." ;;
+        esac
+        
+        if is_interactive; then
+            read -rp "Press Enter to continue..." _
+        fi
+    done
+}
+
 # Create VM configuration templates
 create_vm_template() {
     # This function requires interactive mode
@@ -7956,6 +8195,7 @@ show_main_menu() {
         echo "  [25] List ROM files"
         echo "  [26] List disk images"
         echo "  [80] Multi-VM orchestration"
+        echo "  [83] VM Resource Monitoring"
         echo ""
         echo "💾 Backup & Restore:"
         echo "  [27] Create configuration backup"
@@ -8054,14 +8294,12 @@ show_main_menu() {
             29) backup_restore_menu ;;
             30) cleanup_all_snapshots ;;
             31) cleanup_unused_disks ;;
-            81) export_vm_menu ;;
-            82) import_vm_menu ;;
-            34) launch_macos_68k ;;
-            35) launch_macos_ppc ;;
-            36) launch_macos_ppc64 ;;
-            37) launch_macos_10_6_ppc ;;
-            38) create_and_launch_macos_10_6_ppc ;;
-            39) debug_macos_10_6_ppc ;;
+            32) launch_macos_68k ;;
+            33) launch_macos_ppc ;;
+            34) launch_macos_ppc64 ;;
+            35) launch_macos_10_6_ppc ;;
+            36) create_and_launch_macos_10_6_ppc ;;
+            37) debug_macos_10_6_ppc ;;
             38) launch_haiku ;;
             39) launch_linux ;;
             40) launch_atari ;;
@@ -8071,8 +8309,6 @@ show_main_menu() {
             44) launch_windows_xp ;;
             45) launch_openstep ;;
             46) launch_custom ;;
-            81) export_vm_menu ;;
-            82) import_vm_menu ;;
             69) check_retro68 ;;
             70) install_retro68 ;;
             71) setup_retro68_environment ;;
@@ -8103,6 +8339,9 @@ show_main_menu() {
             67) list_shares ;;
             68) cleanup_menu ;;
             80) orchestration_menu ;;
+            81) export_vm_menu ;;
+            82) import_vm_menu ;;
+            83) monitor_menu ;;
             q|quit|exit) exit 0 ;;
             *) echo "Invalid option. Please try again." ;;
         esac
@@ -8456,6 +8695,13 @@ Multi-VM Orchestration:
   suspend-all       Suspend all running VMs
   orchestration     Interactive orchestration menu
 
+VM Resource Monitoring:
+  monitor           Monitor all VMs
+  monitor-vm <name> Monitor specific VM
+  monitor-dashboard Start real-time monitoring dashboard
+  monitor-menu      Interactive monitoring menu
+  stats-vm <name>   Show VM resource statistics
+
 VM Export/Import:
   export <name> <out>        Export VM to QCOW2 format
   export-qcow2 <name> <out> Export VM to QCOW2 format
@@ -8734,6 +8980,15 @@ main() {
         status-all) status_all_vms ;;
         suspend-all) suspend_all_vms ;;
         orchestration|orchestrate) orchestration_menu ;;
+        
+        # VM Resource Monitoring
+        monitor) monitor_all_vms ;;
+        monitor-vm) 
+            [[ -n "${2:-}" ]] && monitor_vm "$2" || die "Please specify VM name" ;;
+        monitor-dashboard) monitor_dashboard ;;
+        monitor-menu) monitor_menu ;;
+        stats-vm|vm-stats) 
+            [[ -n "${2:-}" ]] && stats_vm "$2" || die "Please specify VM name" ;;
         
         # VM Export/Import
         export|export-vm) 
