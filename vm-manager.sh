@@ -11804,6 +11804,71 @@ test_local_share() {
     fi
 }
 
+# Check if a specific QEMU device is available
+# Usage: qemu_device_exists <device_name>
+# Returns 0 if device is available, 1 otherwise
+qemu_device_exists() {
+    local device="$1"
+    
+    [[ -n "$device" ]] || return 1
+    
+    # Try different QEMU binaries to check for device support
+    local qemu_binaries=("qemu-system-x86_64" "qemu-system-ppc" "qemu-system-ppc64" "qemu-system-arm")
+    
+    for qemu_bin in "${qemu_binaries[@]}"; do
+        if command -v "$qemu_bin" &>/dev/null; then
+            if "$qemu_bin" -device help 2>/dev/null | grep -q "$device"; then
+                return 0
+            fi
+        fi
+    done
+    
+    return 1
+}
+
+# Test GDB debug connection to a specific port
+# Usage: test_gdb_connection [host] [port]
+test_gdb_connection() {
+    local host="${1:-localhost}"
+    local port="${2:-1234}"
+    
+    # Check if GDB is available
+    if ! command -v gdb &>/dev/null && ! command -v ggdb &>/dev/null; then
+        die "GDB not found. Install gdb first."
+    fi
+    
+    # Check if the debug port is open
+    if command -v nc &>/dev/null; then
+        if nc -z "$host" "$port" 2>/dev/null; then
+            log "✅ GDB port $port is open on $host"
+            log "Connect with: gdb -ex \"target remote $host:$port\""
+            return 0
+        else
+            warn "❌ GDB port $port is not open on $host"
+            return 1
+        fi
+    else
+        # Fallback if netcat is not available
+        warn "netcat (nc) not available, cannot test connection"
+        return 1
+    fi
+}
+
+# Test if a local share directory exists and display its contents
+# Usage: test_local_share [share_path]
+test_local_share() {
+    local share_path="${1:-${VM_SHARED_DIR}}"
+    
+    if [[ -d "$share_path" ]]; then
+        log "✅ Directory exists: $share_path"
+        log "Contents:"
+        ls -la "$share_path" | head -10
+        return 0
+    else
+        die "❌ Directory not found: $share_path"
+    fi
+}
+
 # List all configured shares and directories
 list_shares() {
     heading "List of Configured Shares and Directories"
@@ -14560,7 +14625,9 @@ show_main_menu() {
         echo "  [58] Test Netatalk connection"
         echo "  [59] Test SSH connection"
         echo "  [60] Test GDB connection"
-        echo "  [61] Show QEMU command (debugging)"
+        echo "  [61] Test QEMU device"
+        echo "  [62] Test local share"
+        echo "  [63] Show QEMU command (debugging)"
         echo "  [62] VM Snapshot Management"
         echo "  [63] Check MacPorts installation"
         echo "  [64] Check Homebrew installation"
@@ -14733,13 +14800,22 @@ show_main_menu() {
             58) test_netatalk_connection localhost VM_Shares ;;
             59) test_ssh_connection localhost 22 ;;
             60) test_gdb_connection ;;
-            61) show_qemu_command_menu ;;
-            62) snapshot_menu ;;
-            63) check_macports ;;
-            64) check_homebrew ;;
-            65) update_package_manager ;;
-            66) install_vm_dependencies ;;
-            67) test_local_share ;;
+            61) 
+                local device
+                device=$(ask "Enter device name to test" "")
+                [[ -n "$device" ]] && qemu_device_exists "$device" && log "Device $device is available" || log "Device $device is not available"
+                ;;
+            62) 
+                local share_path
+                share_path=$(ask "Enter share path to test" "${VM_SHARED_DIR}")
+                [[ -n "$share_path" ]] && test_local_share "$share_path" || test_local_share
+                ;;
+            63) show_qemu_command_menu ;;
+            64) snapshot_menu ;;
+            65) check_macports ;;
+            66) check_homebrew ;;
+            67) update_package_manager ;;
+            68) install_vm_dependencies ;;
             68) list_shares ;;
             69) cleanup_menu ;;
             70) detect_cross_compilation_toolchains ;;
@@ -15371,6 +15447,8 @@ Information:
   test-netatalk    Test Netatalk connection with mounting
   test-ssh         Test SSH connection
   test-gdb         Test GDB debug connection
+  test-device      Test QEMU device availability
+  test-local-share Test local share directory
   backup-config     Create backup of configurations
   list-backups      List available backups
   restore-config    Restore from backup
@@ -15719,6 +15797,12 @@ main() {
         test-netatalk|test-netatalk-connection) test_netatalk_connection ;;
         test-ssh|test-ssh-connection) test_ssh_connection ;;
         test-gdb|test-gdb-connection) test_gdb_connection ;;
+        test-device|device-check) 
+            [[ -n "${2:-}" ]] && qemu_device_exists "${2}" && log "Device ${2} is available" || log "Device ${2:-unknown} is not available"
+            ;;
+        test-local-share) 
+            [[ -n "${2:-}" ]] && test_local_share "${2}" || test_local_share
+            ;;
         backup-config|backup) backup_configurations ;;
         list-backups) list_backups ;;
         restore-config|restore) 
