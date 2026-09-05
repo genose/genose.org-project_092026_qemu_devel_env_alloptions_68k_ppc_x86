@@ -14753,6 +14753,10 @@ show_main_menu() {
         echo "  [137] Configure SPICE options"
         echo "  [138] Create TLS certificates for SPICE"
         echo ""
+        echo "📊 VM Status Monitoring:"
+        echo "  [89] Show all VMs status"
+        echo "  [139] Show specific VM status"
+        echo ""
         echo "❌ Exit:"
         echo "  [Q]  Quit"
         echo ""
@@ -15023,6 +15027,12 @@ show_main_menu() {
                 key_path=$(ask "Enter path for TLS key" "${SPICE_CONFIG_DIR}/spice-server.key")
                 days=$(ask "Enter certificate validity in days" "365")
                 [[ -n "$cert_path" && -n "$key_path" ]] && spice_create_tls "$cert_path" "$key_path" "$days" || echo "Certificate and key paths required"
+                ;;
+            89) list_vm_status ;;
+            139) 
+                local vm_name
+                vm_name=$(ask "Enter VM name to show status" "")
+                [[ -n "$vm_name" ]] && get_vm_status "$vm_name" || echo "VM name required"
                 ;;
             
             q|quit|exit) exit 0 ;;
