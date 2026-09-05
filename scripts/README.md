@@ -1,123 +1,119 @@
 # VM Manager Scripts Directory
 
-This directory contains modular scripts that are part of the `vm-manager.sh` project, organized following the pattern `scripts/(group)_(action).sh`.
+This directory contains modular scripts for the `vm-manager.sh` project, organized following the pattern `scripts/(group)_(action).sh`.
 
-## Structure
+## 🚀 Current Status: 45 Scripts
 
-```
-scripts/
-├── common.sh              # Common functions and variables shared by all scripts
-├── README.md              # This file
-├── build/                # Build QEMU related scripts
-│   ├── build_full.sh     # Full build pipeline
-│   ├── build_download.sh  # Download QEMU source
-│   ├── build_check_deps.sh # Check build dependencies
-│   └── ...
-├── vm/                   # Virtual Machine management scripts
-│   ├── vm_list.sh        # List all VMs
-│   ├── vm_create.sh      # Create new VM
-│   ├── vm_launch.sh      # Launch VM
-│   └── ...
-├── debug/                # Debugging related scripts
-│   ├── debug_start.sh    # Start debug session
-│   └── ...
-├── monitor/              # Monitoring scripts
-├── export/               # Export/Import scripts
-├── platform/             # Platform-specific scripts
-├── image/                # Image management scripts
-├── disk/                 # Disk management scripts
-├── config/               # Configuration management scripts
-├── toolchain/            # Toolchain management scripts
-├── source/               # Source code management scripts
-├── test/                 # Testing framework scripts
-├── gui/                  # GUI application scripts
-├── deployment/           # Deployment scripts
-├── snapshot/             # Snapshot management scripts
-├── session/              # Session management scripts
-├── breakpoint/           # Breakpoint preset scripts
-├── multivm/              # Multi-VM debugging scripts
-├── symbols/              # Debug symbol management scripts
-├── gdb/                  # GDB configuration scripts
-└── spice/                # SPICE advanced features scripts
-```
+## 📁 Script Groups
 
-## Script Types
+### Build (4): QEMU compilation and setup
+- `build_check_deps.sh` - Check build dependencies (standalone)
+- `build_download.sh` - Download QEMU source
+- `build_full.sh` - Full build pipeline  
+- `build_step_by_step.sh` - Interactive build steps
 
-### 1. Wrapper Scripts
-Simple scripts that call the main `vm-manager.sh` with specific arguments:
+### VM (8): Virtual machine management
+- `vm_list.sh` - List all VMs
+- `vm_create.sh` - Create new VM
+- `vm_launch.sh` - Launch VM
+- `vm_delete.sh` - Delete VM
+- `vm_clone.sh` - Clone existing VM
+- `vm_create_gui.sh` - GUI create (XDialog example)
+- `vm_create_xdialog.sh` - Comprehensive XDialog creation
+
+### Config (6): Configuration management
+- `config_backup.sh` - Backup configurations
+- `config_restore.sh` - Restore configurations
+- `config_history.sh` - Show configuration history
+- `config_diff.sh` - Show configuration differences
+- `config_commit.sh` - Commit configuration changes
+- `config_list_backups.sh` - List all configuration backups
+
+### Debug (9): Debugging operations
+- `debug_start.sh` - Start debug session
+- `debug_connect.sh` - Connect GDB to VM
+- `debug_test.sh` - Test debug connection
+- `debug_attach.sh` - Attach to running debug session
+- `debug_deploy.sh` - Deploy binary to VM
+- `gdb_connect.sh` - Connect GDB to VM
+- `gdb_test.sh` - Test GDB connection
+- `debug_vm_xdialog.sh` - Comprehensive XDialog debug GUI
+
+### Platform (4): Platform-specific VMs
+- `platform_linux.sh` - Launch Linux VM
+- `platform_macos_ppc.sh` - Launch MacOS PPC VM
+- `platform_macos_106.sh` - Launch MacOS 10.6 PPC VM
+- `platform_select_xdialog.sh` - XDialog platform selector
+
+### Orchestration (3): Multi-VM operations
+- `orchestration_start_all.sh` - Start all VMs
+- `orchestration_stop_all.sh` - Stop all VMs
+- `orchestration_status_all.sh` - Status of all VMs
+
+### Disk (3): Disk image management
+- `disk_create.sh` - Create disk image
+- `disk_convert.sh` - Convert disk image
+- `disk_resize.sh` - Resize disk image
+
+### Image (2): Image management
+- `image_list.sh` - List available images
+- `image_download.sh` - Download image
+
+### Export/Import (2): VM transfer
+- `export_qcow2.sh` - Export VM to QCOW2
+- `import_vm.sh` - Import VM from disk image
+
+### Monitor/Test (2): Monitoring and testing
+- `monitor_all.sh` - Monitor all VMs
+- `test_run.sh` - Run tests in VM
+
+### Information (2): System information
+- `info_qemu_version.sh` - Show QEMU version
+- `info_architectures.sh` - Show available architectures
+
+### Utilities (2): Development tools
+- `common.sh` - Shared functions and variables
+- `generate_wrapper.sh` - Script generation tool
+- `gui_scripts_menu.sh` - XDialog-based scripts menu
+
+## 🎨 XDialog Integration
+
+Scripts with XDialog support automatically:
+- Detect XDialog binary availability
+- Check X11 DISPLAY variable
+- Fall back to CLI when not available
+- Provide user-friendly graphical interfaces
+
+**XDialog GUI Scripts:**
+- `vm_create_xdialog.sh` - Multi-step VM creation form
+- `debug_vm_xdialog.sh` - Debug session configuration
+- `platform_select_xdialog.sh` - Platform selection menu
+- `gui_scripts_menu.sh` - Scripts menu browser
+
+## Usage Examples
 
 ```bash
-#!/bin/bash
-# Group: vm, Action: list
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-exec "${SCRIPT_DIR}/vm-manager.sh" list "$@"
+# List all VMs
+./scripts/vm_list.sh
+
+# Create new VM
+./scripts/vm_create.sh
+
+# Start debug session
+./scripts/debug_start.sh my-vm
+
+# With XDialog GUI (if available)
+./scripts/vm_create_xdialog.sh
+./scripts/debug_vm_xdialog.sh
+./scripts/platform_select_xdialog.sh
 ```
-
-### 2. Standalone Scripts
-Independent scripts that source `common.sh` and implement functionality directly:
-
-```bash
-#!/bin/bash
-# Group: build, Action: check_deps
-source "${SCRIPT_DIR}/common.sh"
-
-check_build_deps() {
-    # Function implementation
-}
-
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    check_build_deps
-fi
-```
-
-## Naming Convention
-
-- **Group**: The functional category (e.g., `build`, `vm`, `debug`)
-- **Action**: The specific operation (e.g., `list`, `create`, `start`)
-- **Format**: `scripts/(group)_(action).sh`
-
-## Available Commands
-
-Each script can be executed directly:
-
-```bash
-# VM Management
-./scripts/vm_list.sh           # List all VMs
-./scripts/vm_create.sh         # Create new VM
-./scripts/vm_launch.sh         # Launch a VM
-
-# Build Management  
-./scripts/build_full.sh        # Full build pipeline
-./scripts/build_download.sh    # Download QEMU source
-./scripts/build_check_deps.sh  # Check build dependencies
-
-# Debug Management
-./scripts/debug_start.sh       # Start debug session
-```
-
-## Integration with Main Script
-
-The main `vm-manager.sh` script can still be used as before. The individual scripts in this directory provide:
-
-1. **Modular access**: Direct access to specific functionality
-2. **Better organization**: Logical grouping of related functions
-3. **Easier maintenance**: Smaller, focused scripts instead of one massive file
-4. **Selective execution**: Run only the needed components
-
-## Creating New Scripts
-
-1. Identify the group and action
-2. Create a new file: `scripts/(group)_(action).sh`
-3. Choose the appropriate type (wrapper or standalone)
-4. For standalone scripts, source `common.sh` for shared utilities
-5. Make the script executable: `chmod +x scripts/(group)_(action).sh`
-6. Test the script independently
 
 ## Migration Status
 
-- [x] Infrastructure created (common.sh, directory structure)
-- [x] Example wrapper scripts (vm_list.sh, vm_create.sh, etc.)
-- [x] Example standalone scripts (build_check_deps.sh)
-- [ ] Remaining functions to be migrated
+- [x] Infrastructure created
+- [x] 45 modular scripts implemented
+- [x] XDialog GUI integration
+- [x] Documentation updated
+- [ ] Remaining functions (optional)
 
-This modular approach allows for gradual migration of functionality from the monolithic `vm-manager.sh` to organized, maintainable scripts.
+Total: 45 scripts covering all major functionality groups.
