@@ -7019,13 +7019,10 @@ gui_main_menu() {
         return 0
     fi
     
-    heading "Main Menu [GUI Mode]"
+    heading "Main Menu [Full XQuartz GUI Mode]"
     
     while true; do
-        # In GUI mode, we would show a graphical menu
-        # For now, we'll use the CLI menu but with GUI enhancements
-        
-        # Show a simplified menu for GUI mode
+        # Show graphical menu using XDialog
         local options=(
             "VM Management" "gui_manage_vms"
             "Build Automation" "build_project_menu"
@@ -7037,7 +7034,19 @@ gui_main_menu() {
         
         local choice
         if is_gui_mode; then
-            choice=$(gui_inputbox "Main Menu" "Select category:" "VM Management")
+            # Use XDialog menu widget for proper GUI selection
+            choice=$(${XDIALOG_PATH} \
+                --backtitle "VM Manager - Main Menu" \
+                --title "Select Category" \
+                --menu "Choose operation category:" \
+                20 70 10 \
+                "VM Management" "Manage Virtual Machines" \
+                "Build Automation" "Build QEMU from source" \
+                "Debugging" "Debug VMs with GDB" \
+                "Testing" "Run test configurations" \
+                "GUI Applications" "Launch GUI applications" \
+                "Quit" "Exit to shell" \
+                3>&1 1>&2 2>&3) || return 0
         else
             choice=$(ask "Select category" "VM Management")
         fi
@@ -15691,15 +15700,13 @@ main() {
     fi
     detect_display_backend "${test_qemu}"
     
-    # Check if XQuartz is running and no command provided, offer GUI mode
-    if [[ -z "${1:-}" ]] && is_interactive; then
-        if pgrep -x "Xquartz" &>/dev/null; then
-            local use_gui
-            use_gui=$(ask "XQuartz is running. Use GUI mode? (yes/no)" "yes")
-            if [[ "$use_gui" == "yes" ]]; then
-                gui_mode_start
-                return 0
-            fi
+    # Offer full XQuartz interactive GUI mode when available
+    if is_interactive && pgrep -x "Xquartz" &>/dev/null; then
+        local use_gui
+        use_gui=$(ask "XQuartz is running. Switch to full XQuartz interactive GUI mode? (yes/no)" "yes")
+        if [[ "$use_gui" == "yes" ]]; then
+            gui_mode_start
+            return 0
         fi
     fi
     
