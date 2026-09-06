@@ -3210,12 +3210,12 @@ launch_macos_10_6_ppc() {
     local cpu="970fx"  # Best CPU for MacOS 10.6
     log "Using CPU: ${cpu} (recommended for MacOS 10.6)"
     
-    # SMP configuration - MacOS 10.6 supports multi-core
-    local smp_sockets=2
+    # SMP configuration - mac99 machine supports max 1 CPU
+    local smp_sockets=1
     local smp_cores=1
     local smp_threads=1
     local smp_flags="${smp_sockets},sockets=${smp_sockets},cores=${smp_cores},threads=${smp_threads}"
-    log "Using SMP: ${smp_flags}"
+    log "Using SMP: ${smp_flags} (Note: mac99 machine supports max 1 CPU)"
     
     local disk
     disk=$(pick_image "macos-106-ppc")
@@ -3243,7 +3243,7 @@ launch_macos_10_6_ppc() {
     
     # Add GDB bridge port forwarding
     local gdb_port="${DEFAULT_GDB_BRIDGE_PORT}"
-    local gdb_forward="tcp:${gdb_port}::${gdb_port}"
+    local gdb_forward="${gdb_port}:${gdb_port}"
     local combined_forwards
     combined_forwards=$(merge_csv_values "${port_forwards}" "${gdb_forward}")
     
@@ -3349,7 +3349,7 @@ create_and_launch_macos_10_6_ppc() {
     # Configuration parameters
     local ram="2048"
     local cpu="970fx"
-    local smp_sockets=2
+    local smp_sockets=1
     local smp_cores=1
     local display_backend="${DEFAULT_DISPLAY}"
     [[ "${display_backend}" == "none" ]] && display_backend="cocoa"
