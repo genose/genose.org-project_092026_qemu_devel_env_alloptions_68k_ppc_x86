@@ -1,5 +1,6 @@
 #!/bin/bash
 # GUI Scripts Menu - XDialog-based menu for scripts directory
+# Group: gui, Action: scripts_menu
 # Simple and working XDialog menu for modular scripts
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

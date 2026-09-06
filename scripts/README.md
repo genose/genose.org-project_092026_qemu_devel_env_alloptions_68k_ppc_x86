@@ -2,7 +2,7 @@
 
 This directory contains modular scripts for the `vm-manager.sh` project, organized following the pattern `scripts/(group)_(action).sh`.
 
-## 🚀 Current Status: 45 Scripts
+## 🚀 Current Status: 48+ Scripts
 
 ## 📁 Script Groups
 
@@ -12,7 +12,7 @@ This directory contains modular scripts for the `vm-manager.sh` project, organiz
 - `build_full.sh` - Full build pipeline  
 - `build_step_by_step.sh` - Interactive build steps
 
-### VM (8): Virtual machine management
+### VM (10): Virtual machine management
 - `vm_list.sh` - List all VMs
 - `vm_create.sh` - Create new VM
 - `vm_launch.sh` - Launch VM
@@ -20,6 +20,7 @@ This directory contains modular scripts for the `vm-manager.sh` project, organiz
 - `vm_clone.sh` - Clone existing VM
 - `vm_create_gui.sh` - GUI create (XDialog example)
 - `vm_create_xdialog.sh` - Comprehensive XDialog creation
+- `vm_manage_xdialog.sh` - XDialog VM management menu
 
 ### Config (6): Configuration management
 - `config_backup.sh` - Backup configurations
@@ -71,7 +72,7 @@ This directory contains modular scripts for the `vm-manager.sh` project, organiz
 - `info_qemu_version.sh` - Show QEMU version
 - `info_architectures.sh` - Show available architectures
 
-### Utilities (2): Development tools
+### Utilities (3): Development tools
 - `common.sh` - Shared functions and variables
 - `generate_wrapper.sh` - Script generation tool
 - `gui_scripts_menu.sh` - XDialog-based scripts menu
@@ -86,8 +87,11 @@ Scripts with XDialog support automatically:
 
 **XDialog GUI Scripts:**
 - `vm_create_xdialog.sh` - Multi-step VM creation form
+- `vm_create_gui.sh` - Simple XDialog VM creation
+- `vm_manage_xdialog.sh` - Comprehensive VM management menu
 - `debug_vm_xdialog.sh` - Debug session configuration
 - `platform_select_xdialog.sh` - Platform selection menu
+- `config_management_xdialog.sh` - Configuration management menu
 - `gui_scripts_menu.sh` - Scripts menu browser
 
 ## Usage Examples
@@ -106,14 +110,21 @@ Scripts with XDialog support automatically:
 ./scripts/vm_create_xdialog.sh
 ./scripts/debug_vm_xdialog.sh
 ./scripts/platform_select_xdialog.sh
+./scripts/vm_manage_xdialog.sh
+./scripts/config_management_xdialog.sh
+
+# Run test suite
+./scripts/test_all_scripts.sh
 ```
 
 ## Migration Status
 
 - [x] Infrastructure created
-- [x] 45 modular scripts implemented
-- [x] XDialog GUI integration
+- [x] 48+ modular scripts implemented
+- [x] XDialog GUI integration with comprehensive menus
+- [x] Test suite for all scripts
 - [x] Documentation updated
+- [x] XQuartz integration for automatic GUI mode detection
 - [ ] Remaining functions (optional)
 
-Total: 45 scripts covering all major functionality groups.
+Total: 48+ scripts covering all major functionality groups.
