@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PASS=0
 FAIL=0
 TOTAL=0
-SKIP_PATTERNS=("common.sh" "generate_wrapper.sh" "gui_scripts_menu.sh" "test_all_scripts.sh" "debug_vm_xdialog.sh" "platform_select_xdialog.sh" "vm_create_xdialog.sh" "vm_create_gui.sh" "vm_manage_xdialog.sh" "config_management_xdialog.sh" "build_configure.sh" "build_compile.sh" "build_install.sh" "build_patch.sh" "vm_create_template.sh")
+SKIP_PATTERNS=("common.sh" "generate_wrapper.sh" "gui_scripts_menu.sh" "test_all_scripts.sh" "debug_vm_xdialog.sh" "platform_select_xdialog.sh" "vm_create_xdialog.sh" "vm_create_gui.sh" "vm_manage_xdialog.sh" "config_management_xdialog.sh" "build_configure.sh" "build_compile.sh" "build_install.sh" "build_patch.sh" "vm_create_template.sh" "test_macos106_ppc.sh")
 
 echo "Testing VM Manager Scripts"
 echo "=========================="
