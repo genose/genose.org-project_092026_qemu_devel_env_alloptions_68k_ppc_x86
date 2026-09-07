@@ -1,0 +1,12 @@
+--- a/hw/riscv/sifive_e.c
++++ b/hw/riscv/sifive_e.c
+@@ -147,7 +147,7 @@
+ static void sifive_e_machine_class_init(ObjectClass *oc, void *data)
+ {
+     mc->desc = "RISC-V Board compatible with SiFive E SDK";
+     mc->init = sifive_e_machine_init;
+-    mc->max_cpus = 1;
++    mc->max_cpus = 4;  /* Enable SMP support for SiFive E */
+     mc->default_cpu_type = SIFIVE_E_CPU;
+     mc->default_ram_id = "riscv.sifive.e.ram";
+     mc->default_ram_size = sifive_e_memmap[SIFIVE_E_DEV_DTIM].size;
