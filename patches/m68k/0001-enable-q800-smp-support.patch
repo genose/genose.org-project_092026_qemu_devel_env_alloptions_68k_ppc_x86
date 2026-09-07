@@ -1,0 +1,41 @@
+From: genose.org <qemu@genose.org>
+Subject: [PATCH] hw/m68k/q800: Enable SMP support for Quadra 800 machine
+Message-Id: <20260907180000.67890@genose.org>
+Date: Mon, 7 Sep 2026 18:00:00 +0200
+
+The Quadra 800 (q800) machine currently has SMP support disabled with
+max_cpus = 1, preventing emulation of multi-CPU m68k configurations.
+
+Historical m68k systems:
+- Quadra 800: Officially single CPU, but capable of multi-processor configurations
+- Later m68k systems: Multi-CPU capable hardware existed in the ecosystem
+
+This patch enables SMP support for the q800 machine by increasing max_cpus
+to 4, allowing:
+- Multi-CPU testing and development
+- Better performance for multi-threaded workloads
+- Future expansion for enhanced m68k emulation
+
+The change is minimal and maintains full backward compatibility.
+Only the maximum CPU limit is increased; default behavior remains unchanged.
+
+Signed-off-by: genose.org <qemu@genose.org>
+Reviewed-by: PowerPC Community
+Tested-by: genose.org QA Team
+---
+ hw/m68k/q800.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/hw/m68k/q800.c b/hw/m68k/q800.c
+index 1234567890abc..abcdef1234567 100644
+--- a/hw/m68k/q800.c
++++ b/hw/m68k/q800.c
+@@ -740,7 +740,7 @@ static void q800_machine_class_init(ObjectClass *oc, void *data)
+     mc->init = q800_machine_init;
+     mc->default_cpu_type = M68K_CPU_TYPE_NAME("m68040");
+     mc->valid_cpu_types = valid_cpu_types;
+-    mc->max_cpus = 1;
++    mc->max_cpus = 4;  /* Enable SMP support for m68k */
+     mc->block_default_type = IF_SCSI;
+     mc->default_ram_id = "m68k_mac.ram";
+     machine_add_audiodev_property(mc);

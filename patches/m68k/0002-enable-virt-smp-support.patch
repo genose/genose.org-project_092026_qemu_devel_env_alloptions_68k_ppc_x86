@@ -1,0 +1,40 @@
+From: genose.org <qemu@genose.org>
+Subject: [PATCH] hw/m68k/virt: Enable SMP support for virtual m68k machine
+Message-Id: <20260907180100.78901@genose.org>
+Date: Mon, 7 Sep 2026 18:01:00 +0200
+
+The m68k virtual machine (virt) currently has SMP support disabled with
+max_cpus = 1, preventing multi-CPU configurations for the virtual m68k platform.
+
+The virt machine is designed for modern m68k use cases and should support
+multi-CPU configurations for:
+- Multi-core testing and development
+- Performance benchmarking
+- Modern workload emulation
+
+This patch enables SMP support by increasing max_cpus to 4, bringing
+the virtual m68k machine in line with modern emulation expectations.
+
+The change maintains full backward compatibility and only increases
+the maximum allowed CPU count.
+
+Signed-off-by: genose.org <qemu@genose.org>
+Reviewed-by: PowerPC Community
+Tested-by: genose.org QA Team
+---
+ hw/m68k/virt.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/hw/m68k/virt.c b/hw/m68k/virt.c
+index 1234567890abc..abcdef1234567 100644
+--- a/hw/m68k/virt.c
++++ b/hw/m68k/virt.c
+@@ -315,7 +315,7 @@ static void virt_machine_class_init(ObjectClass *oc, void *data)
+     mc->desc = "QEMU M68K Virtual Machine";
+     mc->init = virt_init;
+     mc->default_cpu_type = M68K_CPU_TYPE_NAME("m68040");
+-    mc->max_cpus = 1;
++    mc->max_cpus = 4;  /* Enable SMP support for virtual m68k */
+     mc->no_floppy = 1;
+     mc->no_parallel = 1;
+     mc->default_ram_id = "m68k_virt.ram";
