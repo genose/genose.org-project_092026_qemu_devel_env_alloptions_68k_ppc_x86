@@ -1446,8 +1446,8 @@ ask_m68k_cpu() {
 }
 
 ask_ppc_cpu() {
-    local default_cpu="${1:-7455}"
-    ask "PowerPC CPU (601/604/7455)" "${default_cpu}"
+    local default_cpu="${1:-970fx_v3.1}"
+    ask "PowerPC CPU (601/604/7455/7400/970/970fx/970fx_v3.1/G5)" "${default_cpu}"
 }
 
 # Ask for SMP topology
@@ -3197,8 +3197,9 @@ launch_macos_ppc64() {
 launch_macos_10_6_ppc() {
     heading "MacOS X 10.6 Snow Leopard (PPC)"
     log "Optimized configuration for Mac OS X 10.6 with dual display and debugging"
-    log "Machine: QEMU mac99 (PowerPC 970fx)"
+    log "Machine: QEMU mac99 (PowerPC 970fx) - supports dual socket with patches"
     log "Note: You need Mac OS X 10.6 Snow Leopard retail DVD ISO"
+    log "Note: For G5 dual socket: use 2 sockets, for late G4 MDD: use 2 sockets with 1 core each"
     log "Reference config: $(config_path "macos-ppc64")"
     
     local qemu
@@ -3208,15 +3209,18 @@ launch_macos_10_6_ppc() {
     local ram
     ram=$(ask_ram_size "RAM size (MiB) - recommended 2048M for 10.6" "2048")
     
-    local cpu="970fx"  # Best CPU for MacOS 10.6
-    log "Using CPU: ${cpu} (recommended for MacOS 10.6)"
+    local cpu
+    cpu=$(ask "PowerPC CPU for MacOS 10.6 (970fx/970fx_v3.1/970fx_v2.1)" "970fx")
+    log "Using CPU: ${cpu} (970fx family recommended for MacOS 10.6)"
     
-    # SMP configuration - mac99 machine supports max 1 CPU
-    local smp_sockets=1
-    local smp_cores=1
+    # SMP configuration - mac99 machine now supports up to 8 CPUs with patches
+    local smp_sockets
+    local smp_cores
+    smp_sockets=$(ask "CPU sockets for 970fx (1-2, where 2 = dual socket G5)" "2")
+    smp_cores=$(ask "Cores per socket (1-4, where 4 = quad core G5)" "1")
     local smp_threads=1
     local smp_flags="${smp_sockets},sockets=${smp_sockets},cores=${smp_cores},threads=${smp_threads}"
-    log "Using SMP: ${smp_flags} (Note: mac99 machine supports max 1 CPU)"
+    log "Using SMP: ${smp_flags} (970fx supports dual socket with patches)"
     
     local disk
     disk=$(pick_image "macos-106-ppc")
