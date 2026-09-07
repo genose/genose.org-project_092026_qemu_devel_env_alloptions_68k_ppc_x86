@@ -1822,7 +1822,7 @@ apply_patches() {
     [[ -d "${QEMU_SRC_DIR}" ]] || die "Source directory not found: ${QEMU_SRC_DIR}. Run download first."
     [[ -d "${PATCHES_DIR}" ]] || { log "No patches directory; skipping."; return 0; }
     
-    local subdirs=("general" "m68k" "ppc" "sparc")
+    local subdirs=("arm" "general" "i386" "m68k" "ppc" "sparc" "sparc64" "tricore")
     local all_patches=()
     
     for sub in "${subdirs[@]}"; do
