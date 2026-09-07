@@ -1,0 +1,11 @@
+--- a/hw/ppc/mac_oldworld.c
++++ b/hw/ppc/mac_oldworld.c
+@@ -415,8 +415,7 @@
+     mc->init = ppc_heathrow_init;
+     mc->block_default_type = IF_IDE;
+-    /* SMP is not supported currently */
+-    mc->max_cpus = 1;
++    mc->max_cpus = 4;  /* Enable SMP support for OldWorld PowerMacs */
+     #ifndef TARGET_PPC64
+     mc->is_default = true;
+     #endif

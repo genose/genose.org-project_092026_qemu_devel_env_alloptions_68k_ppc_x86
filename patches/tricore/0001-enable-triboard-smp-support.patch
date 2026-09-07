@@ -1,0 +1,11 @@
+--- a/hw/tricore/triboard.c
++++ b/hw/tricore/triboard.c
+@@ -65,7 +65,7 @@
+ static void triboard_machine_init(MachineState *ms)
+ {
+     mc->init        = triboard_machine_init;
+     mc->desc        = "Infineon AURIX TriBoard TC277 (D-Step)";
+-    mc->max_cpus    = 1;
++    mc->max_cpus    = 4;  /* Enable SMP support for TriCore */
+     amc->soc_name   = "tc277d-soc";
+ };
