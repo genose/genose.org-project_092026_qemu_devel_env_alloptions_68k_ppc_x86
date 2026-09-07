@@ -463,6 +463,57 @@ validate_display_backend() {
     return 1
 }
 
+# Check if XQuartz is running (macOS X11 server)
+check_xquartz() {
+    if [[ "$(\uname -s)" == "Darwin" ]]; then
+        if pgrep -q XQuartz; then
+            return 0
+        elif [[ -n "${DISPLAY:-}" && "${DISPLAY}" == :* ]]; then
+            return 0
+        else
+            return 1
+        fi
+    else
+        return 1
+    fi
+}
+
+# Check if XDialog is available for GUI mode
+check_xdialog() {
+    if command -v xdialog &>/dev/null && [[ -n "${DISPLAY:-}" ]]; then
+        XDIALOG_PATH=$(command -v xdialog)
+        HAVE_XDIALOG=true
+        return 0
+    else
+        HAVE_XDIALOG=false
+        XDIALOG_PATH=""
+        return 1
+    fi
+}
+
+# Prompt user to switch to XQuartz GUI mode
+prompt_gui_mode() {
+    if check_xquartz && check_xdialog; then
+        log "XQuartz and XDialog detected - GUI mode available"
+        local response
+        read -rp "Switch to full XDialog GUI mode? [y/N]: " response
+        case "${response:-N}" in
+            [yY][eE][sS]|[yY])
+                USE_XDIALOG=true
+                log "Switching to XDialog GUI mode"
+                return 0
+                ;;
+            *)
+                USE_XDIALOG=false
+                return 1
+                ;;
+        esac
+    else
+        USE_XDIALOG=false
+        return 1
+    fi
+}
+
 # Check if a QEMU device is available for a specific architecture
 qemu_device_exists() {
     local device="$1"
@@ -7069,6 +7120,28 @@ gui_main_menu() {
 }
 
 # Start XDialog-based UI
+# Check if XDialog is available
+detect_xdialog() {
+    if command -v xdialog &>/dev/null && [[ -n "${DISPLAY:-}" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Enable XDialog mode
+enable_xdialog() {
+    USE_XDIALOG=true
+    HAVE_XDIALOG=true
+    XDIALOG_PATH=$(command -v xdialog)
+    log "XDialog enabled: ${XDIALOG_PATH}"
+}
+
+# Check if GUI mode is active
+is_gui_mode() {
+    [[ "${USE_XDIALOG}" == "true" ]] && [[ "${HAVE_XDIALOG}" == "true" ]]
+}
+
 gui_mode_start() {
     heading "Starting GUI Mode"
     
