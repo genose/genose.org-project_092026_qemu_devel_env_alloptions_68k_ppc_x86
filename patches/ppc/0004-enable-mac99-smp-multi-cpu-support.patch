@@ -6,7 +6,7 @@
      mc->block_default_type = IF_IDE;
 -    /* SMP is not supported currently */
 -    mc->max_cpus = 1;
-+    mc->max_cpus = 4;  /* Allow up to 4 CPUs for mac99 */
++    mc->max_cpus = 8;  /* Support late G4 MDD (2 CPUs) and G5 (8 CPUs) */
      mc->default_boot_order = "cd";
      mc->default_display = "std";
      mc->default_nic = "sungem";
