@@ -1,0 +1,14 @@
+--- a/hw/m68k/q800.c
++++ b/hw/m68k/q800.c
+@@ -290,8 +290,8 @@ static void q800_init(MachineState *ms)
+ 
+     linux_boot = (kernel_filename != NULL);
+ 
+     if (ram_size > 1 * GiB) {
+-        error_report("Too much memory for this machine: %" PRId64 " MiB, "
+-                     "maximum 1024 MiB", ram_size / MiB);
++        error_report("Too much memory for this machine: %" PRId64 " MiB, "
++                     "maximum 4096 MiB", ram_size / MiB);
+         exit(1);
+     }
+ 

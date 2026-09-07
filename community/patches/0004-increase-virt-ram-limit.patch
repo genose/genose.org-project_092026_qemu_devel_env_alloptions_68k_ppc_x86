@@ -1,0 +1,12 @@
+--- a/hw/m68k/virt.c
++++ b/hw/m68k/virt.c
+@@ -119,8 +119,8 @@ static void virt_machine_init(MachineState *machine)
+         * The physical memory can be up to 4 GiB - 16 MiB, but linux
+         * kernel crashes after this limit (~ 3.2 GiB)
+         */
+        error_report("Too much memory for this machine: %" PRId64 " KiB, "
+-                    "maximum 3399672 KiB", ram_size / KiB);
++                    "maximum 8589934592 KiB", ram_size / KiB);  /* 8 TiB */
+        exit(1);
+     }
+ 

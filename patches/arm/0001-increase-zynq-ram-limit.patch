@@ -1,0 +1,12 @@
+--- a/hw/arm/xilinx_zynq.c
++++ b/hw/arm/xilinx_zynq.c
+@@ -107,8 +107,8 @@ static void zynq_init(MachineState *machine)
+     unsigned int smp_cpus = machine->smp.cpus;
+ 
+     /* max 2GB ram */
+     if (machine->ram_size > 2 * GiB) {
+-        error_report("RAM size more than 2 GiB is not supported");
++        error_report("RAM size more than 8 GiB is not supported");
+         exit(EXIT_FAILURE);
+     }
+ 
