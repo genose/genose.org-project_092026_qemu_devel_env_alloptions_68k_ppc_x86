@@ -19,8 +19,9 @@
 - ✅ **GDB debugging** with guest bridge forwarding
 - ✅ **ISO/ROM management** with dynamic discovery
 - ✅ **Cross-platform support** (macOS, Linux, BSD)
+- ✅ **genose.org patches** - MAC99 jailbreak (8 CPUs, 4MB ROM), SMP support for 14+ architectures
 
-**Project Status:** 🟢 **98%+ Complete** - All major features integrated and working
+**Project Status:** 🟢 **99%+ Complete** - MAC99 jailbreak completed, all patches organized, GUI mode implemented
 
 ---
 
@@ -1440,6 +1441,31 @@ DEFAULT_DISPLAY=""  # Auto-detected by default
 - **Platform Support:** ✅ **100% Complete** - All 14+ architectures working
 - **Advanced Features:** ✅ **95% Complete** - Most advanced features implemented
 - **Documentation:** ⚠️ **80% Complete** - Comprehensive docs, room for expansion
+
+---
+
+## 🚀 genose.org Quality Philosophy
+
+Following our core principle: **"The upmost can handle the best of the less"**
+
+This means we remove artificial hardware limits to elevate constrained systems to excellence.
+
+### 🎯 MAC99 Jailbreak Achievements
+
+**BEFORE (Stock QEMU):**
+- ❌ Max 1 CPU only on MAC99 machine
+- ❌ ROM size limited to 1MB (insufficient for G5 ROM files)
+- ❌ Dual socket configurations blocked
+- ❌ 970fx CPU family not optimally supported
+
+**AFTER (genose.org Enhancements):**
+- ✅ **Up to 8 CPUs** supported (G5 dual socket, quad core per socket)
+- ✅ **4MB ROM size** limit (supports 1.9MB+ firmware images)
+- ✅ **Dual socket** configurations enabled
+- ✅ **970fx family** CPU options with interactive configuration
+- ✅ **Multi-architecture** patches for 14+ platforms
+
+See [community/README.md](./community/README.md) for complete patch documentation.
 
 ---
 
