@@ -1,0 +1,11 @@
+--- a/hw/ppc/mac_newworld.c
++++ b/hw/ppc/mac_newworld.c
+@@ -85,7 +85,7 @@
+ 
+ #define PROM_FILENAME "openbios-ppc"
+ #define PROM_BASE 0xfff00000
+-#define PROM_SIZE (1 * MiB)
++#define PROM_SIZE (4 * MiB)
+ 
+ #define KERNEL_LOAD_ADDR 0x01000000
+ #define KERNEL_GAP       0x00100000

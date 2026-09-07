@@ -1,0 +1,12 @@
+--- a/hw/ppc/mac_newworld.c
++++ b/hw/ppc/mac_newworld.c
+@@ -574,8 +574,7 @@
+     mc->desc = "Mac99 based PowerMac";
+     mc->init = ppc_core99_init;
+     mc->block_default_type = IF_IDE;
+-    /* SMP is not supported currently */
+-    mc->max_cpus = 1;
++    mc->max_cpus = 4;  /* Allow up to 4 CPUs for mac99 */
+     mc->default_boot_order = "cd";
+     mc->default_display = "std";
+     mc->default_nic = "sungem";

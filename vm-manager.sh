@@ -30,6 +30,7 @@ CONFIG_DIR="${HOME}/vm_assistant"
 VM_CONFIG_DIR="${SCRIPT_DIR}/vm-configs"
 PATCHES_DIR="${SCRIPT_DIR}/patches"
 QEMU_PREFIX="${QEMU_PREFIX:-${HOME}/.local/qemu-retro}"
+QEMU_INSTALL_PREFIX="${QEMU_INSTALL_PREFIX:-${QEMU_PREFIX}}"
 QEMU_BIN_DIR="${QEMU_BIN_DIR:-${QEMU_PREFIX}/bin}"
 QEMU_SRC_DIR="${QEMU_SRC_DIR:-${SCRIPT_DIR}/qemu-9.2.0}"
 QEMU_BUILD_DIR="${QEMU_BUILD_DIR:-${QEMU_SRC_DIR}/build}"
@@ -373,7 +374,7 @@ EXTRA_CONFIG_FLAGS=(
     --enable-sdl
     --enable-gtk
     --enable-curses
-    --enable-audio-drv-list=alsa,pa,sdl,coreaudio,dsound
+    --audio-drv-list=alsa,pa,sdl,coreaudio,dsound
     --enable-bzip2
     --enable-lzo
     --enable-snappy
