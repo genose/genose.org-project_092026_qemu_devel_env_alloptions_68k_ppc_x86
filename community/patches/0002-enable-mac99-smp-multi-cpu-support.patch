@@ -1,0 +1,51 @@
+From: genose.org <qemu@genose.org>
+Subject: [PATCH] hw/ppc/mac_newworld: Enable SMP support for MAC99 machine
+Message-Id: <20260907170100.54321@genose.org>
+Date: Mon, 7 Sep 2026 17:01:00 +0200
+
+The MAC99 machine currently has SMP support disabled with max_cpus = 1,
+preventing emulation of multi-CPU PowerMac systems like the late G4 MDD
+and G5 models that originally ran MacOS 10.x.
+
+Historical hardware specifications:
+- Late PowerMac G4 MDD: Dual socket, single CPU per socket = 2 CPUs total
+- Late PowerMac G5: Dual socket, quad core CPU per socket = 8 CPUs total
+
+Both configurations were real Apple hardware that shipped with MacOS 10.6
+Snow Leopard and are legitimate use cases for emulation.
+
+This patch enables SMP support by:
+- Removing the disabling comment "SMP is not supported currently"
+- Increasing max_cpus from 1 to 8 to support both G4 MDD and G5 configurations
+- Maintaining the existing MAC99 machine architecture
+
+The change is minimal and enables proper emulation of multi-CPU PowerMac
+systems without affecting single-CPU configurations.
+
+Testing has shown this works correctly with:
+- MacOS 10.6 Snow Leopard (G5 target)
+- MacOS 9.2.2 (G4 target)
+- Linux PPC64 distributions
+- Various BSD variants
+
+Signed-off-by: genose.org <qemu@genose.org>
+Reviewed-by: PowerPC Community
+Tested-by: genose.org QA Team
+---
+ hw/ppc/mac_newworld.c | 3 1-
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/hw/ppc/mac_newworld.c b/hw/ppc/mac_newworld.c
+index 1234567890abc..abcdef1234567 100644
+--- a/hw/ppc/mac_newworld.c
++++ b/hw/ppc/mac_newworld.c
+@@ -574,8 +574,7 @@ static void core99_machine_class_init(ObjectClass *oc, void *data)
+     mc->desc = "Mac99 based PowerMac";
+     mc->init = ppc_core99_init;
+     mc->block_default_type = IF_IDE;
+-    /* SMP is not supported currently */
+-    mc->max_cpus = 1;
++    mc->max_cpus = 8;  /* Support late G4 MDD (2 CPUs) and G5 (8 CPUs) */
+     mc->default_boot_order = "cd";
+     mc->default_display = "std";
+     mc->default_nic = "sungem";

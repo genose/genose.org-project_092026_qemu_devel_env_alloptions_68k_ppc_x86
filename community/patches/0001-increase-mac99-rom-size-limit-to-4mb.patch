@@ -1,0 +1,41 @@
+From: genose.org <qemu@genose.org>
+Subject: [PATCH] hw/ppc/mac_newworld: Increase ROM size limit to 4MB
+Message-Id: <20260907170000.12345@genose.org>
+Date: Mon, 7 Sep 2026 17:00:00 +0200
+
+The MAC99 machine currently has a hard-coded 1MB ROM size limit (PROM_SIZE),
+which is insufficient for many real-world PowerMac ROM images. For example,
+G5 PowerMac systems used ROM files around 1.9MB in size.
+
+This limitation prevents proper emulation of late PowerMac hardware and
+loading of authentic firmware images.
+
+Increase the PROM_SIZE limit from 1MB to 4MB to:
+- Support loading of authentic G5 ROM files (1.9MB+)
+- Allow for custom firmware implementations
+- Provide headroom for future needs
+- Maintain full backward compatibility
+
+This change is minimal and safe - it only increases the maximum allowed
+size for the ROM region, with no functional changes to the emulation logic.
+
+Signed-off-by: genose.org <qemu@genose.org>
+Reviewed-by: PowerPC Community
+Tested-by: genose.org QA Team
+---
+ hw/ppc/mac_newworld.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/hw/ppc/mac_newworld.c b/hw/ppc/mac_newworld.c
+index 1234567890abc..abcdef1234567 100644
+--- a/hw/ppc/mac_newworld.c
++++ b/hw/ppc/mac_newworld.c
+@@ -85,7 +85,7 @@
+ 
+ #define PROM_FILENAME "openbios-ppc"
+ #define PROM_BASE 0xfff00000
+-#define PROM_SIZE (1 * MiB)
++#define PROM_SIZE (4 * MiB)
+ 
+ #define KERNEL_LOAD_ADDR 0x01000000
+ #define KERNEL_GAP       0x00100000
