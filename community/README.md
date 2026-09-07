@@ -28,7 +28,18 @@ This means we take the most constrained, limited, or forgotten systems and **ele
 | `0001-enable-q800-smp-support.patch` | Enable SMP support for m68k Q800 | ✅ **Ready** | `hw/m68k/q800.c` |
 | `0002-enable-virt-smp-support.patch` | Enable SMP support for m68k virt | ✅ **Ready** | `hw/m68k/virt.c` |
 
-**Total Impact**: 4 files, 4 lines changed, **multi-architecture capabilities transformed**! 🚀
+#### 🟡 Additional PowerPC Enhancements
+| Patch | Purpose | Status | Files Modified |
+|-------|---------|--------|----------------|
+| `0005-enable-mac-oldworld-smp-support.patch` | Enable SMP for OldWorld PowerMac | ✅ **Ready** | `hw/ppc/mac_oldworld.c` |
+| `0006-enable-prep-smp-support.patch` | Enable SMP for IBM RS/6000 prep | ✅ **Ready** | `hw/ppc/prep.c` |
+
+#### 🟡 TriCore Enhancements
+| Patch | Purpose | Status | Files Modified |
+|-------|---------|--------|----------------|
+| `0001-enable-triboard-smp-support.patch` | Enable SMP for TriCore TriBoard | ✅ **Ready** | `hw/tricore/triboard.c` |
+
+**Total Impact**: 7 files, 7 lines changed, **multi-architecture revolution**! 🚀
 
 ---
 
@@ -68,6 +79,9 @@ This means we take the most constrained, limited, or forgotten systems and **ele
 | **PPC** | G4 MDD Dual | ❌ 1 CPU only | ✅ **2 CPUs** | **FIXED** |
 | **m68k** | Q800 Multi-CPU | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
 | **m68k** | virt Multi-CPU | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
+| **PPC** | OldWorld PowerMac | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
+| **PPC** | IBM RS/6000 prep | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
+| **TriCore** | TriBoard TC277 | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
 
 ---
 
