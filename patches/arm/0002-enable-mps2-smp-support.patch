@@ -1,0 +1,12 @@
+--- a/hw/arm/mps2.c
++++ b/hw/arm/mps2.c
+@@ -470,7 +470,7 @@ static void mps2_common_class_init(ObjectClass *oc, void *data)
+ {
+     MachineClass *mc = MACHINE_CLASS(oc);
+ 
+     mc->init = mps2_common_init;
+-    mc->max_cpus = 1;
++    mc->max_cpus = 4;  /* Enable SMP support for MPS2 */
+     mc->default_ram_size = 16 * MiB;
+     mc->default_ram_id = "mps.ram";
+ }

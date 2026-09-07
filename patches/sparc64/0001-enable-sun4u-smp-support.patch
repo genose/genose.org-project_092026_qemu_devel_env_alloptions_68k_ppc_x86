@@ -1,0 +1,22 @@
+--- a/hw/sparc64/sun4u.c
++++ b/hw/sparc64/sun4u.c
+@@ -808,7 +808,7 @@ static void sun4u_machine_class_init(ObjectClass *oc, void *data)
+ {
+     mc->desc = "Sun4u platform";
+     mc->init = sun4u_init;
+     mc->block_default_type = IF_IDE;
+-    mc->max_cpus = 1; /* XXX for now */
++    mc->max_cpus = 8;  /* Enable SMP support for Sun4u */
+     mc->is_default = true;
+     mc->default_boot_order = "c";
+     mc->default_cpu_type = SPARC_CPU_TYPE_NAME("TI-UltraSparc-IIi");
+@@ -837,7 +837,7 @@ static void sun4v_machine_class_init(ObjectClass *oc, void *data)
+ {
+     mc->desc = "Sun4v platform";
+     mc->init = sun4v_init;
+     mc->block_default_type = IF_IDE;
+-    mc->max_cpus = 1; /* XXX for now */
++    mc->max_cpus = 8;  /* Enable SMP support for Sun4v */
+     mc->default_boot_order = "c";
+     mc->default_cpu_type = SPARC_CPU_TYPE_NAME("Sun-UltraSparc-T1");
+ }

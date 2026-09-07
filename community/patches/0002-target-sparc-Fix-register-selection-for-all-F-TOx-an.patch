@@ -1,0 +1,50 @@
+From 5afb837e3cad49d7cff5e9b46589686a053bee61 Mon Sep 17 00:00:00 2001
+From: Mikael Szreder <git@miszr.win>
+Date: Wed, 5 Feb 2025 10:03:32 +0100
+Subject: [PATCH] target/sparc: Fix register selection for all F*TOx and FxTO*
+ instructions
+
+A bug was introduced in commit 0bba7572d40d which causes the fdtox
+and fqtox instructions to incorrectly select the destination registers.
+More information and a test program can be found in issue #2802.
+
+Cc: qemu-stable@nongnu.org
+Fixes: 0bba7572d40d ("target/sparc: Perform DFPREG/QFPREG in decodetree")
+Resolves: https://gitlab.com/qemu-project/qemu/-/issues/2802
+Signed-off-by: Mikael Szreder <git@miszr.win>
+Acked-by: Artyom Tarasenko <atar4qemu@gmail.com>
+[rth: Squash patches together, since the second fixes a typo in the first.]
+Signed-off-by: Richard Henderson <richard.henderson@linaro.org>
+Message-ID: <20250205090333.19626-3-git@miszr.win>
+(cherry picked from commit 807c3ebd1e3fc2a1be6cdfc702ccea3fa0d2d9b2)
+Signed-off-by: Michael Tokarev <mjt@tls.msk.ru>
+---
+ target/sparc/insns.decode | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/target/sparc/insns.decode b/target/sparc/insns.decode
+index 989c20b4..cfcdf669 100644
+--- a/target/sparc/insns.decode
++++ b/target/sparc/insns.decode
+@@ -321,12 +321,12 @@ FdMULq      10 ..... 110100 ..... 0 0110 1110 .....        @q_d_d
+ FNHADDs     10 ..... 110100 ..... 0 0111 0001 .....        @r_r_r
+ FNHADDd     10 ..... 110100 ..... 0 0111 0010 .....        @d_d_d
+ FNsMULd     10 ..... 110100 ..... 0 0111 1001 .....        @d_r_r
+-FsTOx       10 ..... 110100 00000 0 1000 0001 .....        @r_r2
+-FdTOx       10 ..... 110100 00000 0 1000 0010 .....        @r_d2
+-FqTOx       10 ..... 110100 00000 0 1000 0011 .....        @r_q2
+-FxTOs       10 ..... 110100 00000 0 1000 0100 .....        @r_r2
+-FxTOd       10 ..... 110100 00000 0 1000 1000 .....        @d_r2
+-FxTOq       10 ..... 110100 00000 0 1000 1100 .....        @q_r2
++FsTOx       10 ..... 110100 00000 0 1000 0001 .....        @d_r2
++FdTOx       10 ..... 110100 00000 0 1000 0010 .....        @d_d2
++FqTOx       10 ..... 110100 00000 0 1000 0011 .....        @d_q2
++FxTOs       10 ..... 110100 00000 0 1000 0100 .....        @r_d2
++FxTOd       10 ..... 110100 00000 0 1000 1000 .....        @d_d2
++FxTOq       10 ..... 110100 00000 0 1000 1100 .....        @q_d2
+ FiTOs       10 ..... 110100 00000 0 1100 0100 .....        @r_r2
+ FdTOs       10 ..... 110100 00000 0 1100 0110 .....        @r_d2
+ FqTOs       10 ..... 110100 00000 0 1100 0111 .....        @r_q2
+-- 
+2.54.0
+

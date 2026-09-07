@@ -44,11 +44,24 @@ This means we take the most constrained, limited, or forgotten systems and **ele
 |-------|---------|--------|----------------|
 | `0001-increase-zynq-ram-limit.patch` | Increase Zynq RAM from 2GB to 8GB | ✅ **Ready** | `hw/arm/xilinx_zynq.c` |
 | `0002-enable-mps2-smp-support.patch` | Enable SMP for MPS2 | ✅ **Ready** | `hw/arm/mps2.c` |
+| `0003-enable-microbit-smp-support.patch` | Enable SMP for BBC micro:bit | ✅ **Ready** | `hw/arm/microbit.c` |
 
 #### 🟡 x86 Enhancements
 | Patch | Purpose | Status | Files Modified |
 |-------|---------|--------|----------------|
 | `0001-enable-isapc-smp-support.patch` | Enable SMP for ISA-only PC | ✅ **Ready** | `hw/i386/pc_piix.c` |
+
+#### 🟡 RISC-V Enhancements
+| Patch | Purpose | Status | Files Modified |
+|-------|---------|--------|----------------|
+| `0001-enable-sifive_e-smp-support.patch` | Enable SMP for SiFive E | ✅ **Ready** | `hw/riscv/sifive_e.c` |
+| `0002-enable-opentitan-smp-support.patch` | Enable SMP for OpenTitan | ✅ **Ready** | `hw/riscv/opentitan.c` |
+
+#### 🟡 SPARC Enhancements
+| Patch | Purpose | Status | Files Modified |
+|-------|---------|--------|----------------|
+| `0001-target-sparc-Fix-gdbstub-incorrectly-handling-regist.patch` | Fix gdbstub register handling | ✅ **Ready** | `hw/sparc/gdbstub.c` |
+| `0002-target-sparc-Fix-register-selection-for-all-F-TOx-an.patch` | Fix register selection for F, TOx, ASI | ✅ **Ready** | `hw/sparc/gdbstub.c` |
 
 #### 🟡 SPARC64 Enhancements
 | Patch | Purpose | Status | Files Modified |
@@ -68,7 +81,7 @@ This means we take the most constrained, limited, or forgotten systems and **ele
 | `0003-increase-q800-ram-limit.patch` | Increase q800 RAM from 1GB to 4GB | ✅ **Ready** | `hw/m68k/q800.c` |
 | `0004-increase-virt-ram-limit.patch` | Increase virt RAM from ~3.2GB to 8 TiB | ✅ **Ready** | `hw/m68k/virt.c` |
 
-**Total Impact**: 14 files, 14 lines changed, **UNIVERSAL ARCHITECTURE REVOLUTION**! 🚀
+**Total Impact**: 20+ files, 20+ lines changed, **UNIVERSAL ARCHITECTURE REVOLUTION**! 🚀
 
 ---
 
@@ -120,6 +133,10 @@ This means we take the most constrained, limited, or forgotten systems and **ele
 | **PPC** | IBM RS/6000 prep | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
 | **m68k** | q800 RAM | ❌ 1GB limit | ✅ **4GB limit** | **FIXED** |
 | **m68k** | virt RAM | ❌ ~3.2GB limit | ✅ **8 TiB limit** | **FIXED** |
+| **ARM** | micro:bit | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
+| **RISC-V** | SiFive E | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
+| **RISC-V** | OpenTitan | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
+| **SPARC** | gdbstub fixes | ❌ Broken debugging | ✅ **Fixed** | **FIXED** |
 
 ---
 
@@ -131,11 +148,30 @@ curl -LO https://download.qemu.org/qemu-9.2.0.tar.xz
 tar -xf qemu-9.2.0.tar.xz
 cd qemu-9.2.0
 
-# Apply genose.org patches
+# Apply genose.org patches (complete collection)
 curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0001-increase-mac99-rom-size-limit-to-4mb.patch
 curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0002-enable-mac99-smp-multi-cpu-support.patch
 curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0001-enable-q800-smp-support.patch
 curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0002-enable-virt-smp-support.patch
+curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0003-increase-q800-ram-limit.patch
+curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0004-increase-virt-ram-limit.patch
+
+# PowerPC patches
+curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0005-enable-mac-oldworld-smp-support.patch
+curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0006-enable-prep-smp-support.patch
+
+# ARM patches
+curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0001-increase-zynq-ram-limit.patch
+curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0002-enable-mps2-smp-support.patch
+curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0003-enable-microbit-smp-support.patch
+
+# x86, SPARC, RISC-V, TriCore patches
+curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0001-enable-isapc-smp-support.patch
+curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0001-enable-sun4u-smp-support.patch
+curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0002-enable-niagara-smp-support.patch
+curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0001-enable-sifive_e-smp-support.patch
+curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0002-enable-opentitan-smp-support.patch
+curl -LO https://github.com/genose/genose.org-project_092026_qemu_devel_env_alloptions_68k_ppc_x86/raw/main/community/patches/0001-enable-triboard-smp-support.patch
 
 # Apply patches
 git apply *.patch

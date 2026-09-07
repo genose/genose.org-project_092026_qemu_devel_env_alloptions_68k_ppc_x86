@@ -1,0 +1,11 @@
+--- a/hw/i386/pc_piix.c
++++ b/hw/i386/pc_piix.c
+@@ -790,7 +790,7 @@ static void isapc_machine_options(MachineClass *m)
+ {
+     PCMachineClass *pcmc = PC_MACHINE_CLASS(m);
+     m->desc = "ISA-only PC";
+-    m->max_cpus = 1;
++    m->max_cpus = 4;  /* Enable SMP support for ISA-only PC */
+     m->option_rom_has_mr = true;
+     m->rom_file_has_mr = false;
+     pcmc->pci_enabled = false;
