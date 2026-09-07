@@ -39,7 +39,36 @@ This means we take the most constrained, limited, or forgotten systems and **ele
 |-------|---------|--------|----------------|
 | `0001-enable-triboard-smp-support.patch` | Enable SMP for TriCore TriBoard | ✅ **Ready** | `hw/tricore/triboard.c` |
 
-**Total Impact**: 7 files, 7 lines changed, **multi-architecture revolution**! 🚀
+#### 🟡 ARM Enhancements
+| Patch | Purpose | Status | Files Modified |
+|-------|---------|--------|----------------|
+| `0001-increase-zynq-ram-limit.patch` | Increase Zynq RAM from 2GB to 8GB | ✅ **Ready** | `hw/arm/xilinx_zynq.c` |
+| `0002-enable-mps2-smp-support.patch` | Enable SMP for MPS2 | ✅ **Ready** | `hw/arm/mps2.c` |
+
+#### 🟡 x86 Enhancements
+| Patch | Purpose | Status | Files Modified |
+|-------|---------|--------|----------------|
+| `0001-enable-isapc-smp-support.patch` | Enable SMP for ISA-only PC | ✅ **Ready** | `hw/i386/pc_piix.c` |
+
+#### 🟡 SPARC64 Enhancements
+| Patch | Purpose | Status | Files Modified |
+|-------|---------|--------|----------------|
+| `0001-enable-sun4u-smp-support.patch` | Enable SMP for sun4u/sun4v | ✅ **Ready** | `hw/sparc64/sun4u.c` |
+| `0002-enable-niagara-smp-support.patch` | Enable SMP for Niagara | ✅ **Ready** | `hw/sparc64/niagara.c` |
+
+#### 🟡 Additional PowerPC Enhancements
+| Patch | Purpose | Status | Files Modified |
+|-------|---------|--------|----------------|
+| `0005-enable-mac-oldworld-smp-support.patch` | Enable SMP for OldWorld PowerMac | ✅ **Ready** | `hw/ppc/mac_oldworld.c` |
+| `0006-enable-prep-smp-support.patch` | Enable SMP for IBM RS/6000 prep | ✅ **Ready** | `hw/ppc/prep.c` |
+
+#### 🟡 Additional m68k Enhancements
+| Patch | Purpose | Status | Files Modified |
+|-------|---------|--------|----------------|
+| `0003-increase-q800-ram-limit.patch` | Increase q800 RAM from 1GB to 4GB | ✅ **Ready** | `hw/m68k/q800.c` |
+| `0004-increase-virt-ram-limit.patch` | Increase virt RAM from ~3.2GB to 8 TiB | ✅ **Ready** | `hw/m68k/virt.c` |
+
+**Total Impact**: 14 files, 14 lines changed, **UNIVERSAL ARCHITECTURE REVOLUTION**! 🚀
 
 ---
 
@@ -82,6 +111,15 @@ This means we take the most constrained, limited, or forgotten systems and **ele
 | **PPC** | OldWorld PowerMac | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
 | **PPC** | IBM RS/6000 prep | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
 | **TriCore** | TriBoard TC277 | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
+| **ARM** | Zynq RAM | ❌ 2GB limit | ✅ **8GB limit** | **FIXED** |
+| **ARM** | MPS2 Multi-CPU | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
+| **x86** | ISA-only PC | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
+| **SPARC64** | sun4u/sun4v | ❌ 1 CPU only | ✅ **8 CPUs** | **FIXED** |
+| **SPARC64** | Niagara | ❌ 1 CPU only | ✅ **8 CPUs** | **FIXED** |
+| **PPC** | OldWorld PowerMac | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
+| **PPC** | IBM RS/6000 prep | ❌ 1 CPU only | ✅ **4 CPUs** | **FIXED** |
+| **m68k** | q800 RAM | ❌ 1GB limit | ✅ **4GB limit** | **FIXED** |
+| **m68k** | virt RAM | ❌ ~3.2GB limit | ✅ **8 TiB limit** | **FIXED** |
 
 ---
 
