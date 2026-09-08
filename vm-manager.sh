@@ -3149,7 +3149,7 @@ launch_macos_ppc() {
 
     local cmd=(
         "${qemu}"
-        -machine mac99,via=pmu
+        -machine mac99
         -m "${ram}"
         -cpu "${cpu}"
         -smp "${smp_flags}"
@@ -3217,7 +3217,7 @@ launch_macos_ppc64() {
 
     local cmd=(
         "${qemu}"
-        -machine mac99,via=pmu
+        -machine mac99
         -m "${ram}"
         -cpu "${cpu}"
         -smp "${smp_flags}"
@@ -3318,9 +3318,11 @@ launch_macos_10_6_ppc() {
     local -a dbgflags; qemu_gdb_flags dbgflags
     
     # Build QEMU command
+    # Note: For MacOS 10.6 on mac99, avoid via=pmu as it can cause IDE attachment issues
+    # Remove via=pmu from machine specification for better compatibility
     local cmd=(
         "${qemu}"
-        -machine mac99,via=pmu
+        -machine mac99
         -m "${ram}"
         -cpu "${cpu}"
         -smp "${smp_flags}"
@@ -3340,18 +3342,15 @@ launch_macos_10_6_ppc() {
     append_firmware_attachment cmd "${firmware_path}" "${firmware_mode}" "Mac ROM"
     
     # Add disk and CDROM
+    # Note: -hda and -cdrom automatically create and attach IDE devices on mac99
+    # The redundant -device ide-hd/ide-cd commands were removed as they created
+    # unattached devices that prevented the guest from initializing the display
     if [[ -n "${disk}" ]]; then
         cmd+=(-hda "${disk}")
     fi
     if [[ -n "${cdrom}" ]]; then
         cmd+=(-cdrom "${cdrom}" -boot d)
     fi
-    
-    # Additional optimizations for MacOS 10.6
-    cmd+=(
-        -device ide-hd,bus=ide.0,unit=0
-        -device ide-cd,bus=ide.1,unit=0
-    )
 
     log "MacOS 10.6 PPC Configuration:"
     log "  CPU: ${cpu}"
@@ -3465,7 +3464,8 @@ create_and_launch_macos_10_6_ppc() {
 QEMU_BIN=qemu-system-ppc64
 
 # Machine/CPU
-MACHINE=mac99,via=pmu
+# Note: Removed via=pmu for better IDE compatibility with MacOS 10.6
+MACHINE=mac99
 CPU=${cpu}
 RAM_MB=${ram}
 SMP_SOCKETS=${smp_sockets}
@@ -3517,10 +3517,11 @@ if [[ -f "${CONFIG_FILE}" ]]; then
 fi
 
 # Build QEMU command
+# Note: Using mac99 without via=pmu for better MacOS 10.6 compatibility
 QEMU="${QEMU_BIN:-qemu-system-ppc64}"
 CMD=(
     "${QEMU}"
-    -machine "${MACHINE:-mac99,via=pmu}"
+    -machine "${MACHINE:-mac99}"
     -m "${RAM_MB:-2048}"
     -cpu "${CPU:-970fx}"
     -smp "${SMP_SOCKETS:-2},sockets=${SMP_SOCKETS:-2},cores=${SMP_CORES:-1},threads=${SMP_THREADS:-1}"
@@ -3619,7 +3620,7 @@ debug_macos_10_6_ppc() {
     log "Debug Configuration for MacOS 10.6 PPC:"
     log "  VM Name: ${vm_name}"
     log "  QEMU Binary: ${qemu}"
-    log "  Machine: ${MACHINE:-mac99,via=pmu}"
+    log "  Machine: ${MACHINE:-mac99}"
     log "  CPU: ${CPU:-970fx}"
     log "  RAM: ${RAM_MB:-2048} MB"
     log "  Display: ${DISPLAY_BACKEND:-cocoa}"
@@ -3658,7 +3659,7 @@ debug_macos_10_6_ppc() {
     # Build enhanced debug command
     local cmd=(
         "${qemu}"
-        -machine "${MACHINE:-mac99,via=pmu}"
+        -machine "${MACHINE:-mac99}"
         -m "${RAM_MB:-2048}"
         -cpu "${CPU:-970fx}"
         -smp "${SMP_SOCKETS:-2},sockets=${SMP_SOCKETS:-2},cores=${SMP_CORES:-1},threads=${SMP_THREADS:-1}"
@@ -13830,7 +13831,7 @@ create_vm_template() {
             cat > "${template_file}" << EOF
 # MacOS 9 Template (PPC)
 QEMU_BIN=qemu-system-ppc
-MACHINE=mac99,via=pmu
+MACHINE=mac99
 CPU=7455
 RAM_MB=512
 DISPLAY_BACKEND=cocoa
@@ -13845,7 +13846,7 @@ EOF
             cat > "${template_file}" << EOF
 # MacOS X 10.4 Tiger Template (PPC64)
 QEMU_BIN=qemu-system-ppc64
-MACHINE=mac99,via=pmu
+MACHINE=mac99
 CPU=970fx
 RAM_MB=1024
 DISPLAY_BACKEND=cocoa
@@ -13860,7 +13861,7 @@ EOF
             cat > "${template_file}" << EOF
 # MacOS X 10.5 Leopard Template (PPC64)
 QEMU_BIN=qemu-system-ppc64
-MACHINE=mac99,via=pmu
+MACHINE=mac99
 CPU=970fx
 RAM_MB=2048
 DISPLAY_BACKEND=cocoa
@@ -14439,7 +14440,7 @@ create_env_config() {
             ;;
         2) # PPC
             qemu_bin="qemu-system-ppc"
-            machine="mac99,via=pmu"
+            machine="mac99"
             cpu="7455"
             default_ram="256"
             network_model="sungem"
@@ -14448,7 +14449,7 @@ create_env_config() {
             ;;
         3) # PPC64
             qemu_bin="qemu-system-ppc64"
-            machine="mac99,via=pmu"
+            machine="mac99"
             cpu="970fx"
             default_ram="1024"
             network_model="sungem"
