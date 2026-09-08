@@ -15665,7 +15665,7 @@ EOF
 # Show QEMU command for debugging
 show_qemu_command() {
     local vm_name="$1"
-    local platform="$2"
+    local platform="${2:-}"
     
     # Enhanced bundled directory structure: look for config in VM_NAME_PLATFORM/conf/
     if [[ -n "${platform}" ]]; then
