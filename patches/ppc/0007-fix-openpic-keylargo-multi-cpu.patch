@@ -1,0 +1,36 @@
+From: genose.org <contact@genose.org>
+Date: Mon, 8 Sep 2026 10:00:00 +0000
+Subject: [PATCH] Remove OpenPIC KEYLARGO Uniprocessor restriction
+
+The KEYLARGO OpenPIC model (used by NewWorld Macs like mac99) has an
+artificial UP-only restriction that prevents multi-CPU configurations.
+
+This patch removes the hardcoded check that limited KEYLARGO to 1 CPU,
+allowing mac99 and other NewWorld Mac machines to use multiple CPUs.
+
+The KEYLARGO_MAX_CPU constant (defined as 4 in openpic.h) already limits
+the maximum number of CPUs, so no additional safety check is needed.
+
+Fixes: Property 'openpic.sysbus-irq[5]' not found when using -smp > 1
+
+Signed-off-by: genose.org <contact@genose.org>
+---
+ hw/intc/openpic.c | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/hw/intc/openpic.c b/hw/intc/openpic.c
+index 1584e02..8f0e31a 100644
+--- a/hw/intc/openpic.c
++++ b/hw/intc/openpic.c
+@@ -1581,11 +1581,6 @@ static void openpic_realize(DeviceState *dev, Error **errp)
+         opp->brr1 = -1;
+         opp->mpic_mode_mask = GCR_MODE_MIXED;
+ 
+-        if (opp->nb_cpus != 1) {
+-            error_setg(errp, "Only UP supported today");
+-            return;
+-        }
+-
+         map_list(opp, list_le, &list_count);
+         break;
+     }

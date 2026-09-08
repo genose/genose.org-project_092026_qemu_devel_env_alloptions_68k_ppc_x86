@@ -1,0 +1,53 @@
+From: genose.org <contact@genose.org>
+Date: Mon, 8 Sep 2026 10:00:00 +0000
+Subject: [PATCH] Dynamically set OpenPIC nb_cpus based on machine SMP configuration
+
+The OpenPIC device in NewWorld Macs needs to have its nb_cpus property
+set to match the machine's SMP configuration before it's realized.
+Previously, it used the default nb_cpus=1, which caused property lookup
+failures when the machine was configured with >1 CPU.
+
+This patch:
+1. Adds necessary includes for qdev_get_machine() and MachineState
+2. Sets the OpenPIC device's nb_cpus property based on the machine's
+   smp.cpus value before the device is realized
+
+This allows mac99 and other NewWorld Mac machines to properly support
+multi-CPU configurations (2 CPUs for late G4 MDD, up to 8 CPUs for G5).
+
+Fixes: Property 'openpic.sysbus-irq[5]' not found when using -smp > 1
+
+Signed-off-by: genose.org <contact@genose.org>
+---
+ hw/misc/macio/macio.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/hw/misc/macio/macio.c b/hw/misc/macio/macio.c
+index abcdef123456..fedcba78901 100644
+--- a/hw/misc/macio/macio.c
++++ b/hw/misc/macio/macio.c
+@@ -29,6 +29,8 @@
+ #include "hw/misc/macio/cuda.h"
+ #include "hw/pci/pci.h"
+ #include "hw/ppc/mac_dbdma.h"
+ #include "hw/qdev-properties.h"
++#include "hw/qdev-core.h"
++#include "hw/boards.h"
+ #include "migration/vmstate.h"
+ #include "hw/char/escc.h"
+ #include "hw/misc/macio/macio.h"
+@@ -273,6 +275,14 @@ static void macio_newworld_realize(PCIDevice *d, Error **errp)
+ 
+     /* OpenPIC */
+     qdev_prop_set_uint32(pic_dev, "model", OPENPIC_MODEL_KEYLARGO);
++    
++    /* Set nb_cpus based on machine SMP configuration */
++    {
++        Object *machine = qdev_get_machine();
++        MachineState *ms = MACHINE(machine);
++        qdev_prop_set_uint32(pic_dev, "nb_cpus", ms->smp.cpus);
++    }
++
+     sbd = SYS_BUS_DEVICE(&ns->pic);
+     sysbus_realize_and_unref(sbd, &error_fatal);
+     memory_region_add_subregion(&s->bar, 0x40000,
