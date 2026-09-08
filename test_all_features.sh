@@ -290,7 +290,7 @@ _test_qmp_socket() {
         2>/dev/null &
     
     QEMU_PID=$!
-    sleep 2
+    sleep 5
     
     # Test QMP connection
     if ! timeout 3s python3 -c "
